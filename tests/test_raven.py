@@ -4,10 +4,8 @@ Test that we can make plots
 
 import unittest, glob, os.path, os
 
-import yt.raven
-from yt.config import ytcfg
-print "Setting loglevel"
-ytcfg["yt","LogLevel"] = '50'
+from yt import ytcfg
+ytcfg["yt","LogLevel"] = '20'
 
 import yt.raven
 
@@ -24,7 +22,7 @@ class TestRaven(unittest.TestCase):
         v,self.c = self.hierarchy.findMax("Density")
 
     def tearDown(self):
-        #self.hierarchy.data_file.close()
+        self.hierarchy.dataFile.close()
         del self.OutputFile, self.hierarchy, self.pc
 
     def DoSave(self):
@@ -34,7 +32,7 @@ class TestRaven(unittest.TestCase):
 
     def testSlice(self):
         self.pc.addSlice("Density",0)
-        self.pc.plots[-1].switch_z("Temperature")
+        self.pc.plots[-1].switch_z("CellMass")
         self.pc.set_width(0.5,'1')
         self.pc.set_zlim(1,1000)
         self.pc.set_cmap("hot")
@@ -62,7 +60,7 @@ class TestRaven(unittest.TestCase):
         # Add callbacks, then remove one, then do the plot-saving
         # Both types of callback should be called here
         for ax in range(3):
-            self.pc.addSlice("Density", ax)
+            self.pc.addSlice("Density", 0)
             x,y = yt.raven.axis_labels[ax]
             v1 = "%s-velocity" % (x)
             v2 = "%s-velocity" % (y)
@@ -72,16 +70,6 @@ class TestRaven(unittest.TestCase):
             gi = self.pc.plots[-1].addCallback(yt.raven.be.contourCallback("Gas_Energy",
                                                ax, ncont=3, factor=10))
             self.pc.plots[-1].removeCallback(gi)
-        self.DoSave()
-
-    def testParticlesOnSlice(self):
-        # We test a couple things here
-        # Add callbacks, then remove one, then do the plot-saving
-        # Both types of callback should be called here
-        for ax in range(3):
-            self.pc.addSlice("Density", ax)
-            gi = self.pc.plots[-1].addCallback(yt.raven.be.particleCallback(
-                                               ax, 0.01))
         self.DoSave()
 
 if __name__ == "__main__":

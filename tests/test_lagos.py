@@ -19,7 +19,7 @@ import numpy as na
 # The dataset used is located at:
 # http://yt.spacepope.org/DD0018.zip
 fn = "DD0000/moving7_0000"
-fn = os.path.join(os.path.dirname(__file__),fn)
+fn = os.path.join(os.path.dirname(__file__), fn)
 
 class LagosTestingBase:
     def setUp(self):
