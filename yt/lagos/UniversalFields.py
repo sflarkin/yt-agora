@@ -30,16 +30,15 @@ import numpy as na
 import inspect
 import copy
 
-# All our math stuff here:
-try:
-    import scipy.signal
-except ImportError:
-    pass
-
 from math import pi
 
 from yt.funcs import *
 from FieldInfoContainer import *
+
+try:
+    import cic_deposit
+except ImportError:
+    pass
 
 mh = 1.67e-24 # g
 me = 9.11e-28 # g
@@ -317,6 +316,12 @@ def _convertCellMassCode(data):
 add_field("CellMassCode", 
           function=_CellMassCode,
           convert_function=_convertCellMassCode)
+
+def _TotalMass(field,data):
+    return (data["Density"]+data["particle_density"]) * data["CellVolume"]
+add_field("TotalMassMsun", units=r"M_{\odot}",
+          function=_TotalMass,
+          convert_function=_convertCellMassMsun)
 
 def _CellVolume(field, data):
     if data['dx'].size == 1:
