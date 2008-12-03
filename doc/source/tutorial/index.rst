@@ -1,5 +1,5 @@
-A Short Tutorial
-================
+The Tutorial
+============
 
 As with many interactive packages, getting started with yt can be a bit
 daunting.  Following this tutorial we'll walk through the intepreter, get used
@@ -19,3 +19,4 @@ Contents:
    advanced_objects
    projections
    example_script
+   using_reason

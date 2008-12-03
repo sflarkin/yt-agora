@@ -3,9 +3,13 @@ Callbacks to add additional functionality on to plots.
 
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
+Author: J. S. Oishi <jsoishi@astro.berkeley.edu>
+Affiliation: UC Berkeley
+Author: Stephen Skory <sskory@physics.ucsd.edu>
+Affiliation: UC San Diego
 Homepage: http://yt.enzotools.org/
 License:
-  Copyright (C) 2008 Matthew Turk.  All Rights Reserved.
+  Copyright (C) 2008 Matthew Turk, JS Oishi, Stephen Skory.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -30,6 +34,16 @@ import _MPL
 class PlotCallback(object):
     def __init__(self, *args, **kwargs):
         pass
+
+    def convert_to_pixels(self, plot, coord):
+        x0, x1 = plot.xlim
+        y0, y1 = plot.ylim
+        l, b, width, height = plot._axes.bbox.get_bounds()
+        xi = lagos.x_dict[plot.data.axis]
+        yi = lagos.y_dict[plot.data.axis]
+        dx = plot.image._A.shape[0] / (x1-x0)
+        dy = plot.image._A.shape[1] / (y1-y0)
+        return ((coord[0] - x0)*dx, (coord[1] - y0)*dy)
 
 class QuiverCallback(PlotCallback):
     def __init__(self, field_x, field_y, factor):
@@ -72,7 +86,7 @@ class QuiverCallback(PlotCallback):
         plot._axes.hold(False)
 
 class ParticleCallback(PlotCallback):
-    def __init__(self, axis, width, p_size=1.0, col='k'):
+    def __init__(self, axis, width, p_size=1.0, col='k', stride=1.0):
         """
         Adds particle positions, based on a thick slab along *axis* with a
         *width* along the line of sight.  *p_size* controls the number of
@@ -83,37 +97,64 @@ class ParticleCallback(PlotCallback):
         self.width = width
         self.p_size = p_size
         self.color = col
+        if check_color(col):
+            self.color_field = False
+        else:
+            self.color_field = True
         self.field_x = "particle_position_%s" % lagos.axis_names[lagos.x_dict[axis]]
         self.field_y = "particle_position_%s" % lagos.axis_names[lagos.y_dict[axis]]
         self.field_z = "particle_position_%s" % lagos.axis_names[axis]
+        self.stride = stride
+        self.particles_x = self.particles_y = self.particles_z = None
+
+    def _setup_particles(self, data):
+        if self.particles_x is not None: return
+        grids = data._grids
+        particles_x = []; particles_y = []; particles_z = [];
+        for g in grids:
+            particles_x.append(g[self.field_x][::self.stride])
+            particles_y.append(g[self.field_y][::self.stride])
+            particles_z.append(g[self.field_z][::self.stride])
+        self.particles_x = na.concatenate(particles_x); del particles_x
+        self.particles_y = na.concatenate(particles_y); del particles_y
+        self.particles_z = na.concatenate(particles_z); del particles_z
+        if not self.color_field: return
+        particles_c = []
+        for g in grids:
+            particles_c.append(g[self.color][::self.stride])
+        self.particles_c = na.log10(na.concatenate(particles_c)); del particles_c
 
     def __call__(self, plot):
         z0 = plot.data.center[self.axis] - self.width/2.0
         z1 = plot.data.center[self.axis] + self.width/2.0
-        grids = plot.data._grids
-        particles_x = na.concatenate([g[self.field_x] for g in grids]).ravel()
-        particles_y = na.concatenate([g[self.field_y] for g in grids]).ravel()
-        particles_z = na.concatenate([g[self.field_z] for g in grids]).ravel()
-        if len(particles_x) == 0: return
+        self._setup_particles(plot.data)
+        if len(self.particles_x) == 0: return
         x0, x1 = plot.xlim
         y0, y1 = plot.ylim
         xx0, xx1 = plot._axes.get_xlim()
         yy0, yy1 = plot._axes.get_ylim()
+        print "Particle bounding box:", x0, x1, y0, y1, z0, z1
         # Now we rescale because our axes limits != data limits
-        goodI = na.where( (particles_x < x1) & (particles_x > x0)
-                        & (particles_y < y1) & (particles_y > y0)
-                        & (particles_z < z1) & (particles_z > z0))
-        particles_x = (particles_x[goodI] - x0) * (xx1-xx0)/(x1-x0)
-        particles_y = (particles_y[goodI] - y0) * (yy1-yy0)/(y1-y0)
+        goodI = na.where( (self.particles_x < x1) & (self.particles_x > x0)
+                        & (self.particles_y < y1) & (self.particles_y > y0)
+                        & (self.particles_z < z1) & (self.particles_z > z0))
+        particles_x = (self.particles_x[goodI] - x0) * (xx1-xx0)/(x1-x0) + xx0
+        particles_y = (self.particles_y[goodI] - y0) * (yy1-yy0)/(y1-y0) + yy0
+        print "Particle px extrema", particles_x.min(), particles_x.max(), \
+                                     particles_y.min(), particles_y.max()
+        print "Axial limits", xx0, xx1, yy0, yy1
+        if not self.color_field: particles_c = self.color
+        else: particles_c = self.particles_c[goodI]
         plot._axes.hold(True)
         plot._axes.scatter(particles_x, particles_y, edgecolors='None',
-                          s=self.p_size, c=self.color)
+                           s=self.p_size, c=particles_c)
         plot._axes.set_xlim(xx0,xx1)
         plot._axes.set_ylim(yy0,yy1)
         plot._axes.hold(False)
 
 class ContourCallback(PlotCallback):
-    def __init__(self, field, ncont=5, factor=4, take_log=False, clim=None):
+    def __init__(self, field, ncont=5, factor=4, take_log=False, clim=None,
+                 plot_args = None):
         """
         Add contours in *field* to the plot.  *ncont* governs the number of
         contours generated, *factor* governs the number of points used in the
@@ -133,6 +174,8 @@ class ContourCallback(PlotCallback):
             self.__call__ = lambda a: None
         if self.take_log and clim is not None: clim = (na.log10(clim[0]), na.log10(clim[1]))
         if clim is not None: self.ncont = na.linspace(clim[0], clim[1], ncont)
+        if plot_args is None: plot_args = {'colors':'k'}
+        self.plot_args = plot_args
 
     def __call__(self, plot):
         x0, x1 = plot.xlim
@@ -156,7 +199,9 @@ class ContourCallback(PlotCallback):
         z = plot.data[self.field][wI]
         if self.take_log: z=na.log10(z)
         zi = self.de.Triangulation(x,y).nn_interpolator(z)(xi,yi)
-        plot._axes.contour(xi,yi,zi,self.ncont,colors='k')
+        print z.min(), z.max(), na.nanmin(z), na.nanmax(z)
+        print zi.min(), zi.max(), na.nanmin(zi), na.nanmax(zi)
+        plot._axes.contour(xi,yi,zi,self.ncont, **self.plot_args)
         plot._axes.set_xlim(xx0,xx1)
         plot._axes.set_ylim(yy0,yy1)
         plot._axes.hold(False)
@@ -174,16 +219,21 @@ class GridBoundaryCallback(PlotCallback):
     def __call__(self, plot):
         x0, x1 = plot.xlim
         y0, y1 = plot.ylim
+        xx0, xx1 = plot._axes.get_xlim()
+        yy0, yy1 = plot._axes.get_ylim()
         dx = plot.image._A.shape[0] / (x1-x0)
         dy = plot.image._A.shape[1] / (y1-y0)
         GLE = plot.data.gridLeftEdge
         GRE = plot.data.gridRightEdge
         px_index = lagos.x_dict[plot.data.axis]
         py_index = lagos.y_dict[plot.data.axis]
-        left_edge_px = (GLE[:,px_index]-x0)*dx
-        left_edge_py = (GLE[:,py_index]-y0)*dy
-        right_edge_px = (GRE[:,px_index]-x0)*dx
-        right_edge_py = (GRE[:,py_index]-y0)*dy
+        left_edge_px = na.maximum((GLE[:,px_index]-x0)*dx, xx0)
+        left_edge_py = na.maximum((GLE[:,py_index]-y0)*dy, yy0)
+        right_edge_px = na.minimum((GRE[:,px_index]-x0)*dx, xx1)
+        right_edge_py = na.minimum((GRE[:,py_index]-y0)*dy, yy1)
+        print left_edge_px.min(), left_edge_px.max(), \
+              right_edge_px.min(), right_edge_px.max(), \
+              x0, x1, y0, y1
         verts = na.array(
                 [(left_edge_px, left_edge_px, right_edge_px, right_edge_px),
                  (left_edge_py, right_edge_py, right_edge_py, left_edge_py)])
@@ -197,6 +247,18 @@ class GridBoundaryCallback(PlotCallback):
         plot._axes.hold(True)
         plot._axes.add_collection(grid_collection)
         plot._axes.hold(False)
+
+class LabelCallback(PlotCallback):
+    def __init__(self, label):
+        PlotCallback.__init__(self)
+        self.label = label
+
+    def __call__(self, plot):
+        plot._figure.subplots_adjust(hspace=0, wspace=0,
+                                     bottom=0.1, top=0.9,
+                                     left=0.0, right=1.0)
+        plot._axes.set_xlabel(self.label)
+        plot._axes.set_ylabel(self.label)
 
 def get_smallest_appropriate_unit(v, pf):
     max_nu = 1e30
@@ -323,6 +385,163 @@ class CuttingQuiverCallback(PlotCallback):
         plot._axes.set_ylim(yy0,yy1)
         plot._axes.hold(False)
 
+class ClumpContourCallback(PlotCallback):
+    def __init__(self, clumps, axis, plot_args = None):
+        """
+        Take a list of *clumps* and plot them as a set of contours.
+        """
+        self.clumps = clumps
+        self.xf = lagos.axis_names[lagos.x_dict[axis]]
+        self.yf = lagos.axis_names[lagos.y_dict[axis]]
+        if plot_args is None: plot_args = {}
+        self.plot_args = plot_args
+
+    def __call__(self, plot):
+        x0, x1 = plot.xlim
+        y0, y1 = plot.ylim
+        xx0, xx1 = plot._axes.get_xlim()
+        yy0, yy1 = plot._axes.get_ylim()
+        plot._axes.hold(True)
+        
+        nx, ny = plot.image._A.shape
+        buff = na.zeros((nx,ny),dtype='float64')
+        for i,clump in enumerate(reversed(self.clumps)):
+            mylog.debug("Pixelizing contour %s", i)
+            temp = _MPL.Pixelize(clump[self.xf],
+                                 clump[self.yf],
+                                 clump['dx'],
+                                 clump['dx'],
+                                 clump['dx']*0.0+i+1, # inits inside Pixelize
+                                 int(nx), int(ny),
+                             (x0, x1, y0, y1), 0).transpose()
+            buff = na.maximum(temp, buff)
+        self.rv = plot._axes.contour(buff, len(self.clumps)+1,
+                                     **self.plot_args)
+        plot._axes.hold(False)
+
+class PointAnnotateCallback(PlotCallback):
+    def __init__(self, pos, text, text_args = None):
+        self.pos = pos
+        self.text = text
+        self.text_args = text_args
+
+    def __call__(self, plot):
+        x,y = self.convert_to_pixels(plot, self.pos)
+        plot._axes.text(x, y, self.text, **self.text_args)
+
+class SphereCallback(PlotCallback):
+    def __init__(self, center, radius, circle_args = None,
+                 text = None, text_args = None):
+        self.center = center
+        self.radius = radius
+        self.circle_args = circle_args
+        self.text = text
+        self.text_args = text_args
+
+    def __call__(self, plot):
+        from matplotlib.patches import Circle
+        x0, x1 = plot.xlim
+        y0, y1 = plot.ylim
+        l, b, width, height = plot._axes.bbox.get_bounds()
+        xi = lagos.x_dict[plot.data.axis]
+        yi = lagos.y_dict[plot.data.axis]
+        dx = plot.image._A.shape[0] / (x1-x0)
+        dy = plot.image._A.shape[1] / (y1-y0)
+        radius = self.radius * dx
+        center_x = (self.center[xi] - x0)*dx
+        center_y = (self.center[yi] - y0)*dy
+        cir = Circle((center_x, center_y), radius, fill=False,
+                     **self.circle_args)
+        plot._axes.add_patch(cir)
+        if self.text is not None:
+            plot._axes.text(center_x, center_y, "%s" % halo.id,
+                            **self.text_args)
+
+        
+
+class HopCircleCallback(PlotCallback):
+    def __init__(self, hop_output, axis, max_number=None,
+                 annotate=False, min_size=20, font_size=8, print_halo_size=False):
+        self.axis = axis
+        self.hop_output = hop_output
+        self.max_number = max_number
+        self.annotate = annotate
+        self.min_size = min_size
+        self.font_size = font_size
+        self.print_halo_size = print_halo_size
+
+    def __call__(self, plot):
+        from matplotlib.patches import Circle
+        x0, x1 = plot.xlim
+        y0, y1 = plot.ylim
+        l, b, width, height = plot._axes.bbox.get_bounds()
+        xi = lagos.x_dict[plot.data.axis]
+        yi = lagos.y_dict[plot.data.axis]
+        dx = plot.image._A.shape[0] / (x1-x0)
+        dy = plot.image._A.shape[1] / (y1-y0)
+        print "there are %d haloes" % len(self.hop_output) # skory
+        for halo in self.hop_output[:self.max_number]:
+            radius = halo.maximum_radius() * dx
+            center = halo.center_of_mass()
+            center_x = (center[xi] - x0)*dx
+            center_y = (center[yi] - y0)*dy
+            cir = Circle((center_x, center_y), radius, fill=False)
+            plot._axes.add_patch(cir)
+            if self.annotate:
+                if self.print_halo_size:
+                    plot._axes.text(center_x, center_y, "%s" % len(halo.indices),
+                    fontsize=self.font_size)
+                else:
+                    plot._axes.text(center_x, center_y, "%s" % halo.id,
+                    fontsize=self.font_size)
+
+class FloorToValueInPlot(PlotCallback):
+    def __init__(self):
+        pass
+
+    def __call__(self, plot):
+        aa = plot.image._A
+        min_val = aa[aa>0].min()
+        aa[aa==0] = min_val
+
+
+class VobozCircleCallback(PlotCallback):
+    def __init__(self, voboz_output, axis, max_number=None,
+                 annotate=False, min_size=20, font_size=8, print_halo_size=False):
+        self.axis = axis
+        self.voboz_output = voboz_output
+        self.max_number = max_number
+        self.annotate = annotate
+        self.min_size = min_size
+        self.font_size = font_size
+        self.print_halo_size = print_halo_size
+
+    def __call__(self, plot):
+        from matplotlib.patches import Circle
+        x0, x1 = plot.xlim
+        y0, y1 = plot.ylim
+        l, b, width, height = plot._axes.bbox.get_bounds()
+        xi = lagos.x_dict[plot.data.axis]
+        yi = lagos.y_dict[plot.data.axis]
+        dx = plot.image._A.shape[0] / (x1-x0)
+        dy = plot.image._A.shape[1] / (y1-y0)
+        for i,halo in enumerate(self.voboz_output[:self.max_number]):
+            if (len(halo.particles) >= self.min_size):
+                radius = halo.maximum_radius * dx
+                center = halo.center_of_mass
+                center_x = (center[xi] - x0)*dx
+                center_y = (center[yi] - y0)*dy
+                #print "voboz center = (%f,%f)" % (center[xi],center[yi])
+                #print "voboz radius = %f" % halo.maximum_radius
+                cir = Circle((center_x, center_y), radius, fill=False)
+                plot._axes.add_patch(cir)
+                if self.annotate:
+                    if self.print_halo_size:
+                        plot._axes.text(center_x, center_y, "%s" % len(halo.particles),
+                        fontsize=self.font_size)
+                    else:
+                        plot._axes.text(center_x, center_y, "%s" % i,
+                        fontsize=self.font_size)
 
 class CoordAxesCallback(PlotCallback):
     """Creates x and y axes for a VMPlot. In the future, it will
@@ -389,5 +608,4 @@ class CoordAxesCallback(PlotCallback):
         plot._axes.set_xlabel(xlabel,visible=True)
         plot._axes.set_ylabel(ylabel,visible=True)
         plot._figure.subplots_adjust(left=0.1,right=0.8)
-
 

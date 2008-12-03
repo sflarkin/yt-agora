@@ -37,6 +37,9 @@ try:
 except:
     mylog.warning("Deliverator import failed; all deliverator actions will fail!")
 
+import matplotlib
+matplotlib.rc('contour', negative_linestyle='solid')
+
 import matplotlib.image
 import matplotlib.ticker
 import matplotlib.axes
@@ -55,14 +58,19 @@ axis_names = {0: 'x', 1: 'y', 2: 'z'}
 
 vm_axis_names = {0:'x', 1:'y', 2:'z', 3:'dx', 4:'dy'}
 
-from ColorMaps import raven_colormaps, add_cmap
+from ColorMaps import raven_colormaps, add_cmap, check_color
 
 import PlotTypes
 be = PlotTypes
 
 from Callbacks import *
+from FixedResolution import *
 
 color_maps = matplotlib.cm.cmapnames + raven_colormaps.keys()
+default_cmap = ytcfg.get("raven", "colormap")
+if default_cmap != "jet":
+    mylog.info("Setting default colormap to %s", default_cmap)
+    matplotlib.rc('image', cmap=default_cmap)
 
 from PlotCollection import *
 try:

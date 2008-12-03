@@ -30,10 +30,20 @@ import cPickle
 #import yt.enki
 
 _data_style_funcs = \
-   { 4: (readDataHDF4, readAllDataHDF4, getFieldsHDF4, readDataSliceHDF4, getExceptionHDF4), \
-     5: (readDataHDF5, readAllDataHDF5, getFieldsHDF5, readDataSliceHDF5, getExceptionHDF5), \
-     6: (readDataPacked, readAllDataPacked, getFieldsPacked, readDataSlicePacked, getExceptionHDF5), \
-     7: (readDataNative, readAllDataNative, None, readDataSliceNative, getExceptionHDF5) \
+   { 4: (readDataHDF4,readAllDataHDF4, getFieldsHDF4, readDataSliceHDF4,
+         getExceptionHDF4, DataQueueHDF4),
+     5: (readDataHDF5, readAllDataHDF5, getFieldsHDF5, readDataSliceHDF5,
+         getExceptionHDF5, DataQueueHDF5),
+     6: (readDataPacked, readAllDataPacked, getFieldsPacked, readDataSlicePacked,
+         getExceptionHDF5, DataQueuePackedHDF5),
+     7: (readDataNative, readAllDataNative, None, readDataSliceNative,
+         getExceptionHDF5, None), \
+     8: (readDataInMemory, readAllDataInMemory, getFieldsInMemory, readDataSliceInMemory,
+         getExceptionInMemory, DataQueueInMemory),
+     'enzo_packed_2d': (readDataPacked, readAllDataPacked, getFieldsPacked, readDataSlicePacked2D,
+         getExceptionHDF5, DataQueuePacked2D),
+     'enzo_packed_1d': (readDataPacked, readAllDataPacked, getFieldsPacked, readDataSlicePacked1D,
+         getExceptionHDF5, DataQueuePacked1D),
    }
 
 class AMRHierarchy:
@@ -47,7 +57,6 @@ class AMRHierarchy:
         # Although really, I think perhaps we should take a closer look
         # at how "center" is used.
         self.center = None
-        self.bulkVelocity = None
 
         self._initialize_level_stats()
 
@@ -167,14 +176,17 @@ class AMRHierarchy:
         self.proj = classobj("AMRProj",(AMRProjBase,), dd)
         self.slice = classobj("AMRSlice",(AMRSliceBase,), dd)
         self.region = classobj("AMRRegion",(AMRRegionBase,), dd)
+        self.periodic_region = classobj("AMRPeriodicRegion",(AMRPeriodicRegionBase,), dd)
         self.covering_grid = classobj("AMRCoveringGrid",(AMRCoveringGrid,), dd)
         self.smoothed_covering_grid = classobj("AMRSmoothedCoveringGrid",(AMRSmoothedCoveringGrid,), dd)
         self.sphere = classobj("AMRSphere",(AMRSphereBase,), dd)
         self.cutting = classobj("AMRCuttingPlane",(AMRCuttingPlaneBase,), dd)
-        self.ray = classobj("AMROrthoRay",(AMROrthoRayBase,), dd)
+        self.ray = classobj("AMRRay",(AMRRayBase,), dd)
+        self.ortho_ray = classobj("AMROrthoRay",(AMROrthoRayBase,), dd)
         self.disk = classobj("AMRCylinder",(AMRCylinderBase,), dd)
+        self.grid_collection = classobj("AMRGridCollection",(AMRGridCollection,), dd)
 
-    def __deserialize_hierarchy(self, harray):
+    def _deserialize_hierarchy(self, harray):
         mylog.debug("Cached entry found.")
         self.gridDimensions[:] = harray[:,0:3]
         self.gridStartIndices[:] = harray[:,3:6]
@@ -227,6 +239,11 @@ class AMRHierarchy:
         """
         Returns (value, center) of location of maximum for a given field.
         """
+        mg, mc, mv, pos = self.find_max_cell_location(field, finestLevels)
+        return mv, pos
+    findMax = find_max
+
+    def find_max_cell_location(self, field, finestLevels = True):
         if finestLevels:
             gI = na.where(self.gridLevels >= self.maxLevel - NUMTOCHECK)
         else:
@@ -241,21 +258,12 @@ class AMRHierarchy:
                 maxGrid = grid
         mc = na.array(maxCoord)
         pos=maxGrid.get_position(mc)
-        pos[0] += 0.5*maxGrid.dx
-        pos[1] += 0.5*maxGrid.dx
-        pos[2] += 0.5*maxGrid.dx
         mylog.info("Max Value is %0.5e at %0.16f %0.16f %0.16f in grid %s at level %s %s", \
               maxVal, pos[0], pos[1], pos[2], maxGrid, maxGrid.Level, mc)
         self.center = pos
-        # This probably won't work for anyone else
-        self.bulkVelocity = (maxGrid["x-velocity"][maxCoord], \
-                             maxGrid["y-velocity"][maxCoord], \
-                             maxGrid["z-velocity"][maxCoord])
         self.parameters["Max%sValue" % (field)] = maxVal
         self.parameters["Max%sPos" % (field)] = "%s" % (pos)
-        return maxVal, pos
-
-    findMax = find_max
+        return maxGrid, maxCoord, maxVal, pos
 
     @time_execution
     def find_min(self, field):
@@ -273,9 +281,6 @@ class AMRHierarchy:
                 minGrid = grid
         mc = na.array(minCoord)
         pos=minGrid.get_position(mc)
-        pos[0] += 0.5*minGrid.dx
-        pos[1] += 0.5*minGrid.dx
-        pos[2] += 0.5*minGrid.dx
         mylog.info("Min Value is %0.5e at %0.16f %0.16f %0.16f in grid %s at level %s", \
               minVal, pos[0], pos[1], pos[2], minGrid, minGrid.Level)
         self.center = pos
@@ -376,6 +381,8 @@ class AMRHierarchy:
         return self.grids[grid_i], grid_i
 
     def get_periodic_box_grids(self, left_edge, right_edge):
+        left_edge = na.array(left_edge)
+        right_edge = na.array(right_edge)
         mask = na.zeros(self.grids.shape, dtype='bool')
         dl = self.parameters["DomainLeftEdge"]
         dr = self.parameters["DomainRightEdge"]
@@ -392,39 +399,6 @@ class AMRHierarchy:
                     g, gi = self.get_box_grids(nle, nre)
                     mask[gi] = True
         return self.grids[mask], na.where(mask)
-
-    @time_execution
-    def find_max(self, field, finestLevels = True):
-        """
-        Returns (value, center) of location of maximum for a given field.
-        """
-        if finestLevels:
-            gI = na.where(self.gridLevels >= self.maxLevel - NUMTOCHECK)
-        else:
-            gI = na.where(self.gridLevels >= 0) # Slow but pedantic
-        maxVal = -1e100
-        for grid in self.grids[gI[0]]:
-            mylog.debug("Checking %s (level %s)", grid.id, grid.Level)
-            val, coord = grid.find_max(field)
-            if val > maxVal:
-                maxCoord = coord
-                maxVal = val
-                maxGrid = grid
-        mc = na.array(maxCoord)
-        pos=maxGrid.get_position(mc)
-        pos[0] += 0.5*maxGrid.dx
-        pos[1] += 0.5*maxGrid.dx
-        pos[2] += 0.5*maxGrid.dx
-        mylog.info("Max Value is %0.5e at %0.16f %0.16f %0.16f in grid %s at level %s %s", \
-              maxVal, pos[0], pos[1], pos[2], maxGrid, maxGrid.Level, mc)
-        self.center = pos
-        # This probably won't work for anyone else
-        self.bulkVelocity = (maxGrid["x-velocity"][maxCoord], \
-                             maxGrid["y-velocity"][maxCoord], \
-                             maxGrid["z-velocity"][maxCoord])
-        self.parameters["Max%sValue" % (field)] = maxVal
-        self.parameters["Max%sPos" % (field)] = "%s" % (pos)
-        return maxVal, pos
 
     @time_execution
     def export_particles_pb(self, filename, filter = 1, indexboundary = 0, fields = None, scale=1.0):
@@ -488,6 +462,68 @@ class AMRHierarchy:
         indices = na.where(self.gridLevels[:,0] == level)[0]
         return indices
 
+    def __initialize_octree_list(self, fields):
+        import DepthFirstOctree as dfo
+        o_length = r_length = 0
+        grids = []
+        levels_finest, levels_all = defaultdict(lambda: 0), defaultdict(lambda: 0)
+        for g in self.grids:
+            ff = na.array([g[f] for f in fields])
+            grids.append(dfo.OctreeGrid(
+                            g.child_index_mask.astype('int32'),
+                            ff.astype("float64"),
+                            g.LeftEdge.astype('float64'),
+                            g.ActiveDimensions.astype('int32'),
+                            na.ones(1,dtype='float64') * g.dx, g.Level))
+            levels_all[g.Level] += g.ActiveDimensions.prod()
+            levels_finest[g.Level] += g.child_mask.ravel().sum()
+            g.clear_data()
+        ogl = dfo.OctreeGridList(grids)
+        return ogl, levels_finest, levels_all
+
+    def _generate_flat_octree(self, fields):
+        """
+        Generates two arrays, one of the actual values in a depth-first flat
+        octree array, and the other of the values describing the refinement.
+        This allows for export to a code that understands this.  *field* is the
+        field used in the data array.
+        """
+        import DepthFirstOctree as dfo
+        fields = ensure_list(fields)
+        ogl, levels_finest, levels_all = self.__initialize_octree_list(fields)
+        o_length = na.sum(levels_finest.values())
+        r_length = na.sum(levels_all.values())
+        output = na.zeros((o_length,len(fields)), dtype='float64')
+        refined = na.zeros(r_length, dtype='int32')
+        position = dfo.position()
+        dfo.RecurseOctreeDepthFirst(0, 0, 0,
+                ogl[0].dimensions[0],
+                ogl[0].dimensions[1],
+                ogl[0].dimensions[2],
+                position, 1,
+                output, refined, ogl)
+        return output, refined
+
+    def _generate_levels_octree(self, fields):
+        import DepthFirstOctree as dfo
+        fields = ensure_list(fields) + ["Ones", "Ones"]
+        ogl, levels_finest, levels_all = self.__initialize_octree_list(fields)
+        o_length = na.sum(levels_finest.values())
+        r_length = na.sum(levels_all.values())
+        output = na.zeros((r_length,len(fields)), dtype='float64')
+        genealogy = na.zeros((r_length, 3), dtype='int32') - 1 # init to -1
+        corners = na.zeros((r_length, 3), dtype='float64')
+        position = na.add.accumulate(
+                    na.array([0] + [levels_all[v] for v in
+                        sorted(levels_all)[:-1]], dtype='int32'))
+        pp = position.copy()
+        dfo.RecurseOctreeByLevels(0, 0, 0,
+                ogl[0].dimensions[0],
+                ogl[0].dimensions[1],
+                ogl[0].dimensions[2],
+                position.astype('int32'), 1,
+                output, genealogy, corners, ogl)
+        return output, genealogy, levels_all, levels_finest, pp, corners
 
 class EnzoHierarchy(AMRHierarchy):
     eiTopGrid = None
@@ -506,12 +542,10 @@ class EnzoHierarchy(AMRHierarchy):
         """
         # Expect filename to be the name of the parameter file, not the
         # hierarchy
-        self.field_info = EnzoFieldContainer()
         self.data_style = data_style
         self.hierarchy_filename = os.path.abspath(pf.parameter_filename) \
                                + ".hierarchy"
-        self.__hierarchy_lines = open(self.hierarchy_filename).readlines()
-        if len(self.__hierarchy_lines) == 0:
+        if os.path.getsize(self.hierarchy_filename) == 0:
             raise IOError(-1,"File empty", self.hierarchy_filename)
         self.boundary_filename = os.path.abspath(pf.parameter_filename) \
                                + ".boundary"
@@ -519,11 +553,16 @@ class EnzoHierarchy(AMRHierarchy):
         # Now we search backwards from the end of the file to find out how many
         # grids we have, which allows us to preallocate memory
         self.__hierarchy_string = open(self.hierarchy_filename).read()
-        for line in reversed(self.__hierarchy_lines):
-            if line.startswith("Grid ="):
-                self.num_grids = int(line.split("=")[-1])
+        testGrid = testGridID = None
+        for line in rlines(open(self.hierarchy_filename, "rb")):
+            if line.startswith("BaryonFileName") or \
+               line.startswith("FileName "):
+                testGrid = line.split("=")[-1].strip().rstrip()
+            if line.startswith("Grid "):
+                self.num_grids = testGridID = int(line.split("=")[-1])
                 break
-        self.__guess_data_style()
+        self.__guess_data_style(pf["TopGridRank"], testGrid, testGridID)
+        self._setup_data_queue()
         # For some reason, r8 seems to want Float64
         if pf.has_key("CompilerPrecision") \
             and pf["CompilerPrecision"] == "r4":
@@ -533,22 +572,15 @@ class EnzoHierarchy(AMRHierarchy):
 
         AMRHierarchy.__init__(self, pf)
 
-        del self.__hierarchy_string, self.__hierarchy_lines
+        del self.__hierarchy_string 
 
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
         self.grid = classobj("EnzoGrid",(EnzoGridBase,), dd)
         AMRHierarchy._setup_classes(self, dd)
 
-    def __guess_data_style(self):
+    def __guess_data_style(self, rank, testGrid, testGridID):
         if self.data_style: return
-        for line in reversed(self.__hierarchy_lines):
-            if line.startswith("BaryonFileName") or \
-               line.startswith("FileName "):
-                testGrid = line.split("=")[-1].strip().rstrip()
-            if line.startswith("Grid "):
-                testGridID = int(line.split("=")[-1])
-                break
         if testGrid[0] != os.path.sep:
             testGrid = os.path.join(self.directory, testGrid)
         if not os.path.exists(testGrid):
@@ -562,17 +594,31 @@ class EnzoHierarchy(AMRHierarchy):
             mylog.debug("Detected HDF4")
         except:
             list_of_sets = HDF5LightReader.ReadListOfDatasets(testGrid, "/")
-            if len(list_of_sets) == 0:
+            if len(list_of_sets) == 0 and rank == 3:
                 mylog.debug("Detected packed HDF5")
                 self.data_style = 6
-            else:
+            elif len(list_of_sets) > 0 and rank == 3:
                 mylog.debug("Detected unpacked HDF5")
                 self.data_style = 5
+            elif len(list_of_sets) == 0 and rank == 2:
+                mylog.debug("Detect packed 2D")
+                self.data_style = 'enzo_packed_2d'
+            elif len(list_of_sets) == 0 and rank == 1:
+                mylog.debug("Detect packed 1D")
+                self.data_style = 'enzo_packed_1d'
+            else:
+                raise TypeError
+
+    def _setup_data_queue(self):
+        self.queue = _data_style_funcs[self.data_style][5]()
 
     def __setup_filemap(self, grid):
         if not self.data_style == 6:
             return
-        self.cpu_map[grid.filename].append(grid)
+        try:
+            self.cpu_map[grid.filename].append(grid)
+        except AttributeError:
+            pass
 
     def __del__(self):
         self._close_data_file()
@@ -615,14 +661,13 @@ class EnzoHierarchy(AMRHierarchy):
             for v in vals.split():
                 toAdd[curGrid-1,j] = func(v)
                 j+=1
-        for line_index, line in enumerate(self.__hierarchy_lines):
+        for line_index, line in enumerate(open(self.hierarchy_filename)):
             # We can do this the slow, 'reliable' way by stripping
             # or we can manually pad all our strings, which speeds it up by a
             # factor of about ten
             #param, vals = map(strip,line.split("="))
             if (line_index % 1e5) == 0:
-                mylog.debug("Parsing line % 9i / % 9i",
-                            line_index, len(self.__hierarchy_lines))
+                mylog.debug("Parsing line % 9i", line_index)
             if len(line) < 2:
                 continue
             param, vals = line.split("=")
@@ -670,16 +715,12 @@ class EnzoHierarchy(AMRHierarchy):
         # This needs to go elsewhere:
         # Now get the baryon filenames
         mylog.debug("Getting baryon filenames")
-        re_BaryonFileName = constructRegularExpressions("BaryonFileName",('s'))
-        fn_results = re.findall(re_BaryonFileName, self.__hierarchy_string)
-        if len(fn_results):
-            self.__set_all_filenames(fn_results)
-            return
-        re_BaryonFileName = constructRegularExpressions("FileName",('s'))
-        fn_results = re.findall(re_BaryonFileName, self.__hierarchy_string)
-        self.__set_all_filenames(fn_results)
-        # This is pretty bad, but we do it to save a significant amount of time
-        # in larger runs.
+        for patt in ["BaryonFileName", "FileName", "ParticleFileName"]:
+            re_FileName = constructRegularExpressions(patt,('s'))
+            fn_results = re.findall(re_FileName, self.__hierarchy_string)
+            if len(fn_results):
+                self.__set_all_filenames(fn_results)
+                return
 
     def __setup_grid_tree(self):
         mylog.debug("No cached tree found, creating")
@@ -724,7 +765,7 @@ class EnzoHierarchy(AMRHierarchy):
         if self.num_grids <= 1000:
             mylog.info("Skipping serialization!")
         if harray and self.num_grids > 1000:
-            self.__deserialize_hierarchy(harray)
+            self._deserialize_hierarchy(harray)
         else:
             self.__parse_hierarchy_file()
         self.__obtain_filenames()
@@ -753,9 +794,9 @@ class EnzoHierarchy(AMRHierarchy):
         for i, grid in enumerate(self.grids):
             if (i%1e4) == 0: mylog.debug("Prepared % 7i / % 7i grids", i, self.num_grids)
             grid._prepare_grid()
-        self.__setup_grid_dxs()
+        self._setup_grid_dxs()
         mylog.debug("Prepared")
-        self.__setup_field_lists()
+        self._setup_field_lists()
         self.levelIndices = {}
         self.levelNum = {}
         ad = self.gridEndIndices - self.gridStartIndices + 1
@@ -767,7 +808,7 @@ class EnzoHierarchy(AMRHierarchy):
             self.levelNum[level] = len(self.levelIndices[level])
         mylog.debug("Hierarchy fully populated.")
 
-    def __setup_grid_dxs(self):
+    def _setup_grid_dxs(self):
         mylog.debug("Setting up corners and dxs")
         self._setup_grid_corners()
         dx = (self.gridRightEdge[:,0] - self.gridLeftEdge[:,0]) / \
@@ -797,30 +838,38 @@ class EnzoHierarchy(AMRHierarchy):
                     if grid.Parent: grid._guess_properties_from_parent()
                 if pbar: pbar.finish()
 
-    def __setup_field_lists(self):
+    def _join_field_lists(self, field_list):
+        return field_list
+
+    def _setup_field_lists(self):
         field_list = self.get_data("/", "DataFields")
-        if field_list == None:
+        if field_list is None:
             mylog.info("Gathering a field list (this may take a moment.)")
             field_list = sets.Set()
-            if self.num_grids > 40:
-                starter = na.random.randint(0, 20)
-                random_sample = na.mgrid[starter:len(self.grids)-1:20j].astype("int32")
-                mylog.debug("Checking grids: %s", random_sample.tolist())
-            else:
-                random_sample = na.mgrid[0:max(len(self.grids)-1,1)].astype("int32")
-            for grid in self.grids[(random_sample,)]:
-                gf = grid.getFields()
+            random_sample = self._generate_random_grids()
+            for grid in random_sample:
+                if not hasattr(grid, 'filename'): continue
+                try:
+                    gf = grid.getFields()
+                except grid._read_exception:
+                    mylog.debug("Grid %s is a bit funky?", grid.id)
+                    continue
                 mylog.debug("Grid %s has: %s", grid.id, gf)
                 field_list = field_list.union(sets.Set(gf))
+            field_list = self._join_field_lists(field_list)
+            self.save_data(list(field_list),"/","DataFields")
         self.field_list = list(field_list)
         for field in self.field_list:
-            if field in self.field_info: continue
+            if field in self.parameter_file.field_info: continue
             mylog.info("Adding %s to list of fields", field)
-            add_field(field, lambda a, b: None)
+            cf = None
+            if self.parameter_file.has_key(field):
+                cf = lambda d: d.convert(field)
+            add_field(field, lambda a, b: None, convert_function=cf)
         self.derived_field_list = []
-        for field in self.field_info:
+        for field in self.parameter_file.field_info:
             try:
-                fd = self.field_info[field].get_dependencies(pf = self.parameter_file)
+                fd = self.parameter_file.field_info[field].get_dependencies(pf = self.parameter_file)
             except:
                 continue
             available = na.all([f in self.field_list for f in fd.requested])
@@ -828,6 +877,121 @@ class EnzoHierarchy(AMRHierarchy):
         for field in self.field_list:
             if field not in self.derived_field_list:
                 self.derived_field_list.append(field)
+
+    def _generate_random_grids(self):
+        if self.num_grids > 40:
+            starter = na.random.randint(0, 20)
+            random_sample = na.mgrid[starter:len(self.grids)-1:20j].astype("int32")
+            mylog.debug("Checking grids: %s", random_sample.tolist())
+        else:
+            random_sample = na.mgrid[0:max(len(self.grids)-1,1)].astype("int32")
+        return self.grids[(random_sample,)]
+
+class EnzoHierarchyInMemory(EnzoHierarchy):
+    def __init__(self, pf, data_style = 8):
+        import enzo
+        self.float_type = 'float64'
+        self.data_style = data_style # Mandated
+        self.directory = os.getcwd()
+        self.num_grids = enzo.hierarchy_information["GridDimensions"].shape[0]
+        self._setup_data_queue()
+        AMRHierarchy.__init__(self, pf)
+
+    def _initialize_data_file(self):
+        pass
+
+    def _join_field_lists(self, field_list):
+        from mpi4py import MPI
+        MPI.COMM_WORLD.Barrier()
+        data = list(field_list)
+        if MPI.COMM_WORLD.rank == 0:
+            for i in range(1, MPI.COMM_WORLD.size):
+                data += MPI.COMM_WORLD.Recv(source=i, tag=0)
+            data = list(set(data))
+        else:
+            MPI.COMM_WORLD.Send(data, dest=0, tag=0)
+        MPI.COMM_WORLD.Barrier()
+        return MPI.COMM_WORLD.Bcast(data, root=0)
+
+    def _populate_hierarchy(self):
+        self._copy_hierarchy_structure()
+        import enzo
+        mylog.debug("Copying reverse tree")
+        self.gridReverseTree = enzo.hierarchy_information["GridParentIDs"].ravel().tolist()
+        # Initial setup:
+        mylog.debug("Reconstructing parent-child relationships")
+        #self.gridTree = [ [] for i in range(self.num_grids) ]
+        for id,pid in enumerate(self.gridReverseTree):
+            if pid > 0:
+                self.gridTree[pid-1].append(
+                    weakref.proxy(self.grids[id]))
+            else:
+                self.gridReverseTree[id] = None
+        self.max_level = self.gridLevels.max()
+        self.maxLevel = self.max_level
+        mylog.debug("Preparing grids")
+        for i, grid in enumerate(self.grids):
+            if (i%1e4) == 0: mylog.debug("Prepared % 7i / % 7i grids", i, self.num_grids)
+            grid.filename = None
+            grid._prepare_grid()
+            grid.proc_num = self.gridProcs[i,0]
+        self._setup_grid_dxs()
+        mylog.debug("Prepared")
+        self._setup_field_lists()
+        self.levelIndices = {}
+        self.levelNum = {}
+        ad = self.gridEndIndices - self.gridStartIndices + 1
+        for level in xrange(self.maxLevel+1):
+            self.level_stats[level]['numgrids'] = na.where(self.gridLevels==level)[0].size
+            li = na.where(self.gridLevels[:,0] == level)
+            self.level_stats[level]['numcells'] = ad[li].prod(axis=1).sum()
+            self.levelIndices[level] = self._select_level(level)
+            self.levelNum[level] = len(self.levelIndices[level])
+        mylog.debug("Hierarchy fully populated.")
+
+    def _copy_hierarchy_structure(self):
+        import enzo
+        self.gridDimensions[:] = enzo.hierarchy_information["GridDimensions"][:]
+        self.gridStartIndices[:] = enzo.hierarchy_information["GridStartIndices"][:]
+        self.gridEndIndices[:] = enzo.hierarchy_information["GridEndIndices"][:]
+        self.gridLeftEdge[:] = enzo.hierarchy_information["GridLeftEdge"][:]
+        self.gridRightEdge[:] = enzo.hierarchy_information["GridRightEdge"][:]
+        self.gridLevels[:] = enzo.hierarchy_information["GridLevels"][:]
+        self.gridTimes[:] = enzo.hierarchy_information["GridTimes"][:]
+        self.gridProcs = enzo.hierarchy_information["GridProcs"].copy()
+        self.gridNumberOfParticles[:] = enzo.hierarchy_information["GridNumberOfParticles"][:]
+
+    def _generate_random_grids(self):
+        my_proc = ytcfg.getint("yt","__parallel_rank")
+        gg = self.grids[self.gridProcs[:,0] == my_proc]
+        if len(gg) > 40:
+            starter = na.random.randint(0, 20)
+            random_sample = na.mgrid[starter:len(gg)-1:20j].astype("int32")
+            mylog.debug("Checking grids: %s", random_sample.tolist())
+        else:
+            random_sample = na.mgrid[0:max(len(gg)-1,1)].astype("int32")
+        return gg[(random_sample,)]
+
+class EnzoHierarchy1D(EnzoHierarchy):
+    def __init__(self, *args, **kwargs):
+        EnzoHierarchy.__init__(self, *args, **kwargs)
+        self.gridRightEdge[:,1:3] = 1.0
+        self.gridDimensions[:,1:3] = 1.0
+        self.gridDys[:,0] = 1.0
+        self.gridDzs[:,0] = 1.0
+        for g in self.grids:
+            g._prepare_grid()
+            g._setup_dx()
+
+class EnzoHierarchy2D(EnzoHierarchy):
+    def __init__(self, *args, **kwargs):
+        EnzoHierarchy.__init__(self, *args, **kwargs)
+        self.gridRightEdge[:,2] = 1.0
+        self.gridDimensions[:,2] = 1.0
+        self.gridDzs[:,0] = 1.0
+        for g in self.grids:
+            g._prepare_grid()
+            g._setup_dx()
 
 scanf_regex = {}
 scanf_regex['e'] = r"[-+]?\d+\.?\d*?|\.\d+[eE][-+]?\d+?"
@@ -849,6 +1013,49 @@ def constructRegularExpressions(param, toReadTypes):
         rs += "(%s)\s*" % (scanf_regex[t])
     rs +="$"
     return re.compile(rs,re.M)
+
+# These next two functions are taken from
+# http://www.reddit.com/r/Python/comments/6hj75/reverse_file_iterator/c03vms4
+# Credit goes to "Brian" on Reddit
+
+def rblocks(f, blocksize=4096):
+    """Read file as series of blocks from end of file to start.
+
+    The data itself is in normal order, only the order of the blocks is reversed.
+    ie. "hello world" -> ["ld","wor", "lo ", "hel"]
+    Note that the file must be opened in binary mode.
+    """
+    if 'b' not in f.mode.lower():
+        raise Exception("File must be opened using binary mode.")
+    size = os.stat(f.name).st_size
+    fullblocks, lastblock = divmod(size, blocksize)
+
+    # The first(end of file) block will be short, since this leaves 
+    # the rest aligned on a blocksize boundary.  This may be more 
+    # efficient than having the last (first in file) block be short
+    f.seek(-lastblock,2)
+    yield f.read(lastblock)
+
+    for i in range(fullblocks-1,-1, -1):
+        f.seek(i * blocksize)
+        yield f.read(blocksize)
+
+def rlines(f, keepends=False):
+    """Iterate through the lines of a file in reverse order.
+
+    If keepends is true, line endings are kept as part of the line.
+    """
+    buf = ''
+    for block in rblocks(f):
+        buf = block + buf
+        lines = buf.splitlines(keepends)
+        # Return all lines except the first (since may be partial)
+        if lines:
+            lines.reverse()
+            buf = lines.pop() # Last line becomes end of new first line.
+            for line in lines:
+                yield line
+    yield buf  # First line.
 
 class OrionHierarchy(AMRHierarchy):
     def __init__(self,pf,data_style=7):
@@ -1074,4 +1281,3 @@ class OrionLevel:
         self.ngrids = ngrids
         self.grids = []
     
-

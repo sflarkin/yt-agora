@@ -56,6 +56,9 @@ import sets
 
 import time
 
+from Cosmology import *
+from EnzoCosmology import *
+
 if ytcfg.getboolean("lagos","useswig"):
     try:
         from yt.enki import EnzoInterface
@@ -63,8 +66,10 @@ if ytcfg.getboolean("lagos","useswig"):
         pass
 
 if ytcfg.getboolean("lagos","usefortran"):
-    pass
-    #import EnzoFortranRoutines
+    try:
+        import EnzoFortranRoutines
+    except ImportError:
+        mylog.warning("Told to import fortan, but unable!")
 
 # Now we import all the subfiles
 
@@ -74,14 +79,15 @@ import HDF5LightReader
 from EnzoDefs import *
 from OrionDefs import *
 
+from ParallelTools import *
 # Now our fields
 #from DerivedFields import *
 from FieldInfoContainer import *
 from UniversalFields import *
 from EnzoFields import *
 from OrionFields import *
+fieldInfo = EnzoFieldInfo
 
-# Derived quantities
 from DerivedQuantities import DerivedQuantityCollection, GridChildMaskWrapper
 from DataReadingFuncs import *
 from ClusterFiles import *

@@ -722,19 +722,12 @@ static PyObject *DataCubeGeneric(PyObject *obj, PyObject *args,
             if (ac_le[i] < adl_edge[i]) {
                 ac_le_p[i][itc  ] = adr_edge[i] - (adl_edge[i] - ac_le[i]);
                 ac_re_p[i][itc++] = adr_edge[i] + (ac_re[i] - adl_edge[i]);
-/*                 fprintf(stderr, "le axis: %d (%d) le: %0.5e re: %0.5e\n",  */
-/*                        i, itc-1, ac_le_p[i][itc-1], ac_re_p[i][itc-1]); */
             }
             if (ac_re[i] > adr_edge[i]) {
                 ac_le_p[i][itc  ] = ac_le[i] - (adr_edge[i] - adl_edge[i]);
                 ac_re_p[i][itc++] = adl_edge[i] + (ac_re[i] - adr_edge[i]);
-
-/*                 fprintf(stderr, "re axis: %d (%d) le: %0.5e re: %0.5e\n",  */
-/*                        i, itc-1, ac_le_p[i][itc-1], ac_re_p[i][itc-1]); */
             }
             p_niter[i] = itc;
-/*             fprintf(stderr, "Iterating on %d %d (%d) times\n", */
-/*                    i, itc, p_niter[i]); */
     }
 
     for (xg = 0; xg < g_data[0]->dimensions[0]; xg++) {
@@ -1116,7 +1109,8 @@ Py_FindBindingEnergy(PyObject *obj, PyObject *args)
     /* progress bar stuff */
     float totalWork = 0.5 * (pow(n_q,2.0) - n_q);
     float workDone = 0;
-
+    int every_cells = floor(n_q / 100);
+    int until_output = 1;
     for (q_outer = 0; q_outer < n_q - 1; q_outer++) {
         this_potential = 0;
         mass_o = *(npy_float64*) PyArray_GETPTR1(mass, q_outer);
@@ -1135,8 +1129,13 @@ Py_FindBindingEnergy(PyObject *obj, PyObject *args)
         }
         total_potential += this_potential;
 	workDone += n_q - q_outer - 1;
-	fprintf(stderr,"Calculating Potential for %i cells: %.2f%%\t(pe/ke = %e)\r", n_q,((100*workDone)/totalWork),(total_potential/kinetic_energy));
-	fflush(stdout); fflush(stderr);
+    until_output -= 1;
+    if(until_output == 0){
+        fprintf(stderr,"Calculating Potential for %i cells: %.2f%%\t(pe/ke = %e)\r",
+                n_q,((100*workDone)/totalWork),(total_potential/kinetic_energy));
+        fflush(stdout); fflush(stderr);
+        until_output = every_cells;
+    }
         if ((truncate == 1) && (total_potential > kinetic_energy)){
             fprintf(stderr, "Truncating!\r");
             break;
@@ -1161,6 +1160,60 @@ Py_FindBindingEnergy(PyObject *obj, PyObject *args)
         return NULL;
 }
 
+static PyObject *_outputFloatsToFileError;
+
+static PyObject *
+Py_OutputFloatsToFile(PyObject *obj, PyObject *args)
+{
+    PyObject *oarray;
+    PyArrayObject *array;
+    char *filename, *header = NULL;
+    npy_intp i, j, imax, jmax;
+
+    if (!PyArg_ParseTuple(args, "Os|s", &oarray, &filename, &header))
+        return PyErr_Format(_outputFloatsToFileError,
+                    "OutputFloatsToFile: Invalid parameters.");
+
+    array   = (PyArrayObject *) PyArray_FromAny(oarray,
+                    PyArray_DescrFromType(NPY_FLOAT64), 2, 2,
+                    0, NULL);
+    if(array==NULL){
+    PyErr_Format(_outputFloatsToFileError,
+             "OutputFloatsToFile: Failure to convert array ( nd == 2 ?)");
+    goto _fail;
+    }
+
+    FILE *to_write = fopen(filename, "w");
+    if(to_write == NULL){
+    PyErr_Format(_outputFloatsToFileError,
+             "OutputFloatsToFile: Unable to open %s for writing.", filename);
+      goto _fail;
+    }
+
+    if(header!=NULL)fprintf(to_write,"%s\n", header);
+
+    imax = PyArray_DIM(array, 0);
+    jmax = PyArray_DIM(array, 1);
+    for(i=0;i<imax;i++){
+      for(j=0;j<jmax;j++){
+        fprintf(to_write, "%0.16e",
+                *((npy_float64*)PyArray_GETPTR2(array,i,j)));
+        if(j<jmax-1)fprintf(to_write, "\t");
+      }
+      fprintf(to_write, "\n");
+    }
+    fclose(to_write);
+
+    Py_DECREF(array);
+    return Py_None;
+
+   _fail:
+    Py_XDECREF(array);
+
+    return NULL;
+}
+
+
 static PyMethodDef _combineMethods[] = {
     {"CombineGrids", Py_CombineGrids, METH_VARARGS},
     {"Interpolate", Py_Interpolate, METH_VARARGS},
@@ -1170,6 +1223,7 @@ static PyMethodDef _combineMethods[] = {
     {"Bin3DProfile", Py_Bin3DProfile, METH_VARARGS},
     {"FindContours", Py_FindContours, METH_VARARGS},
     {"FindBindingEnergy", Py_FindBindingEnergy, METH_VARARGS},
+    {"OutputFloatsToFile", Py_OutputFloatsToFile, METH_VARARGS},
     {NULL, NULL} /* Sentinel */
 };
 
@@ -1195,6 +1249,8 @@ void initPointCombine(void)
     PyDict_SetItemString(d, "error", _profile3DError);
     _findContoursError = PyErr_NewException("PointCombine.FindContoursError", NULL, NULL);
     PyDict_SetItemString(d, "error", _findContoursError);
+    _outputFloatsToFileError = PyErr_NewException("PointCombine.OutputFloatsToFileError", NULL, NULL);
+    PyDict_SetItemString(d, "error", _outputFloatsToFileError);
     import_array();
 }
 

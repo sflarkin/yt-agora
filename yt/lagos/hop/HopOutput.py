@@ -43,16 +43,17 @@ class HopList(object):
         self.__run_hop()
         mylog.info("Parsing outputs")
         self.__parse_output()
-        mylog.debug("Finished.")
+        mylog.debug("Finished. (%s)", len(self))
 
     def __obtain_particles(self):
         if self.dm_only: ii = self.__get_dm_indices()
         else: ii = slice(None)
-        self._base_indices = ii
         self.particle_fields = {}
         for field in ["particle_position_%s" % ax for ax in 'xyz'] + \
                      ["ParticleMassMsun"]:
+            tot_part = self.data_source[field].size
             self.particle_fields[field] = self.data_source[field][ii]
+        self._base_indices = na.arange(tot_part)[ii]
 
     def __run_hop(self):
         self.densities, self.tags = \
@@ -80,6 +81,7 @@ class HopList(object):
         counts = na.bincount(self.tags+1)
         sort_indices = na.argsort(self.tags)
         grab_indices = na.indices(self.tags.shape).ravel()[sort_indices]
+        dens = self.densities[sort_indices]
         cp = 0
         for i in unique_ids:
             cp_c = cp + counts[i+1]
@@ -88,10 +90,10 @@ class HopList(object):
                 continue
             group_indices = grab_indices[cp:cp_c]
             self._groups.append(HopGroup(self, i, group_indices))
-            md_i = na.argmax(self.densities[sort_indices][cp:cp_c])
+            md_i = na.argmax(dens[cp:cp_c])
             px, py, pz = [self.particle_fields['particle_position_%s'%ax][group_indices]
                                             for ax in 'xyz']
-            self._max_dens[i] = (self.densities[sort_indices][cp:cp_c][md_i],
+            self._max_dens[i] = (dens[cp:cp_c][md_i],
                                  px[md_i], py[md_i], pz[md_i])
             cp += counts[i+1]
 
@@ -109,7 +111,6 @@ class HopList(object):
         Write out standard HOP information to *filename*.
         """
         f = open(filename,"w")
-        f.write("# Center of mass does NOT account for periodicity!\n")
         f.write("\t".join(["# Group","Mass","# part","max dens"
                            "x","y","z", "center-of-mass",
                            "x","y","z",
@@ -124,6 +125,7 @@ class HopList(object):
             f.write("\t".join(["%0.9e" % v for v in group.center_of_mass()]))
             f.write("\t")
             f.write("\t".join(["%0.9e" % v for v in group.bulk_velocity()]))
+            f.write("\t")
             f.write("%0.9e\t" % group.maximum_radius())
             f.write("\n")
         f.close()
@@ -147,8 +149,7 @@ class HopGroup(object):
         self.hop_output = hop_output
         self.id = id
         self.data = hop_output.data_source
-        self.indices = indices
-        self._base_indices = hop_output._base_indices
+        self.indices = hop_output._base_indices[indices]
         
     def center_of_mass(self):
         """
@@ -210,7 +211,7 @@ class HopGroup(object):
         return r.max()
 
     def __getitem__(self, key):
-        return self.data[key][self._base_indices][self.indices]
+        return self.data[key][self.indices]
 
     def get_sphere(self, center_of_mass=True):
         """
@@ -224,3 +225,44 @@ class HopGroup(object):
         sphere = self.hop_output.data_source.hierarchy.sphere(
                         center, radius=radius)
         return sphere
+
+class HaloFinder(ParallelAnalysisInterface):
+    def __init__(self, pf, threshold=160.0, dm_only=True):
+        self.pf = pf
+        self.hierarchy = pf.hierarchy
+        self.padding = 0.2 * pf["unitary"]
+        LE, RE, self.source = self._partition_hierarchy_3d(padding=self.padding)
+        self.bounds = (LE, RE)
+        self._reposition_particles((LE, RE))
+        # For scaling the threshold, note that it's a passthrough
+        total_mass = self._mpi_allsum(self.source["ParticleMassMsun"].sum())
+        hop_list = HopList(self.source, threshold, dm_only)
+        self._join_hoplists(hop_list)
+
+    @parallel_passthrough
+    def _join_hoplists(self, hop_list):
+        # First we get the total number of halos the entire collection
+        # has identified
+        nhalos = self._mpi_allsum(len(hop_list))
+        # Now we identify our padding-region particles
+        LE, RE = self.bounds
+        ind = na.zeros(hop_list.particle_fields["particle_position_x"].size, dtype='bool')
+        for i, ax in enumerate('xyz'):
+            arr = hop_list.particle_fields["particle_position_%s" % ax]
+            ind |= (arr < LE[i]-self.padding)
+            ind |= (arr > RE[i]+self.padding)
+        # This is a one-d array of all buffer particle indices
+        indices = self._mpi_catarray(hop_list.particle_fields["particle_index"][ind])
+        # This is a one-d array of halo IDs
+        halos = self._mpi_catarray(hop_list.tags[ind]) 
+        
+    @parallel_passthrough
+    def _reposition_particles(self, bounds):
+        # This only does periodicity.  We do NOT want to deal with anything
+        # else.  The only reason we even do periodicity is the 
+        LE, RE = bounds
+        dw = self.pf["DomainRightEdge"] - self.pf["DomainLeftEdge"]
+        for i, ax in enumerate('xyz'):
+            arr = self.source["particle_position_%s" % ax]
+            arr[arr < LE[i]-self.padding] += dw[i]
+            arr[arr > RE[i]+self.padding] -= dw[i]

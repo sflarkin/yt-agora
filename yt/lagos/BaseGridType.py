@@ -39,33 +39,13 @@ class AMRGridPatch(AMRData):
         self.fields = []
         self.start_index = None
         self.id = id
+        if (id % 1e4) == 0: mylog.debug("Prepared grid %s", id)
         if hierarchy: self.hierarchy = weakref.proxy(hierarchy)
         if filename: self.set_filename(filename)
         self.overlap_masks = [None, None, None]
         self._overlap_grids = [None, None, None]
+        self._file_access_pooling = False
         self.pf = self.hierarchy.parameter_file # weakref already
-    
-    def get_data(self, field):
-        """
-        Returns a field or set of fields for a key or set of keys
-        """
-        if not self.data.has_key(field):
-            if field in self.hierarchy.field_list:
-                conv_factor = 1.0
-                if self.pf.field_info.has_key(field):
-                    conv_factor = self.pf.field_info[field]._convert_function(self)
-                try:
-                    self[field] = self.readDataFast(field) * conv_factor
-                except self._read_exception:
-                    if field in self.pf.field_info:
-                        if self.pf.field_info[field].particle_type:
-                            self[field] = na.array([],dtype='int64')
-                        if self.pf.field_info[field].not_in_all:
-                            self[field] = na.zeros(self.ActiveDimensions, dtype='float64')
-                    else: raise
-            else:
-                self._generate_field(field)
-        return self.data[field]
 
     def _generate_field(self, field):
         if self.pf.field_info.has_key(field):
@@ -84,6 +64,32 @@ class AMRGridPatch(AMRData):
                 self[field] = self.pf.field_info[field](self)
         else: # Can't find the field, try as it might
             raise exceptions.KeyError, field
+    
+    def get_data(self, field):
+        """
+        Returns a field or set of fields for a key or set of keys
+        """
+        if not self.data.has_key(field):
+            if field in self.hierarchy.field_list:
+                conv_factor = 1.0
+                if self.pf.field_info.has_key(field):
+                    conv_factor = self.pf.field_info[field]._convert_function(self)
+                try:
+                    if hasattr(self.hierarchy, 'queue'):
+                        temp = self.hierarchy.queue.pop(self, field)
+                    else:
+                        temp = self.readDataFast(field)
+                    self[field] = temp * conv_factor
+                except self._read_exception, exc:
+                    if field in self.pf.field_info:
+                        if self.pf.field_info[field].particle_type:
+                            self[field] = na.array([],dtype='int64')
+                        if self.pf.field_info[field].not_in_all:
+                            self[field] = na.zeros(self.ActiveDimensions, dtype='float64')
+                    else: raise
+            else:
+                self._generate_field(field)
+        return self.data[field]
 
     def _setup_dx(self):
         # So first we figure out what the index is.  We don't assume
@@ -95,8 +101,8 @@ class AMRGridPatch(AMRData):
         self.data['dx'] = self.dx
         self.data['dy'] = self.dy
         self.data['dz'] = self.dz
+        self.data['dds'] = na.array([self.dx, self.dy, self.dz])
         self._corners = self.hierarchy.gridCorners[:,:,id]
-
 
     def _generate_overlap_masks(self, axis, LE, RE):
         """
@@ -158,19 +164,20 @@ class AMRGridPatch(AMRData):
         # Now we give it pointers to all of its attributes
         # Note that to keep in line with Enzo, we have broken PEP-8
         h = self.hierarchy # cache it
-        self.Dimensions = h.gridDimensions[self.id-1]
-        self.StartIndices = h.gridStartIndices[self.id-1]
-        self.EndIndices = h.gridEndIndices[self.id-1]
-        self.LeftEdge = h.gridLeftEdge[self.id-1]
-        self.RightEdge = h.gridRightEdge[self.id-1]
-        self.Level = h.gridLevels[self.id-1,0]
-        self.Time = h.gridTimes[self.id-1,0]
-        self.NumberOfParticles = h.gridNumberOfParticles[self.id-1,0]
+        my_ind = self.id - self._id_offset
+        self.Dimensions = h.gridDimensions[my_ind]
+        self.StartIndices = h.gridStartIndices[my_ind]
+        self.EndIndices = h.gridEndIndices[my_ind]
+        self.LeftEdge = h.gridLeftEdge[my_ind]
+        self.RightEdge = h.gridRightEdge[my_ind]
+        self.Level = h.gridLevels[my_ind,0]
+        self.Time = h.gridTimes[my_ind,0]
+        self.NumberOfParticles = h.gridNumberOfParticles[my_ind,0]
         self.ActiveDimensions = (self.EndIndices - self.StartIndices + 1)
-        self.Children = h.gridTree[self.id-1]
-        pID = h.gridReverseTree[self.id-1]
+        self.Children = h.gridTree[my_ind]
+        pID = h.gridReverseTree[my_ind]
         if pID != None and pID != -1:
-            self.Parent = weakref.proxy(h.grids[pID - 1])
+            self.Parent = weakref.proxy(h.grids[pID - self._id_offset])
         else:
             self.Parent = None
 
@@ -257,7 +264,29 @@ class AMRGridPatch(AMRData):
             pass
         self.__child_mask = None
 
+    def _get_child_index_mask(self):
+        if self.__child_index_mask is None:
+            self.__generate_child_index_mask()
+        return self.__child_index_mask
+
+    def _del_child_index_mask(self):
+        try:
+            del self.__child_index_mask
+        except AttributeError:
+            pass
+        self.__child_index_mask = None
+
     #@time_execution
+    def __fill_child_mask(self, child, mask, tofill):
+        startIndex = na.maximum(0, na.rint((child.LeftEdge - self.LeftEdge)/self.dx))
+        endIndex = na.minimum(na.rint((child.RightEdge - self.LeftEdge)/self.dx),
+                              self.ActiveDimensions)
+                              #startIndex + self.ActiveDimensions)
+        startIndex = na.maximum(0, startIndex)
+        mask[startIndex[0]:endIndex[0],
+             startIndex[1]:endIndex[1],
+             startIndex[2]:endIndex[2]] = tofill
+
     def __generate_child_mask(self):
         """
         Generates self.child_mask, which is zero where child grids exist (and
@@ -265,16 +294,17 @@ class AMRGridPatch(AMRData):
         """
         self.__child_mask = na.ones(self.ActiveDimensions, 'int32')
         for child in self.Children:
-            # Now let's get our overlap
-            startIndex = na.rint((child.LeftEdge - self.LeftEdge)/self.dx)
-            endIndex = na.minimum(na.rint((child.RightEdge - self.LeftEdge)/self.dx),
-                                  self.ActiveDimensions)
-                                  #startIndex + self.ActiveDimensions)
-            startIndex = na.maximum(0, startIndex)
-            self.__child_mask[startIndex[0]:endIndex[0],
-                              startIndex[1]:endIndex[1],
-                              startIndex[2]:endIndex[2]] = 0
+            self.__fill_child_mask(child, self.__child_mask, 0)
         self.__child_indices = (self.__child_mask==0) # bool, possibly redundant
+
+    def __generate_child_index_mask(self):
+        """
+        Generates self.child_index_mask, which is -1 where there is no child,
+        and otherwise has the ID of the grid that resides there.
+        """
+        self.__child_index_mask = na.zeros(self.ActiveDimensions, 'int32') - 1
+        for child in self.Children:
+            self.__fill_child_mask(child, self.__child_mask, child.id)
 
     def _get_coords(self):
         if self.__coords == None: self._generate_coords()
@@ -300,8 +330,10 @@ class AMRGridPatch(AMRData):
 
     __child_mask = None
     __child_indices = None
+    __child_index_mask = None
 
     child_mask = property(fget=_get_child_mask, fdel=_del_child_mask)
+    child_index_mask = property(fget=_get_child_index_mask, fdel=_del_child_index_mask)
     child_indices = property(fget=_get_child_indices, fdel = _del_child_indices)
 
     def retrieve_ghost_zones(self, n_zones, fields, all_levels=False,
@@ -366,21 +398,23 @@ class EnzoGridBase(AMRGridPatch):
         space-filling tiling of grids, possibly due to the finite accuracy in a
         standard Enzo hierarchy file.
         """
+        rf = self.pf["RefineBy"]
+        my_ind = self.id - self._id_offset
         le = self.LeftEdge
-        self.dx = self.Parent.dx/2.0
-        self.dy = self.Parent.dy/2.0
-        self.dz = self.Parent.dz/2.0
+        self.dx = self.Parent.dx/rf
+        self.dy = self.Parent.dy/rf
+        self.dz = self.Parent.dz/rf
         ParentLeftIndex = na.rint((self.LeftEdge-self.Parent.LeftEdge)/self.Parent.dx)
-        self.start_index = 2*(ParentLeftIndex + self.Parent.get_global_startindex()).astype('int64')
+        self.start_index = rf*(ParentLeftIndex + self.Parent.get_global_startindex()).astype('int64')
         self.LeftEdge = self.Parent.LeftEdge + self.Parent.dx * ParentLeftIndex
         self.RightEdge = self.LeftEdge + \
                          self.ActiveDimensions*na.array([self.dx,self.dy,self.dz])
-        self.hierarchy.gridDxs[self.id-1,0] = self.dx
-        self.hierarchy.gridDys[self.id-1,0] = self.dy
-        self.hierarchy.gridDzs[self.id-1,0] = self.dz
-        self.hierarchy.gridLeftEdge[self.id-1,:] = self.LeftEdge
-        self.hierarchy.gridRightEdge[self.id-1,:] = self.RightEdge
-        self.hierarchy.gridCorners[:,:,self.id-1] = na.array([ # Unroll!
+        self.hierarchy.gridDxs[my_ind,0] = self.dx
+        self.hierarchy.gridDys[my_ind,0] = self.dy
+        self.hierarchy.gridDzs[my_ind,0] = self.dz
+        self.hierarchy.gridLeftEdge[my_ind,:] = self.LeftEdge
+        self.hierarchy.gridRightEdge[my_ind,:] = self.RightEdge
+        self.hierarchy.gridCorners[:,:,my_ind] = na.array([ # Unroll!
             [self.LeftEdge[0], self.LeftEdge[1], self.LeftEdge[2]],
             [self.RightEdge[0], self.LeftEdge[1], self.LeftEdge[2]],
             [self.RightEdge[0], self.RightEdge[1], self.LeftEdge[2]],
@@ -391,6 +425,7 @@ class EnzoGridBase(AMRGridPatch):
             [self.LeftEdge[0], self.RightEdge[1], self.LeftEdge[2]],
             ], dtype='float64')
         self.__child_mask = None
+        self.__child_index_mask = None
         self.__child_indices = None
         self._setup_dx()
 
@@ -407,7 +442,7 @@ class EnzoGridBase(AMRGridPatch):
         pdx = na.array([self.Parent.dx, self.Parent.dy, self.Parent.dz]).ravel()
         start_index = (self.Parent.get_global_startindex()) + \
                        na.rint((self.LeftEdge - self.Parent.LeftEdge)/pdx)
-        self.start_index = (start_index*2).astype('int64').ravel()
+        self.start_index = (start_index*self.pf["RefineBy"]).astype('int64').ravel()
         return self.start_index
 
     def set_filename(self, filename):
@@ -457,9 +492,6 @@ class OrionGridBase(AMRGridPatch):
         h.gridLevels[self.id,0] = self.Level
         h.gridLeftEdge[self.id,:] = self.LeftEdge[:]
         h.gridRightEdge[self.id,:] = self.RightEdge[:]
-#        self.Level = h.gridLevels[self.id+1,0]
-#        self.LeftEdge = h.gridLeftEdge[self.id]
-#        self.RightEdge = h.gridRightEdge[self.id]
         self.Time = h.gridTimes[self.id,0]
         self.NumberOfParticles = h.gridNumberOfParticles[self.id,0]
         self.Children = h.gridTree[self.id]

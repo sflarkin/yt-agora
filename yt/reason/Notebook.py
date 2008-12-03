@@ -298,7 +298,10 @@ class PlotPage(wx.Panel):
             ccmap_name = self.plot.colorbar.cmap.name
         except AttributeError:
             ccmap_name = "jet"
-        self.cmapmenu.FindItemById(self.cmapmenu.FindItem(ccmap_name)).Check(True)
+        try:
+            self.cmapmenu.FindItemById(self.cmapmenu.FindItem(ccmap_name)).Check(True)
+        except AttributeError:
+            pass
 
     def makePlot(self):
         pass
@@ -403,16 +406,13 @@ class VMPlotPage(PlotPage):
     def SetupControls(self):
 
         self.widthSlider = wx.Slider(self, -1, wx.SL_HORIZONTAL | wx.SL_AUTOTICKS)
-        max_val = (self.outputfile["DomainRightEdge"] -
-                   self.outputfile["DomainLeftEdge"]).max()
-        self.vals = na.logspace(log10(25*self.outputfile.hierarchy.get_smallest_dx()),
-                                log10(max_val),201)
+        self.vals = na.logspace(log10(25*self.outputfile.hierarchy.get_smallest_dx()),0,201)
         self.widthSlider.SetRange(0, 200)
         self.widthSlider.SetTickFreq(1,1)
         self.widthSlider.SetValue(200)
 
         self.widthBox = wx.TextCtrl(self, style=wx.TE_PROCESS_ENTER)
-        self.widthBox.SetValue("%s" % max_val)
+        self.widthBox.SetValue("1.0")
 
         self.choices = self.outputfile.units.keys()
         self.choices.sort()
@@ -424,8 +424,7 @@ class VMPlotPage(PlotPage):
         self.widthSlider.Bind(wx.EVT_SCROLL_THUMBRELEASE, self.UpdateWidth)
         self.widthBox.Bind(wx.EVT_TEXT_ENTER, self.UpdateWidthFromText)
 
-        wI = self.unitList.GetItems().index('unitary')
-        self.unitList.SetSelection(wI)
+        self.unitList.SetSelection(0)
 
     def DoLayout(self):
 
@@ -506,7 +505,7 @@ class VMPlotPage(PlotPage):
         #xp, yp = self.figure.axes[0].transData.inverse_xy_tup((xp,yp))
         dx = (self.plot.xlim[1] - self.plot.xlim[0])/self.plot.pix[0]
         dy = (self.plot.ylim[1] - self.plot.ylim[0])/self.plot.pix[1]
-        l, b, width, height = self.figure.axes[0].bbox.get_bounds()
+        l, b, width, height = raven.PlotTypes._get_bounds(self.figure.axes[0].bbox)
         x = self.plot.xlim[0] + (dx * (xp-l))
         y = self.plot.ylim[1] - (dy * (yp-b))
         return x, y
@@ -561,9 +560,7 @@ class VMPlotPage(PlotPage):
         self.widthBox.SetValue("%0.5e" % (w))
         val = w/self.outputfile[u]
         dx = (log10(self.vals[0])-log10(self.vals[-1]))/201
-        vv = 200-int(log10(val)/dx)
-        print "Setting to vv", vv, u, w, self.outputfile[u]
-        self.widthSlider.SetValue(vv)
+        self.widthSlider.SetValue(200-int(log10(val)/dx))
         self.ChangeWidth(w,u)
 
     def ChangeWidth(self, width, unit):
@@ -625,8 +622,8 @@ class VMPlotPage(PlotPage):
         self.UpdateCanvas()
 
     def fulldomain(self, *args):
-        self.ChangeWidth(1,'unitary')
-        Publisher().sendMessage(('viewchange','width'), (1,'unitary'))
+        self.ChangeWidth(1,'1')
+        Publisher().sendMessage(('viewchange','width'), (1,'1'))
 
     def set_bulk_velocity(self, *args):
         bv = Toolbars.GetBulkVelocity(self.outputfile, self.center)

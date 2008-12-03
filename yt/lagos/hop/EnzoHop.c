@@ -47,13 +47,14 @@ Py_EnzoHop(PyObject *obj, PyObject *args)
     PyArrayObject    *xpos, *ypos, *zpos,
                      *mass;
     xpos=ypos=zpos=mass=NULL;
-    npy_float64 totalmass = 0;
+    npy_float64 totalmass = 0.0;
+    float normalize_to = 1.0;
     float thresh = 160.0;
 
     int i;
 
-    if (!PyArg_ParseTuple(args, "OOOO|f",
-        &oxpos, &oypos, &ozpos, &omass, &thresh))
+    if (!PyArg_ParseTuple(args, "OOOO|ff",
+        &oxpos, &oypos, &ozpos, &omass, &thresh, &normalize_to))
     return PyErr_Format(_HOPerror,
             "EnzoHop: Invalid parameters.");
 
@@ -90,7 +91,7 @@ Py_EnzoHop(PyObject *obj, PyObject *args)
     mass    = (PyArrayObject *) PyArray_FromAny(omass,
                     PyArray_DescrFromType(NPY_FLOAT64), 1, 1,
                     NPY_INOUT_ARRAY | NPY_UPDATEIFCOPY, NULL);
-    if((!zpos)||(PyArray_SIZE(mass) != num_particles)) {
+    if((!mass)||(PyArray_SIZE(mass) != num_particles)) {
     PyErr_Format(_HOPerror,
              "EnzoHop: xpos and mass must be the same length.");
     goto _fail;
@@ -98,6 +99,7 @@ Py_EnzoHop(PyObject *obj, PyObject *args)
 
     for(i = 0; i < num_particles; i++)
         totalmass+=*(npy_float64*)PyArray_GETPTR1(mass,i);
+    totalmass /= normalize_to;
 
   /* initialize the kd hop structure */
 
@@ -113,19 +115,24 @@ Py_EnzoHop(PyObject *obj, PyObject *args)
   
  	/* Copy positions into kd structure. */
 
+    fprintf(stdout, "Filling in %d particles\n", num_particles);
 	for (i = 0; i < num_particles; i++) {
-	  kd->p[i].r[0] = (float)*(npy_float64*) PyArray_GETPTR1(xpos, i);
-	  kd->p[i].r[1] = (float)*(npy_float64*) PyArray_GETPTR1(ypos, i);
-	  kd->p[i].r[2] = (float)*(npy_float64*) PyArray_GETPTR1(zpos, i);
+	  kd->p[i].r[0] = (float)(*(npy_float64*) PyArray_GETPTR1(xpos, i));
+	  kd->p[i].r[1] = (float)(*(npy_float64*) PyArray_GETPTR1(ypos, i));
+	  kd->p[i].r[2] = (float)(*(npy_float64*) PyArray_GETPTR1(zpos, i));
 	  kd->p[i].fMass = (float)(*(npy_float64*) PyArray_GETPTR1(mass, i)/totalmass);
 	}
 
     HC my_comm;
     my_comm.s = newslice();
     my_comm.gl = (Grouplist*)malloc(sizeof(Grouplist));
+    if(my_comm.gl == NULL) {
+        fprintf(stderr, "failed allocating Grouplist\n");
+        goto _fail;
+    }
     initgrouplist(my_comm.gl);
 
-    fprintf(stderr, "Calling hop... %d\n",num_particles);
+    fprintf(stderr, "Calling hop... %d %0.3e\n",num_particles,thresh);
     hop_main(kd, &my_comm, thresh);
 
     fprintf(stderr, "Calling regroup...\n");

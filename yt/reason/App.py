@@ -35,7 +35,6 @@ _ProfileObjectMenuItems = ["export",]
 _FidoOutputMenuItems = ["delete",]
 
 class ReasonMainWindow(wx.Frame):
-    _fn = "/Users/matthewturk/Development/yt/branches/yt-generalization/tests/uniformCollapse_base64_maxLev4/plt0005"
     def __init__(self, *args, **kwds):
         kwds["style"] = wx.DEFAULT_FRAME_STYLE
         kwds["title"] = "yt - Reason"
@@ -157,6 +156,8 @@ class ReasonMainWindow(wx.Frame):
         self.data_tree.Expand(self.data_root)
 
         self.data_tree.Bind(wx.EVT_RIGHT_DOWN, self.OnRightDown)
+        self.data_tree.Bind(wx.EVT_RIGHT_DOWN, self.OnRightDown)
+        self.data_tree.Bind(wx.EVT_LEFT_DCLICK, self.OnRightDown)
         self.Bind(wx.EVT_TREE_ITEM_EXPANDED, self.OnItemExpanded, self.data_tree)
 
         self.__setup_fido_tree()
@@ -279,9 +280,8 @@ class ReasonMainWindow(wx.Frame):
     def _add_static_output(self, filename):
         # Alright, we choose the hierarchy in the file selector,
         # so let's strip that extension off
-        fn = filename#[:-10]
-        #eso = lagos.EnzoStaticOutput(fn)
-        eso = lagos.OrionStaticOutput(fn)
+        fn = filename[:-10]
+        eso = lagos.EnzoStaticOutput(fn)
         try:
             z = str(eso["CosmologyCurrentRedshift"])
         except:
@@ -423,13 +423,13 @@ class ReasonMainWindow(wx.Frame):
                                _ProjObjectMenuItems, parent_id)
             print "Adding with ID:", MyID
             total += 1
-        for w in self.windows[-total:]: w.ChangeWidth(1,'unitary')
+        for w in self.windows[-total:]: w.ChangeWidth(1,'1')
         proj_setup.Destroy()
 
     def _add_slice(self, event=None):
         MyID = wx.NewId()
         parent_id, data_object = self.get_output()
-        field, width, unit = "Density", 1.0, 'unitary'
+        field, width, unit = "Density", 1.0, '1'
         for i, ax in enumerate('xyz'):
             mylog.info("Adding %s slice of %s" % (ax, data_object))
             self._add_page_to_notebook(
@@ -445,7 +445,7 @@ class ReasonMainWindow(wx.Frame):
             self._add_data_object("Slice: %s" % (ax),
                                self.windows[-1].plot.data,
                                _SliceObjectMenuItems, parent_id)
-        for w in self.windows[-3:]: w.ChangeWidth(1,'unitary')
+        for w in self.windows[-3:]: w.ChangeWidth(1,'1')
 
     def _export_data_object(self, event):
         parent_id, data_object = self.get_output()
@@ -495,7 +495,7 @@ class ReasonMainWindow(wx.Frame):
             center = data_object.get_field_parameter("center")
             parameter_file = data_object.pf
         MyID = wx.NewId()
-        field, width, unit = "Density", 1.0, 'unitary'
+        field, width, unit = "Density", 1.0, '1'
         mylog.info("Adding cutting plane of %s with normal %s",
                    data_object, normal)
         self._add_page_to_notebook(
@@ -508,7 +508,7 @@ class ReasonMainWindow(wx.Frame):
         self._add_data_object("Cutting Plane" % (parameter_file),
                               self.windows[-1].plot.data,
                               _CuttingPlaneObjectMenuItems, parent_id)
-        self.windows[-1].ChangeWidth(1,'unitary')
+        self.windows[-1].ChangeWidth(1,'1')
 
     def get_output(self, event=None):
         # Figure out which outputs are selected
