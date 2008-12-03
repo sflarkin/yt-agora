@@ -34,6 +34,9 @@ templates_path = ['.templates']
 # The suffix of source filenames.
 source_suffix = '.rst'
 
+# HTML file suffix workaround to fix search
+html_file_suffix = ".html"
+
 # The master toctree document.
 master_doc = 'index'
 
@@ -45,9 +48,9 @@ copyright = '2008, Matthew J. Turk'
 # other places throughout the built documents.
 #
 # The short X.Y version.
-version = '0.3'
+version = '1.5'
 # The full version, including alpha/beta/rc tags.
-release = '0.3-pre'
+release = '1.5-alpha'
 
 # There are two options for replacing |today|: either, you set today to some
 # non-false value, then it is used:
@@ -87,7 +90,7 @@ html_style = 'default.css'
 
 # The name of an image file (within the static path) to place at the top of
 # the sidebar.
-#html_logo = None
+html_logo = "static/yt_icon.png"
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

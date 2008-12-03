@@ -30,16 +30,15 @@ import numpy as na
 import inspect
 import copy
 
-# All our math stuff here:
-try:
-    import scipy.signal
-except ImportError:
-    pass
-
 from math import pi
 
 from yt.funcs import *
 from FieldInfoContainer import *
+
+try:
+    import cic_deposit
+except ImportError:
+    pass
 
 mh = 1.67e-24 # g
 me = 9.11e-28 # g
@@ -176,6 +175,11 @@ add_field("ParticleMassMsun",
           function=_ParticleMass, validators=[ValidateSpatial(0)],
           particle_type=True, convert_function=_convertParticleMassMsun)
 
+def _RadialMachNumber(field, data):
+    """M{|v|/t_sound}"""
+    return data["RadialVelocity"] / data["SoundSpeed"]
+add_field("RadialMachNumber", function=_RadialMachNumber)
+
 def _MachNumber(field, data):
     """M{|v|/t_sound}"""
     return data["VelocityMagnitude"] / data["SoundSpeed"]
@@ -230,9 +234,10 @@ def _Pressure(field, data):
 add_field("Pressure", function=_Pressure, units=r"\rm{dyne}/\rm{cm}^{2}")
 
 def _Entropy(field, data):
-    return data["Density"]**(-2./3.) * \
-           data["Temperature"]
-add_field("Entropy", function=_Entropy, units="WhoKnows")
+    return (kboltz/mh) * data["Temperature"] / \
+           (data["MeanMolecularWeight"] * data["Density"]**(2./3.))
+add_field("Entropy", units=r"\rm{ergs}\/\rm{cm}^{2}",
+          function=_Entropy)
 
 def _Height(field, data):
     # We take the dot product of the radius vector with the height-vector
@@ -295,6 +300,12 @@ add_field("DynamicalTime", function=_DynamicalTime,
            units=r"\rm{s}",
           convert_function=_ConvertDynamicalTime)
 
+def JeansMassMsun(field,data):
+    return (MJ_constant * 
+            ((data["Temperature"]/data["MeanMolecularWeight"])**(1.5)) *
+            (data["Density"]**(-0.5)))
+add_field("JeansMassMsun",function=JeansMassMsun,units=r"\rm{Msun}")
+
 def _CellMass(field, data):
     return data["Density"] * data["CellVolume"]
 def _convertCellMassMsun(data):
@@ -302,6 +313,20 @@ def _convertCellMassMsun(data):
 add_field("CellMass", function=_CellMass, units=r"\rm{g}")
 add_field("CellMassMsun", units=r"M_{\odot}",
           function=_CellMass,
+          convert_function=_convertCellMassMsun)
+
+def _CellMassCode(field, data):
+    return data["Density"] * data["CellVolumeCode"]
+def _convertCellMassCode(data):
+    return 1.0/data.convert("Density")
+add_field("CellMassCode", 
+          function=_CellMassCode,
+          convert_function=_convertCellMassCode)
+
+def _TotalMass(field,data):
+    return (data["Density"]+data["particle_density"]) * data["CellVolume"]
+add_field("TotalMassMsun", units=r"M_{\odot}",
+          function=_TotalMass,
           convert_function=_convertCellMassMsun)
 
 def _CellVolume(field, data):
@@ -352,28 +377,6 @@ def _convertSZY(data):
     conv = (0.88/mh) * (kboltz)/(me * clight*clight) * sigma_thompson
     return conv
 add_field("SZY", function=_SZY, convert_function=_convertSZY)
-
-def __gauss_kern(size):
-    """ Returns a normalized 2D gauss kernel array for convolutions """
-    size = int(size)
-    x, y, z = na.mgrid[-size:size+1, -size:size+1, -size:size+1]
-    g = na.exp(-(x**2/float(size)+y**2/float(size)+z**2/float(size)))
-    return g / g.sum()
-
-def __blur_image(im, n):
-    """ blurs the image by convolving with a gaussian kernel of typical
-        size n. The optional keyword argument ny allows for a different
-        size in the y direction.
-    """
-    g = __gauss_kern(n)
-    improc = scipy.signal.convolve(im,g, mode='same')
-    return(improc)
-
-def _SmoothedDensity(field, data):
-    return __blur_image(data["Density"], 1)
-add_field("SmoothedDensity",
-          function=_SmoothedDensity,
-          validators=[ValidateSpatial(2)])
 
 def _AveragedDensity(field, data):
     nx, ny, nz = data["Density"].shape
@@ -457,6 +460,56 @@ add_field("SpecificAngularMomentumKMSMPC",
           function=_SpecificAngularMomentum,
           convert_function=_convertSpecificAngularMomentumKMSMPC, vector_field=True,
           units=r"\rm{km}\rm{Mpc}/\rm{s}", validators=[ValidateParameter('center')])
+def _AngularMomentum(field, data):
+    return data["CellMass"] * data["SpecificAngularMomentum"]
+add_field("AngularMomentum", function=_AngularMomentum,
+         units=r"\rm{g}\/\rm{cm}^2/\rm{s}", vector_field=True)
+def _AngularMomentumMSUNKMSMPC(field, data):
+    return data["CellMassMsun"] * data["SpecificAngularMomentumKMSMPC"]
+add_field("AngularMomentumMSUNKMSMPC", function=_AngularMomentum,
+          units=r"M_{\odot}\rm{km}\rm{Mpc}/\rm{s}", vector_field=True)
+
+def _ParticleSpecificAngularMomentum(field, data):
+    """
+    Calculate the angular of a particle velocity.  Returns a vector for each
+    particle.
+    """
+    if data.has_field_parameter("bulk_velocity"):
+        bv = data.get_field_parameter("bulk_velocity")
+    else: bv = na.zeros(3, dtype='float64')
+    xv = data["particle_velocity_x"] - bv[0]
+    yv = data["particle_velocity_y"] - bv[1]
+    zv = data["particle_velocity_z"] - bv[2]
+    center = data.get_field_parameter('center')
+    coords = na.array([data['particle_position_x'],
+                       data['particle_position_y'],
+                       data['particle_position_z']], dtype='float64')
+    new_shape = tuple([3] + [1]*(len(coords.shape)-1))
+    r_vec = coords - na.reshape(center,new_shape)
+    v_vec = na.array([xv,yv,zv], dtype='float64')
+    return na.cross(r_vec, v_vec, axis=0)
+add_field("ParticleSpecificAngularMomentum",
+          function=_ParticleSpecificAngularMomentum,
+          convert_function=_convertSpecificAngularMomentum, vector_field=True,
+          units=r"\rm{cm}^2/\rm{s}", validators=[ValidateParameter('center')])
+def _convertSpecificAngularMomentumKMSMPC(data):
+    return data.convert("mpc")/1e5
+add_field("ParticleSpecificAngularMomentumKMSMPC",
+          function=_ParticleSpecificAngularMomentum,
+          convert_function=_convertSpecificAngularMomentumKMSMPC, vector_field=True,
+          units=r"\rm{km}\rm{Mpc}/\rm{s}", validators=[ValidateParameter('center')])
+def _ParticleAngularMomentum(field, data):
+    return data["ParticleMass"] * data["ParticleSpecificAngularMomentum"]
+add_field("ParticleAngularMomentum", 
+          function=_ParticleAngularMomentum, units=r"\rm{g}\/\rm{cm}^2/\rm{s}",
+          particle_type=True)
+def _ParticleAngularMomentumMSUNKMSMPC(field, data):
+    return data["ParticleMass"] * data["ParticleSpecificAngularMomentumKMSMPC"]
+add_field("ParticleAngularMomentumMSUNKMSMPC",
+          function=_ParticleAngularMomentumMSUNKMSMPC,
+          units=r"M_{\odot}\rm{km}\rm{Mpc}/\rm{s}",
+          particle_type=True)
+
 
 def _ParticleRadius(field, data):
     center = data.get_field_parameter("center")
@@ -474,7 +527,8 @@ def _ConvertRadiusCGS(data):
     return data.convert("cm")
 add_field("ParticleRadius", function=_ParticleRadius,
           validators=[ValidateParameter("center")],
-          convert_function = _ConvertRadiusCGS, units=r"\rm{cm}")
+          convert_function = _ConvertRadiusCGS, units=r"\rm{cm}",
+          particle_type = True)
 add_field("Radius", function=_Radius,
           validators=[ValidateParameter("center")],
           convert_function = _ConvertRadiusCGS, units=r"\rm{cm}")
@@ -486,13 +540,15 @@ add_field("RadiusMpc", function=_Radius,
           convert_function = _ConvertRadiusMpc, units=r"\rm{Mpc}")
 add_field("ParticleRadiusMpc", function=_ParticleRadius,
           validators=[ValidateParameter("center")],
-          convert_function = _ConvertRadiusMpc, units=r"\rm{Mpc}")
+          convert_function = _ConvertRadiusMpc, units=r"\rm{Mpc}",
+          particle_type=True)
 
 def _ConvertRadiuskpc(data):
     return data.convert("kpc")
 add_field("ParticleRadiuskpc", function=_ParticleRadius,
           validators=[ValidateParameter("center")],
-          convert_function = _ConvertRadiuskpc, units=r"\rm{kpc}")
+          convert_function = _ConvertRadiuskpc, units=r"\rm{kpc}",
+          particle_type=True)
 add_field("Radiuskpc", function=_Radius,
           validators=[ValidateParameter("center")],
           convert_function = _ConvertRadiuskpc, units=r"\rm{kpc}")
@@ -501,7 +557,8 @@ def _ConvertRadiuskpch(data):
     return data.convert("kpch")
 add_field("ParticleRadiuskpch", function=_ParticleRadius,
           validators=[ValidateParameter("center")],
-          convert_function = _ConvertRadiuskpc, units=r"\rm{kpc}/\rm{h}")
+          convert_function = _ConvertRadiuskpc, units=r"\rm{kpc}/\rm{h}",
+          particle_type=True)
 add_field("Radiuskpch", function=_Radius,
           validators=[ValidateParameter("center")],
           convert_function = _ConvertRadiuskpc, units=r"\rm{kpc}/\rm{h}")
@@ -510,7 +567,8 @@ def _ConvertRadiuspc(data):
     return data.convert("pc")
 add_field("ParticleRadiuspc", function=_ParticleRadius,
           validators=[ValidateParameter("center")],
-          convert_function = _ConvertRadiuspc, units=r"\rm{pc}")
+          convert_function = _ConvertRadiuspc, units=r"\rm{pc}",
+          particle_type=True)
 add_field("Radiuspc", function=_Radius,
           validators=[ValidateParameter("center")],
           convert_function = _ConvertRadiuspc, units=r"\rm{pc}")
@@ -519,13 +577,15 @@ def _ConvertRadiusAU(data):
     return data.convert("au")
 add_field("ParticleRadiusAU", function=_ParticleRadius,
           validators=[ValidateParameter("center")],
-          convert_function = _ConvertRadiusAU, units=r"\rm{AU}")
+          convert_function = _ConvertRadiusAU, units=r"\rm{AU}",
+          particle_type=True)
 add_field("RadiusAU", function=_Radius,
           validators=[ValidateParameter("center")],
           convert_function = _ConvertRadiusAU, units=r"\rm{AU}")
 
 add_field("ParticleRadiusCode", function=_ParticleRadius,
-          validators=[ValidateParameter("center")])
+          validators=[ValidateParameter("center")],
+          particle_type=True)
 add_field("RadiusCode", function=_Radius,
           validators=[ValidateParameter("center")])
 
@@ -538,6 +598,8 @@ def _RadialVelocity(field, data):
                 + (data['y']-center[1])*(data["y-velocity"]-bulk_velocity[1])
                 + (data['z']-center[2])*(data["z-velocity"]-bulk_velocity[2])
                 )/data["RadiusCode"]
+    if na.any(na.isnan(new_field)): # to fix center = point
+        new_field[na.isnan(new_field)] = 0.0
     return new_field
 def _RadialVelocityABS(field, data):
     return na.abs(_RadialVelocity(field, data))
@@ -545,16 +607,13 @@ def _ConvertRadialVelocityKMS(data):
     return 1e-5
 add_field("RadialVelocity", function=_RadialVelocity,
           units=r"\rm{cm}/\rm{s}",
-          validators=[ValidateParameter("center"),
-                      ValidateParameter("bulk_velocity")])
+          validators=[ValidateParameter("center")])
 add_field("RadialVelocityABS", function=_RadialVelocityABS,
           units=r"\rm{cm}/\rm{s}",
-          validators=[ValidateParameter("center"),
-                      ValidateParameter("bulk_velocity")])
+          validators=[ValidateParameter("center")])
 add_field("RadialVelocityKMS", function=_RadialVelocity,
           convert_function=_ConvertRadialVelocityKMS, units=r"\rm{km}/\rm{s}",
-          validators=[ValidateParameter("center"),
-                      ValidateParameter("bulk_velocity")])
+          validators=[ValidateParameter("center")])
 
 def _CuttingPlaneVelocityX(field, data):
     x_vec, y_vec, z_vec = [data.get_field_parameter("cp_%s_vec" % (ax))
@@ -596,21 +655,3 @@ def _JeansMassMsun(field,data):
             (data["Density"]**(-0.5)))
 add_field("JeansMassMsun",function=_JeansMassMsun,
           units=r"\rm{M_{\odot}}")
-
-#def _convertMomentum(data):
-#    return data.convert("x-velocity")*data.convert("Density")*1e5 # want this in cm/s not km/s
-#for ax in ['x','y','z']:
-#    f = fieldInfo["%s-momentum" % ax]
-#    f._units = r"\rm{erg\ s}/\rm{cm^3}"
-#    f._convert_function = _convertMomentum
-#    f.take_log = False
-#
-#fieldInfo["Temperature"].units = r"K"
-#
-#if __name__ == "__main__":
-#    k = fieldInfo.keys()
-#    k.sort()
-#    for f in k:
-#        e = FieldDetector()
-#        fieldInfo[f](e)
-#        print f + ":", ", ".join(e.requested)

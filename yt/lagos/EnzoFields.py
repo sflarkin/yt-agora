@@ -25,6 +25,12 @@ License:
 
 from UniversalFields import *
 
+class EnzoFieldContainer(CodeFieldInfoContainer):
+    _shared_state = {}
+    _field_list = {}
+EnzoFieldInfo = EnzoFieldContainer()
+add_enzo_field = EnzoFieldInfo.add_field
+
 add_field = add_enzo_field
 
 _speciesList = ["HI","HII","Electron",
@@ -94,6 +100,11 @@ add_field("NumberDensity", units=r"\rm{cm}^{-3}",
           function=_NumberDensity,
           convert_function=_ConvertNumberDensity)
 
+def Overdensity(field,data):
+    return (data['Density'] + data['particle_density']) / \
+        (rho_crit_now * ((1+data.pf['CosmologyCurrentRedshift'])**3))
+add_field("Overdensity",function=Overdensity,units=r"")
+
 # Now we add all the fields that we want to control, but we give a null function
 # This is every Enzo field we can think of.  This will be installation-dependent,
 #if data.pf["HydroMethod"] == 'orion':
@@ -143,3 +154,96 @@ for ax in ['x','y','z']:
     f._convert_function = _convertVelocity
     f.take_log = False
 
+def _pdensity(field, data):
+    blank = na.zeros(data.ActiveDimensions, dtype='float32', order="FORTRAN")
+    if data.NumberOfParticles == 0: return blank
+    cic_deposit.cic_deposit(data["particle_position_x"],
+                            data["particle_position_y"],
+                            data["particle_position_z"], 3,
+                            data["particle_mass"],
+                            blank, data.LeftEdge, data.dx)
+    return blank
+add_field("particle_density", function=_pdensity,
+          validators=[ValidateSpatial(0)], convert_function=_convertDensity)
+
+EnzoFieldInfo["Temperature"].units = r"K"
+
+#
+# Now we do overrides for 2D fields
+#
+
+class Enzo2DFieldContainer(CodeFieldInfoContainer):
+    _shared_state = {}
+    _field_list = EnzoFieldContainer._field_list.copy()
+# We make a copy of the dict from the other, so we
+# can now update it...
+Enzo2DFieldInfo = Enzo2DFieldContainer()
+add_enzo_2d_field = Enzo2DFieldInfo.add_field
+
+def _CellArea(field, data):
+    if data['dx'].size == 1:
+        try:
+            return data['dx']*data['dy']*\
+                na.ones(data.ActiveDimensions, dtype='float64')
+        except AttributeError:
+            return data['dx']*data['dy']
+    return data["dx"]*data["dy"]
+def _ConvertCellAreaMpc(data):
+    return data.convert("mpc")**2.0
+def _ConvertCellAreaCGS(data):
+    return data.convert("cm")**2.0
+add_enzo_2d_field("CellAreaCode", units=r"\rm{BoxArea}^2",
+          function=_CellArea)
+add_enzo_2d_field("CellAreaMpc", units=r"\rm{Mpc}^2",
+          function=_CellArea,
+          convert_function=_ConvertCellAreaMpc)
+add_enzo_2d_field("CellArea", units=r"\rm{cm}^2",
+          function=_CellArea,
+          convert_function=_ConvertCellAreaCGS)
+
+for a in ["Code", "Mpc", ""]:
+    Enzo2DFieldInfo["CellVolume%s" % a] = \
+        Enzo2DFieldInfo["CellArea%s" % a]
+
+def _zvel(field, data):
+    return na.zeros(data["x-velocity"].shape,
+                    dtype='float64')
+add_enzo_2d_field("z-velocity", function=_zvel)
+
+
+#
+# Now we do overrides for 1D fields
+#
+
+class Enzo1DFieldContainer(CodeFieldInfoContainer):
+    _shared_state = {}
+    _field_list = EnzoFieldContainer._field_list.copy()
+# We make a copy of the dict from the other, so we
+# can now update it...
+Enzo1DFieldInfo = Enzo1DFieldContainer()
+add_enzo_1d_field = Enzo1DFieldInfo.add_field
+
+def _CellLength(field, data):
+    return data["dx"]
+def _ConvertCellLengthMpc(data):
+    return data.convert("mpc")
+def _ConvertCellLengthCGS(data):
+    return data.convert("cm")
+add_enzo_1d_field("CellLengthCode", units=r"\rm{BoxArea}^2",
+          function=_CellLength)
+add_enzo_1d_field("CellLengthMpc", units=r"\rm{Mpc}^2",
+          function=_CellLength,
+          convert_function=_ConvertCellLengthMpc)
+add_enzo_1d_field("CellLength", units=r"\rm{cm}^2",
+          function=_CellLength,
+          convert_function=_ConvertCellLengthCGS)
+
+for a in ["Code", "Mpc", ""]:
+    Enzo1DFieldInfo["CellVolume%s" % a] = \
+        Enzo1DFieldInfo["CellLength%s" % a]
+
+def _yvel(field, data):
+    return na.zeros(data["x-velocity"].shape,
+                    dtype='float64')
+add_enzo_1d_field("z-velocity", function=_zvel)
+add_enzo_1d_field("y-velocity", function=_yvel)

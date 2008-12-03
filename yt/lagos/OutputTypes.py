@@ -1,8 +1,7 @@
 """
-AMR output objects, both static and time-series.
+Generalized Enzo output objects, both static and time-series.
 
 Presumably at some point EnzoRun will be absorbed into here.
-
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
 Homepage: http://yt.enzotools.org/
@@ -140,7 +139,29 @@ class EnzoStaticOutput(StaticOutput):
         cp = os.path.join(self.directory, "cool_rates.out")
         if os.path.exists(cp):
             self.cool = EnzoTable(cp, cool_out_key)
+
+        # Now fixes for different types of Hierarchies
+        # This includes changing the fieldinfo class!
+        if self["TopGridRank"] == 1: self._setup_1d()
+        elif self["TopGridRank"] == 2: self._setup_2d()
+
         self.field_info = self._fieldinfo_class()
+
+    def _setup_1d(self):
+        self._hierarchy_class = EnzoHierarchy1D
+        self._fieldinfo_class = Enzo1DFieldContainer
+        self.parameters["DomainLeftEdge"] = \
+            na.concatenate([self["DomainLeftEdge"], [0.0, 0.0]])
+        self.parameters["DomainRightEdge"] = \
+            na.concatenate([self["DomainRightEdge"], [1.0, 1.0]])
+
+    def _setup_2d(self):
+        self._hierarchy_class = EnzoHierarchy2D
+        self._fieldinfo_class = Enzo2DFieldContainer
+        self.parameters["DomainLeftEdge"] = \
+            na.concatenate([self["DomainLeftEdge"], [0.0]])
+        self.parameters["DomainRightEdge"] = \
+            na.concatenate([self["DomainRightEdge"], [1.0]])
 
     def _parse_parameter_file(self):
         """
@@ -277,6 +298,32 @@ class EnzoStaticOutput(StaticOutput):
                (1.0 + self.parameters["CosmologyCurrentRedshift"])
         return k
 
+class EnzoStaticOutputInMemory(EnzoStaticOutput):
+    _hierarchy_class = EnzoHierarchyInMemory
+    def __init__(self, parameter_override=None, conversion_override=None):
+        if parameter_override is None: parameter_override = {}
+        self.__parameter_override = parameter_override
+        if conversion_override is None: conversion_override = {}
+        self.__conversion_override = conversion_override
+
+        StaticOutput.__init__(self, "InMemoryParameterFile", 8)
+
+    def _parse_parameter_file(self):
+        import enzo
+        self.parameters['CurrentTimeIdentifier'] = time.time()
+        self.parameters.update(enzo.yt_parameter_file)
+        self.conversion_factors.update(enzo.conversion_factors)
+        for i in self.parameters:
+            if isinstance(self.parameters[i], types.TupleType):
+                self.parameters[i] = na.array(self.parameters[i])
+        for i in self.conversion_factors:
+            if isinstance(self.conversion_factors[i], types.TupleType):
+                self.conversion_factors[i] = na.array(self.conversion_factors[i])
+        for p, v in self.__parameter_override.items():
+            self.parameters[p] = v
+        for p, v in self.__conversion_override.items():
+            self.conversion_factors[p] = v
+
 class OrionStaticOutput(StaticOutput):
     """
     This class is a stripped down class that simply reads and parses, without
@@ -357,9 +404,6 @@ class OrionStaticOutput(StaticOutput):
                     self.parameters[paramName] = t[0]
                 else:
                     self.parameters[paramName] = t
-#                 if paramName.endswith("Units") and not paramName.startswith("Temperature"):
-#                     dataType = paramName[:-5]
-#                     self.conversion_factors[dataType] = self.parameters[paramName]
             elif param.startswith("geometry.prob_hi"):
                 self.parameters["DomainRightEdge"] = \
                     na.array([float(i) for i in vals.split()])

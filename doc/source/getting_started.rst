@@ -46,6 +46,15 @@ Binary Packages
 Installing From Source
 ======================
 
+Using the Installation Script
+-----------------------------
+
+In the ``doc/`` directory in the yt source distribution, there is a script,
+``install_script.sh``, that I have used in the past to set up a full
+installation of yt.  It may need tweaking or modification, but it gives a
+good idea of the roadmap to installation.
+
+
 Prerequisites for yt
 --------------------
 
@@ -62,7 +71,7 @@ the graphical user interface, Reason.
  * `wxPython <http://www.wxpython.org/>`_, the GUI toolkit
 
 (If you are only interested in manipulating data without any graphical plotting
-or interfaces, you only need to install NumPy and Python!)
+or interfaces, you only need to install HDF5, NumPy, and Python!)
 
 Installing the Necessary Packages
 ---------------------------------

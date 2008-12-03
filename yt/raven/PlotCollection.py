@@ -25,6 +25,15 @@ License:
 
 from yt.raven import *
 
+# No better place to put this
+def concatenate_pdfs(output_fn, input_fns):
+    from pyPdf import PdfFileWriter, PdfFileReader
+    outfile = PdfFileWriter()
+    for fn in input_fns:
+        infile = PdfFileReader(open(fn, 'rb'))
+        outfile.addPage(infile.getPage(0))
+    outfile.write(open(output_fn, "wb"))
+
 class PlotCollection:
     __id_counter = 0
     def __init__(self, pf, deliverator_id=-1, center=None):
@@ -39,7 +48,7 @@ class PlotCollection:
         self._run_id = deliverator_id
         self.pf = pf
         if center == None:
-            v,self.c = pf.h.findMax("Density") # @todo: ensure no caching
+            v,self.c = pf.h.find_max("Density") # @todo: ensure no caching
         else:
             self.c = center
         if deliverator_id > 0:
@@ -53,6 +62,10 @@ class PlotCollection:
             self.submit = False
         mylog.info("Created plot collection with default plot-center = %s",
                     list(self.c))
+
+    def __iter__(self):
+        for p in self.plots:
+            yield p
 
     def save(self, basename, format="png", override=False):
         """
@@ -146,8 +159,7 @@ class PlotCollection:
         self.plots.append(plot)
         return plot
 
-    def add_slice(self, field, axis, coord=None, center=None,
-                 use_colorbar=True, figure = None, axes = None, fig_size=None):
+    def add_slice(self, *args, **kwargs):
         """
         Generate a slice through *field* along *axis*, optionally at
         [axis]=*coord*, with the *center* attribute given (some 
@@ -156,22 +168,55 @@ class PlotCollection:
         providing pre-existing Matplotlib *figure* and *axes* objects.
         *fig_size* in (height_inches, width_inches)
         """
+        return self.__add_slice(PlotTypes.SlicePlot, *args, **kwargs)
+
+    def add_slice_interpolated(self, *args, **kwargs):
+        """
+        Generate a slice through *field* along *axis*, optionally at
+        [axis]=*coord*, with the *center* attribute given (some 
+        degeneracy with *coord*, but not complete), with *use_colorbar*
+        specifying whether the plot is naked or not and optionally
+        providing pre-existing Matplotlib *figure* and *axes* objects.
+        *fig_size* in (height_inches, width_inches)
+
+        The slice will be interpolated using the delaunay module, with natural
+        neighbor interpolation.
+        """
+        return self.__add_slice(PlotTypes.SlicePlotNaturalNeighbor, *args, **kwargs)
+
+    def __add_slice(self, ptype, field, axis, coord=None, center=None,
+                 use_colorbar=True, figure = None, axes = None, fig_size=None,
+                 periodic = False, data_source = None, **kwargs):
         if center == None:
             center = self.c
         if coord == None:
             coord = center[axis]
-        slice = self.pf.hierarchy.slice(axis, coord, field, center)
-        p = self._add_plot(PlotTypes.SlicePlot(slice, field, use_colorbar=use_colorbar,
+        if data_source is None:
+            data_source = self.pf.hierarchy.slice(axis, coord, field, center, **kwargs)
+        p = self._add_plot(ptype(data_source, field, use_colorbar=use_colorbar,
                          axes=axes, figure=figure,
-                         size=fig_size))
+                         size=fig_size, periodic=periodic))
         mylog.info("Added slice of %s at %s = %s with 'center' = %s", field,
                     axis_names[axis], coord, list(center))
         p["Axis"] = lagos.axis_names[axis]
         return p
 
+    def add_particles(self, axis, width, p_size=1.0, col='k', stride=1.0,
+                      data_source=None):
+        LE = self.pf["DomainLeftEdge"].copy()
+        RE = self.pf["DomainRightEdge"].copy()
+        LE[axis] = self.c[axis] - width/2.0
+        RE[axis] = self.c[axis] + width/2.0
+        if data_source is None: data_source = self.pf.h.region(self.c, LE, RE)
+        p = self._add_plot(PlotTypes.ParticlePlot(data_source, axis,
+                                        width, p_size, col, stride))
+        p["Axis"] = lagos.axis_names[axis]
+        return p
+
     def add_cutting_plane(self, field, normal,
                           center=None, use_colorbar=True,
-                          figure = None, axes = None, fig_size=None, obj=None):
+                          figure = None, axes = None, fig_size=None, obj=None,
+                           **kwargs):
         """
         Generate a cutting plane of *field* with *normal*, centered at *center*
         (defaults to PlotCollection center) with *use_colorbar*
@@ -183,7 +228,7 @@ class PlotCollection:
         if center == None:
             center = self.c
         if not obj:
-            cp = self.pf.hierarchy.cutting(normal, center, field)
+            cp = self.pf.hierarchy.cutting(normal, center, field, **kwargs)
         else:
             cp = obj
         p = self._add_plot(PlotTypes.CuttingPlanePlot(cp, field,
@@ -194,9 +239,7 @@ class PlotCollection:
         p["Axis"] = "CuttingPlane"
         return p
 
-    def add_projection(self, field, axis, weight_field=None,
-                      center=None, use_colorbar=True,
-                      figure = None, axes = None, fig_size=None):
+    def add_projection(self, *args, **kwargs):
         """
         Generate a projection of *field* along *axis*, optionally giving
         a *weight_field*-weighted average with *use_colorbar*
@@ -204,12 +247,32 @@ class PlotCollection:
         providing pre-existing Matplotlib *figure* and *axes* objects.
         *fig_size* in (height_inches, width_inches)
         """
+        return self._add_projection(PlotTypes.ProjectionPlot, *args, **kwargs)
+
+    def add_projection_interpolated(self, *args, **kwargs):
+        """
+        Generate a projection of *field* along *axis*, optionally giving
+        a *weight_field*-weighted average with *use_colorbar*
+        specifying whether the plot is naked or not and optionally
+        providing pre-existing Matplotlib *figure* and *axes* objects.
+        *fig_size* in (height_inches, width_inches)
+
+        The projection will be interpolated using the delaunay module, with
+        natural neighbor interpolation.
+        """
+        return self._add_projection(PlotTypes.ProjectionPlotNaturalNeighbor, *args, **kwargs)
+
+    def _add_projection(self, ptype, field, axis, weight_field=None,
+                      center=None, use_colorbar=True,
+                      figure = None, axes = None, fig_size=None,
+                      periodic = False, **kwargs):
         if center == None:
             center = self.c
-        proj = self.pf.hierarchy.proj(axis, field, weight_field, center=center)
-        p = self._add_plot(PlotTypes.ProjectionPlot(proj, field,
+        proj = self.pf.hierarchy.proj(axis, field, weight_field, center=center,
+                                      **kwargs)
+        p = self._add_plot(ptype(proj, field,
                          use_colorbar=use_colorbar, axes=axes, figure=figure,
-                         size=fig_size))
+                         size=fig_size, periodic=periodic))
         p["Axis"] = lagos.axis_names[axis]
         return p
 
@@ -320,6 +383,22 @@ class PlotCollection:
         p["Axis"] = None
         return p
 
+    def add_fixed_resolution_plot(self, frb, field, center=None, use_colorbar=True,
+                      figure = None, axes = None, fig_size=None, **kwargs):
+        p = self._add_plot(PlotTypes.FixedResolutionPlot(frb, field,
+                         use_colorbar=use_colorbar, axes=axes, figure=figure,
+                         size=fig_size))
+        p["Axis"] = "na"
+        return p
+
+    def add_ortho_ray(self, axis, coords, field, axes = None,
+                      figure = None, **kwargs):
+        data_source = self.pf.h.ortho_ray(axis, coords, field)
+        p = self._add_plot(PlotTypes.LineQueryPlot(data_source,
+                [axis_names[axis], field], self._get_new_id(),
+                figure, axes, plot_options=kwargs))
+        return p
+
     def _get_new_id(self):
         self.__id_counter += 1
         return self.__id_counter-1
@@ -333,12 +412,23 @@ class PlotCollection:
             del self.plots[-1].data
             del self.plots[-1]
 
+    def save_book(self, filename):
+        from pyPdf import PdfFileWriter, PdfFileReader
+        outfile = PdfFileWriter()
+        fns = self.save("__temp", format="pdf")
+        concatenate_pdfs(filename, fns)
+        for fn in fns: os.unlink(fn)
+
 def wrap_pylab_newplot(func):
     @wraps(func)
     def pylabify(self, *args, **kwargs):
         # Let's assume that axes and figure are not in the positional
         # arguments -- probably safe!
         new_fig = self.pylab.figure()
+        try:
+            new_fig.canvas.set_window_title("%s" % (self.pf))
+        except AttributeError:
+            pass
         kwargs['axes'] = self.pylab.gca()
         kwargs['figure'] = self.pylab.gcf()
         retval = func(self, *args, **kwargs)
@@ -358,6 +448,7 @@ def wrap_pylab_show(func):
 
 class PlotCollectionInteractive(PlotCollection):
     add_slice = wrap_pylab_newplot(PlotCollection.add_slice)
+    add_slice_interpolated = wrap_pylab_newplot(PlotCollection.add_slice_interpolated)
     add_cutting_plane = wrap_pylab_newplot(PlotCollection.add_cutting_plane)
     add_projection = wrap_pylab_newplot(PlotCollection.add_projection)
     add_profile_object = wrap_pylab_newplot(PlotCollection.add_profile_object)
@@ -384,6 +475,6 @@ class PlotCollectionInteractive(PlotCollection):
 
     def clear_plots(self):
         for plot in self.plots:
-            self.pylab.figure(plot._fig_num)
+            self.pylab.figure(pylab._fig_num)
             self.pylab.clf()
-        PlotCollection.clear_plots(self)
+        PlotCollection.clear_data(self)
