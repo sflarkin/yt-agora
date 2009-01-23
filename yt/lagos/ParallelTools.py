@@ -38,7 +38,8 @@ if os.path.basename(sys.executable) in ["mpi4py", "embed_enzo"] \
         ytcfg["yt","__parallel_rank"] = str(MPI.COMM_WORLD.rank)
         ytcfg["yt","__parallel_size"] = str(MPI.COMM_WORLD.size)
         ytcfg["yt","__parallel"] = "True"
-        ytcfg["yt","StoreParameterFiles"] = "False"
+        # I believe we do not need to turn this off manually
+        #ytcfg["yt","StoreParameterFiles"] = "False"
         # Now let's make sure we have the right options set.
         if MPI.COMM_WORLD.rank > 0:
             if ytcfg.getboolean("lagos","serialize"):
@@ -324,7 +325,7 @@ class ParallelAnalysisInterface(object):
         deps = []
         fi = self.pf.field_info
         for field in fields:
-            deps += ensure_list(fi[field].get_dependencies().requested)
+            deps += ensure_list(fi[field].get_dependencies(pf=self.pf).requested)
         return list(set(deps))
 
     def _claim_object(self, obj):

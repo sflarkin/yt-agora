@@ -81,10 +81,10 @@ class LightCone(object):
         # Combine all data dumps.
         self._CombineDataOutputs()
 
-        if self.lightConeParameters['UseMinimumNumberOfProjections']:
-            # Calculate maximum delta z for each data dump.
-            self._CalculateDeltaZMax()
-        else:
+        # Calculate maximum delta z for each data dump.
+        self._CalculateDeltaZMax()
+
+        if not self.lightConeParameters['UseMinimumNumberOfProjections']:
             # Calculate minimum delta z for each data dump.
             self._CalculateDeltaZMin()
 
@@ -223,8 +223,12 @@ class LightCone(object):
                  self.lightConeParameters['OutputDir'] += "/"
 
         for q,output in enumerate(self.lightConeSolution):
-            name = "%s%s_%04d_%04d" % (self.lightConeParameters['OutputDir'],self.lightConeParameters['OutputPrefix'],
-                                       q,len(self.lightConeSolution))
+            if node is None:
+                name = "%s%s_%04d_%04d" % (self.lightConeParameters['OutputDir'],self.lightConeParameters['OutputPrefix'],
+                                           q,len(self.lightConeSolution))
+            else:
+                name = "%s%s_%s_%04d_%04d" % (self.lightConeParameters['OutputDir'],self.lightConeParameters['OutputPrefix'],
+                                              node,q,len(self.lightConeSolution))
             output['object'] = lagos.EnzoStaticOutput(output['filename'])
             frb = LightConeProjection(output,field,self.pixels,weight_field=weight_field,
                                       save_image=save_slice_images,
@@ -239,11 +243,18 @@ class LightCone(object):
                 else:
                     self.projectionStack.append(frb[field])
 
+                # Delete the frb.  This saves a decent amount of ram.
+                if (q < len(self.lightConeSolution) - 1):
+                    del frb
+
                 # Flatten stack to save memory.
                 if flatten_stack and (len(self.projectionStack) > 1):
                     self.projectionStack = [sum(self.projectionStack)]
                     if weight_field is not None:
                         self.projectionWeightFieldStack = [sum(self.projectionWeightFieldStack)]
+
+            # Delete the plot collection now that the frb is deleted.
+            del output['pc']
 
             # Unless this is the last slice, delete the dataset object.
             # The last one will be saved to make the plot collection.
@@ -257,7 +268,10 @@ class LightCone(object):
             else:
                 lightConeProjection = sum(self.projectionStack) / sum(self.projectionWeightFieldStack)
 
-            filename = "%s%s" % (self.lightConeParameters['OutputDir'],self.lightConeParameters['OutputPrefix'])
+            if node is None:
+                filename = "%s%s" % (self.lightConeParameters['OutputDir'],self.lightConeParameters['OutputPrefix'])
+            else:
+                filename = "%s%s_%s" % (self.lightConeParameters['OutputDir'],self.lightConeParameters['OutputPrefix'],node)
 
             # Save the last fixed resolution buffer for the plot collection, 
             # but replace the data with the full light cone projection data.
@@ -285,8 +299,6 @@ class LightCone(object):
 
             # Return the plot collection so the user can remake the plot if they want.
             return pc
-        else:
-            mylog.info("I'm not the root process so I'm just going to chill.")
 
     def RerandomizeLightConeSolution(self,newSeed,recycle=True):
         """

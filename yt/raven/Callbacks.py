@@ -432,14 +432,44 @@ class ClumpContourCallback(PlotCallback):
         xx0, xx1 = plot._axes.get_xlim()
         yy0, yy1 = plot._axes.get_ylim()
         plot._axes.hold(True)
-        xf = lagos.axis_names[lagos.x_dict[plot.data.axis]]
-        yf = lagos.axis_names[lagos.y_dict[plot.data.axis]]
 
+        px_index = lagos.x_dict[plot.data.axis]
+        py_index = lagos.y_dict[plot.data.axis]
+
+        xf = lagos.axis_names[px_index]
+        yf = lagos.axis_names[py_index]
+
+        DomainRight = plot.data.pf["DomainRightEdge"]
+        DomainLeft = plot.data.pf["DomainLeftEdge"]
+        DomainWidth = DomainRight - DomainLeft
+        
         nx, ny = plot.image._A.shape
         buff = na.zeros((nx,ny),dtype='float64')
         for i,clump in enumerate(reversed(self.clumps)):
             mylog.debug("Pixelizing contour %s", i)
-            temp = _MPL.Pixelize(clump[xf], clump[yf],
+
+
+            xf_copy = copy.copy(clump[xf])
+            yf_copy = copy.copy(clump[yf])
+
+            #Shift zones that belong shifted, both directions in X and Y.
+            shifted = na.logical_and( xf_copy + DomainWidth[px_index] >= DomainRight[px_index],
+                                      xf_copy + DomainWidth[px_index]<= x1 )
+            xf_copy[na.where(shifted)] += DomainWidth[px_index]
+            
+            shifted = na.logical_and( xf_copy - DomainWidth[px_index] <= DomainLeft[px_index],
+                                      xf_copy - DomainWidth[px_index] >= x0 )
+            xf_copy[na.where(shifted)] -= DomainWidth[px_index]
+            
+            shifted = na.logical_and( yf_copy + DomainWidth[py_index] >= DomainRight[py_index],
+                                      yf_copy + DomainWidth[py_index] <= y1 )
+            yf_copy[na.where(shifted)] += DomainWidth[py_index]
+            
+            shifted = na.logical_and( yf_copy - DomainWidth[py_index] <= DomainLeft[py_index],
+                                      yf_copy - DomainWidth[py_index] >= y0 )
+            yf_copy[na.where(shifted)] -= DomainWidth[py_index]
+            
+            temp = _MPL.Pixelize(xf_copy, yf_copy, 
                                  clump['dx']/2.0,
                                  clump['dy']/2.0,
                                  clump['dx']*0.0+i+1, # inits inside Pixelize
@@ -480,6 +510,8 @@ class SphereCallback(PlotCallback):
                  text = None, text_args = None):
         self.center = center
         self.radius = radius
+        if circle_args is None: circle_args = {}
+        if 'fill' not in circle_args: circle_args['fill'] = False
         self.circle_args = circle_args
         self.text = text
         self.text_args = text_args
@@ -497,18 +529,16 @@ class SphereCallback(PlotCallback):
         center_x = (self.center[xi] - x0)*dx
         center_y = (self.center[yi] - y0)*dy
         # origin = lower?  not sure why center_y and center_x are reversed
-        cir = Circle((center_y, center_x), radius, fill=False,
-                     **self.circle_args)
+        cir = Circle((center_x, center_y), radius, **self.circle_args)
         plot._axes.add_patch(cir)
         if self.text is not None:
             plot._axes.text(center_x, center_y, "%s" % halo.id,
                             **self.text_args)
 
-        
-
 class HopCircleCallback(PlotCallback):
     def __init__(self, hop_output, axis, max_number=None,
-                 annotate=False, min_size=20, font_size=8, print_halo_size=False):
+                 annotate=False, min_size=20, font_size=8, print_halo_size=False,
+                 print_halo_mass=False):
         self.axis = axis
         self.hop_output = hop_output
         self.max_number = max_number
@@ -516,6 +546,7 @@ class HopCircleCallback(PlotCallback):
         self.min_size = min_size
         self.font_size = font_size
         self.print_halo_size = print_halo_size
+        self.print_halo_mass = print_halo_mass
 
     def __call__(self, plot):
         from matplotlib.patches import Circle
@@ -538,6 +569,9 @@ class HopCircleCallback(PlotCallback):
             if self.annotate:
                 if self.print_halo_size:
                     plot._axes.text(center_x, center_y, "%s" % size,
+                    fontsize=self.font_size)
+                elif self.print_halo_mass:
+                    plot._axes.text(center_x, center_y, "%s" % halo.total_mass(),
                     fontsize=self.font_size)
                 else:
                     plot._axes.text(center_x, center_y, "%s" % halo.id,
