@@ -216,6 +216,7 @@ class Data3DBase:
         ps = cPickle.dumps(self.data)
         pf, obj = cPickle.loads(ps)
         self.assertEqual(obj["CellMassMsun"].sum(), self.data["CellMassMsun"].sum())
+        print "TEST PICKLE"
 
 for field_name in yt.lagos.FieldInfo:
     field = yt.lagos.FieldInfo[field_name]
