@@ -17,7 +17,9 @@ ytcfg["lagos","serialize"] = "False"
 
 import cPickle
 import yt.lagos
+import yt.lagos.OutputTypes
 import numpy as na
+from yt.fido import ParameterFileStore
 
 # The dataset used is located at:
 # http://yt.spacepope.org/DD0018.zip
@@ -41,6 +43,37 @@ class LagosTestingBase:
         if hasattr(self,'ind_to_get'): del self.ind_to_get
         del self.OutputFile, self.hierarchy
         
+class TestParameterFileStore(unittest.TestCase):
+    def setUp(self):
+        ytcfg['yt','ParameterFileStore'] = "testing.csv"
+        pfs = ParameterFileStore()
+        os.unlink(pfs._get_db_name())
+        self.pfs = ParameterFileStore() # __init__ gets called again
+        ytcfg['lagos', 'serialize'] = "True"
+
+    def testCacheFile(self):
+        pf1 = yt.lagos.EnzoStaticOutput(fn)
+        pf2 = self.pfs.get_pf_hash(pf1._hash())
+        self.assertTrue(pf1 is pf2)
+
+    def testGrabFile(self):
+        pf1 = yt.lagos.EnzoStaticOutput(fn)
+        hash = pf1._hash()
+        del pf1
+        pf2 = self.pfs.get_pf_hash(hash)
+        self.assertTrue(hash == pf2._hash())
+
+    def testGetCurrentTimeID(self):
+        pf1 = yt.lagos.EnzoStaticOutput(fn)
+        hash = pf1._hash()
+        ctid = pf1["CurrentTimeIdentifier"]
+        del pf1
+        pf2 = self.pfs.get_pf_ctid(ctid)
+        self.assertTrue(hash == pf2._hash())
+
+    def tearDown(self):
+        ytcfg['lagos', 'serialize'] = "False"
+        os.unlink(self.pfs._get_db_name())
 
 class TestHierarchy(LagosTestingBase, unittest.TestCase):
     def testGetHierarchy(self):
@@ -301,7 +334,8 @@ class TestDataCube(LagosTestingBase, unittest.TestCase):
     
     def testFlushBackToGrids(self):
         ml = self.hierarchy.max_level
-        cg = self.hierarchy.covering_grid(3, [0.0]*3, [1.0]*3, [64,64,64])
+        #cg = self.hierarchy.covering_grid(3, [0.0]*3, [1.0]*3, [64,64,64])
+        cg = self.hierarchy.new_covering_grid(2, [0.0]*3, [64,64,64])
         cg["Ones"] *= 2.0
         cg.flush_data(field="Ones")
         for g in na.concatenate([self.hierarchy.select_grids(i) for i in range(3)]):
@@ -310,15 +344,18 @@ class TestDataCube(LagosTestingBase, unittest.TestCase):
 
     def testFlushBackToNewCover(self):
         ml = self.hierarchy.max_level
-        cg = self.hierarchy.covering_grid(3, [0.0]*3, [1.0]*3, [64,64,64])
+        #cg = self.hierarchy.covering_grid(3, [0.0]*3, [1.0]*3, [64,64,64])
+        cg = self.hierarchy.new_covering_grid(2, [0.0]*3, [64,64,64])
         cg["tempContours"] = cg["Ones"] * 2.0
         cg.flush_data(field="tempContours")
-        cg2 = self.hierarchy.covering_grid(3, [0.0]*3, [1.0]*3, [64,64,64])
+        #cg2 = self.hierarchy.covering_grid(3, [0.0]*3, [1.0]*3, [64,64,64])
+        cg2 = self.hierarchy.new_covering_grid(2, [0.0]*3, [64,64,64])
         self.assertTrue(na.all(cg["tempContours"] == cg2["tempContours"]))
 
     def testRawFlushBack(self):
         ml = self.hierarchy.max_level
-        cg = self.hierarchy.covering_grid(3, [0.0]*3, [1.0]*3, [64,64,64])
+        #cg = self.hierarchy.covering_grid(3, [0.0]*3, [1.0]*3, [64,64,64])
+        cg = self.hierarchy.new_covering_grid(2, [0.0]*3, [64,64,64])
         cg["DensityNew"] = cg["Density"] * 2.111
         cg.flush_data(field="DensityNew")
         for g in na.concatenate([self.hierarchy.select_grids(i) for i in range(3)]):
@@ -331,14 +368,18 @@ class TestDataCube(LagosTestingBase, unittest.TestCase):
             self.assertAlmostEqual(max_diff, 2.111, 5)
 
     def testAllCover(self):
-        cg = self.hierarchy.covering_grid(0, [0.0]*3, [1.0]*3, [32,32,32])
-        self.assertTrue(cg["Density"].max() \
-                     == self.hierarchy.grids[0]["Density"].max())
-        self.assertTrue(cg["Density"].min() \
-                     == self.hierarchy.grids[0]["Density"].min())
+        #cg = self.hierarchy.covering_grid(0, [0.0]*3, [1.0]*3, [32,32,32])
+        cg = self.hierarchy.new_covering_grid(1, [0.0]*3, [32,32,32])
+        mi, ma = 1e30, -1e30
+        for g in na.concatenate([self.hierarchy.select_grids(i) for i in range(2)]):
+            ma = max(ma, g["Density"].max())
+            mi = min(mi, g["Density"].min())
+        self.assertEqual(cg["Density"].max(), ma)
+        self.assertEqual(cg["Density"].min(), mi)
 
     def testCellVolume(self):
-        cg = self.hierarchy.covering_grid(2, [0.0]*3, [1.0]*3, [64,64,64])
+        #cg = self.hierarchy.covering_grid(2, [0.0]*3, [1.0]*3, [64,64,64])
+        cg = self.hierarchy.new_covering_grid(2, [0.0]*3, [64,64,64])
         self.assertEqual(na.unique(cg["CellVolume"]).size, 1)
 
 class TestDiskDataType(Data3DBase, DataTypeTestingBase, LagosTestingBase, unittest.TestCase):
