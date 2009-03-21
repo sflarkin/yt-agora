@@ -33,7 +33,7 @@ import tables as h5
 
 PROFILE_RADIUS_THRESHOLD = 2
 
-class HaloProfiler(object):
+class HaloProfiler(lagos.ParallelAnalysisInterface):
     def __init__(self,dataset,HaloProfilerParameterFile,halos='multiple',radius=0.1,radius_units='1',hop_style='new'):
         self.dataset = dataset
         self.HaloProfilerParameterFile = HaloProfilerParameterFile
@@ -49,7 +49,7 @@ class HaloProfiler(object):
         self.halos = halos
         if not(self.halos is 'multiple' or self.halos is 'single'):
             mylog.error("Keyword, halos, must be either 'single' or 'multiple'.")
-            exit(1)
+            return None
 
         # Set hop file style.
         # old: enzo_hop output.
@@ -57,7 +57,7 @@ class HaloProfiler(object):
         self.hop_style = hop_style
         if not(self.hop_style is 'old' or self.hop_style is 'new'):
             mylog.error("Keyword, hop_style, must be either 'old' or 'new'.")
-            exit(1)
+            return None
 
         # Set some parameter defaults.
         self._SetParameterDefaults()
@@ -71,22 +71,22 @@ class HaloProfiler(object):
             if self.haloProfilerParameters['VelocityCenter'][1] == 'halo' and \
                     self.halos is 'single':
                 mylog.error("Parameter, VelocityCenter, must be set to 'bulk sphere' or 'max <field>' with halos flag set to 'single'.")
-                exit(1)
+                return None
             if self.haloProfilerParameters['VelocityCenter'][1] == 'halo' and \
                     self.hop_style is 'old':
                 mylog.error("Parameter, VelocityCenter, must be 'bulk sphere' for old style hop output files.")
-                exit(1)
+                return None
             if not(self.haloProfilerParameters['VelocityCenter'][1] == 'halo' or 
                    self.haloProfilerParameters['VelocityCenter'][1] == 'sphere'):
                 mylog.error("Second value of VelocityCenter must be either 'halo' or 'sphere' if first value is 'bulk'.")
-                exit(1)
+                return None
         elif self.haloProfilerParameters['VelocityCenter'][0] == 'max':
             if self.halos is 'multiple':
                 mylog.error("Getting velocity center from a max field value only works with halos='single'.")
-                exit(1)
+                return None
         else:
             mylog.error("First value of parameter, VelocityCenter, must be either 'bulk' or 'max'.")
-            exit(1)
+            return None
 
         # Create dataset object.
         self.pf = lagos.EnzoStaticOutput(self.dataset)
@@ -123,7 +123,7 @@ class HaloProfiler(object):
             os.mkdir(outputDir)
 
         pbar = lagos.get_pbar("Profiling halos ", len(self.hopHalos))
-        for q,halo in enumerate(self.hopHalos):
+        for q,halo in enumerate(self._get_objs('hopHalos')):
             filename = "%s/Halo_%04d_profile.dat" % (outputDir,q)
 
             # Read profile from file if it already exists.
@@ -186,6 +186,9 @@ class HaloProfiler(object):
 
         pbar.finish()
         self._WriteVirialQuantities()
+
+    def _finalize_parallel(self):
+        self.virialQuantities = self._mpi_catdict(self.virialQuantities)
 
     def makeProjections(self,save_images=True,save_cube=True,**kwargs):
         "Make projections of all halos using specified fields."

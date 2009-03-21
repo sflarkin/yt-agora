@@ -37,7 +37,7 @@ _data_style_funcs = \
      6: (readDataPacked, readAllDataPacked, getFieldsPacked, readDataSlicePacked,
          getExceptionHDF5, DataQueuePackedHDF5),
      7: (readDataNative, readAllDataNative, None, readDataSliceNative,
-         getExceptionHDF5, None), \
+         getExceptionHDF5, DataQueueNative), \
      8: (readDataInMemory, readAllDataInMemory, getFieldsInMemory, readDataSliceInMemory,
          getExceptionInMemory, DataQueueInMemory),
      'enzo_packed_2d': (readDataPacked, readAllDataPacked, getFieldsPacked, readDataSlicePacked2D,
@@ -135,6 +135,9 @@ class AMRHierarchy:
             self._data_file = None
             pass
 
+    def _setup_data_queue(self):
+        self.queue = _data_style_funcs[self.data_style][5]()
+
     def _setup_grid_corners(self):
         self.gridCorners = na.array([ # Unroll!
             [self.gridLeftEdge[:,0], self.gridLeftEdge[:,1], self.gridLeftEdge[:,2]],
@@ -221,6 +224,8 @@ class AMRHierarchy:
                         AMRCoveringGridBase, dd)
         self._add_object_class('smoothed_covering_grid', "AMRSmoothedCoveringGrid",
                         AMRSmoothedCoveringGridBase, dd)
+        self._add_object_class('new_covering_grid', "AMRNewCoveringGrid",
+                        AMRNewCoveringGridBase, dd)
         self._add_object_class('sphere', "AMRSphere", AMRSphereBase, dd)
         self._add_object_class('cutting', "AMRCuttingPlane", AMRCuttingPlaneBase, dd)
         self._add_object_class('ray', "AMRRay", AMRRayBase, dd)
@@ -688,9 +693,6 @@ class EnzoHierarchy(AMRHierarchy):
             else:
                 raise TypeError
 
-    def _setup_data_queue(self):
-        self.queue = _data_style_funcs[self.data_style][5]()
-
     def __setup_filemap(self, grid):
         if not self.data_style == 6:
             return
@@ -1130,6 +1132,7 @@ class OrionHierarchy(AMRHierarchy):
         self.readGlobalHeader(header_filename,self.parameter_file.paranoid_read) # also sets up the grid objects
         self.__cache_endianness(self.levels[-1].grids[-1])
         AMRHierarchy.__init__(self,pf)
+        self._setup_data_queue()
         self._setup_field_list()
 
     def readGlobalHeader(self,filename,paranoid_read):
