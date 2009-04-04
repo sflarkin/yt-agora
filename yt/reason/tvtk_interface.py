@@ -289,19 +289,20 @@ def _set_cpos(cam, po, fp, vu, cr):
     cam.clipping_range = cr
 
 class HierarchyImporter(HasTraits):
-    parameter_fn = File(filter=["*.hierarchy"])
+    pf = Any
     min_grid_level = Int(0)
-    max_grid_level = Int(-1)
+    number_of_levels = Range(1,13)
     field = Str("Density")
+    center_on_max = Bool(True)
     center = CArray(shape = (3,), dtype = 'float64')
     cache = Bool(True)
     smoothed = Bool(True)
     
     default_view = View(Item('min_grid_level'),
-                        Item('max_grid_level'),
-                        Item('parameter_fn'),
+                        Item('number_of_levels'),
                         Item('field'),
-                        Item('center'),
+                        Item('center_on_max'),
+                        Item('center', enabled_when='not object.center_on_max'),
                         Item('smoothed'),
                         Item('cache', label='Pre-load data'),
                         buttons=OKCancelButtons)
@@ -325,11 +326,12 @@ class YTScene(HasTraits):
 
     # Traits
     importer = Instance(HierarchyImporter)
-    parameter_fn = Delegate("importer")
+    pf = Delegate("importer")
     min_grid_level = Delegate("importer")
-    max_grid_level = Delegate("importer")
+    number_of_levels = Delegate("importer")
     field = Delegate("importer")
-    center = Delegate("importer")
+    center = CArray(shape = (3,), dtype = 'float64')
+    center_on_max = Delegate("importer")
     smoothed = Delegate("importer")
     cache = Delegate("importer")
 
@@ -352,21 +354,15 @@ class YTScene(HasTraits):
 
     def __init__(self, **traits):
         HasTraits.__init__(self, **traits)
-        #self.window.open()
-        #self.scene = self.window.scene
-        #self.python_shell.bind("ehds", self)
-        self.pf = lagos.EnzoStaticOutput(self.parameter_fn[:-10])
-        #self.python_shell.bind("pf", self.pf)
         self.extracted_hierarchy = ExtractedHierarchy(
-                        self.pf, self.min_grid_level, self.max_grid_level,
+                        self.pf, self.min_grid_level,
+                        self.min_grid_level + self.number_of_levels - 1,
                         offset=None)
         self._hdata_set = tvtk.HierarchicalBoxDataSet()
         self._ugs = []
         self._grids = []
         self._min_val = 1e60
         self._max_val = -1e60
-        self.center = self.extracted_hierarchy._convert_coords(
-            self.pf.h.find_max("Density")[1])
         gid = 0
         if self.cache:
             for grid_set in self.extracted_hierarchy.get_levels():
@@ -374,11 +370,16 @@ class YTScene(HasTraits):
                     grid[self.field]
         for l, grid_set in enumerate(self.extracted_hierarchy.get_levels()):
             gid = self._add_level(grid_set, l, gid)
-        #self._hdata_set.generate_visibility_arrays()
         self.toggle_grid_boundaries()
-        #self.camera_path.edit_traits()
-        #self.scene.camera.focal_point = self.center
-        #self.scene.render()
+
+    def _center_default(self):
+        return self.extracted_hierarchy._convert_coords(
+                [0.5, 0.5, 0.5])
+
+    def do_center_on_max(self):
+        self.center = self.extracted_hierarchy._convert_coords(
+            self.pf.h.find_max("Density")[1])
+        self.scene.camera.focal_point = self.center
 
     def _add_level(self, grid_set, level, gid):
         for grid in grid_set:
@@ -404,7 +405,7 @@ class YTScene(HasTraits):
             scalars = na.log10(scalars)
         ug.point_data.scalars = scalars.transpose().ravel()
         ug.point_data.scalars.name = self.field
-        if grid.Level != self.max_grid_level:
+        if grid.Level != self.min_grid_level + self.number_of_levels - 1:
             ug.cell_visibility_array = grid.child_mask.transpose().ravel()
         self._ugs.append(ug)
         self._hdata_set.set_data_set(level, gid, left_index, right_index, ug)
