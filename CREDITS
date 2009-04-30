@@ -1,0 +1,12 @@
+YT is a group effort.
+
+Lead Developer:                     Matthew Turk (matthewturk@gmail.com)
+Orion Support:                      Jeff Oishi (jsoishi@gmail.com)
+Cosmology & Fragmentation Analysis: Britton Smith (brittonsmith@gmail.com)
+Galaxy Merger Trees:                Stephen Skory (sskory@physics.ucsd.edu)
+
+We also include the Delaunay Triangulation module written by Robert Kern of
+Enthought, the cmdln.py module by Trent Mick, and the progressbar module by
+Nilton Volpato.
+
+Thanks to everyone for all your contributions!
