@@ -1205,6 +1205,26 @@ class AMRProjBase(AMR2DData):
         return  "%s/%s" % \
             (self._top_node, self.axis)
 
+class AMRFixedResProjection(AMR2DData):
+    _top_node = "/Projections"
+    _type_name = "fixed_res_proj"
+    _con_args = ('axis', 'field', 'weight_field')
+    def __init__(self, axis, left_edge, right_edge, depth=None,
+                 fields = None, pf=None, **kwargs):
+        """
+        A projection that provides fixed resolution output,
+        operating in a grid-by-grid fashion.
+        """
+        AMR2DData.__init__(self, axis, fields, pf, **kwargs)
+        self.left_edge = na.array(left_edge)
+        self.right_edge = na.array(right_edge)
+        if depth is None:
+            depth = 0.5*(self.right_edge - self.left_edge).sum()
+        self.depth = depth
+
+    def _get_list_of_grids(self):
+        pass
+
 class AMR3DData(AMRData, GridPropertiesMixin):
     _key_fields = ['x','y','z','dx','dy','dz']
     """
@@ -2064,6 +2084,148 @@ class AMRSmoothedCoveringGridBase(AMRCoveringGridBase):
     def flush_data(self, *args, **kwargs):
         raise KeyError("Can't do this")
 
+class AMRNewCoveringGridBase(AMR3DData):
+    _spatial = True
+    _type_name = "new_covering_grid"
+    _con_argss = ('level', 'left_edge', 'right_edge', 'ActiveDimensions')
+    def __init__(self, level, left_edge, dims, fields = None,
+                 pf = None, num_ghost_zones = 0, use_pbar = True, **kwargs):
+        AMR3DData.__init__(self, center=None, fields=fields, pf=pf, **kwargs)
+        self.left_edge = na.array(left_edge)
+        self.level = level
+        self.dds = self.pf.h.select_grids(self.level)[0].dds.copy()
+        self.ActiveDimensions = na.array(dims)
+        self.right_edge = self.left_edge + self.ActiveDimensions*self.dds
+        self._num_ghost_zones = num_ghost_zones
+        self._use_pbar = use_pbar
+        self.global_startindex = na.rint(self.left_edge/self.dds).astype('int64')
+        self.domain_width = na.rint((self.pf["DomainRightEdge"] -
+                    self.pf["DomainLeftEdge"])/self.dds).astype('int64')
+        self._refresh_data()
+
+    def _get_list_of_grids(self, buffer = 0.0):
+        if self._grids is not None: return
+        if na.any(self.left_edge - buffer < self.pf["DomainLeftEdge"]) or \
+           na.any(self.right_edge + buffer > self.pf["DomainRightEdge"]):
+            grids,ind = self.pf.hierarchy.get_periodic_box_grids(
+                            self.left_edge - buffer,
+                            self.right_edge + buffer)
+            ind = slice(None)
+        else:
+            grids,ind = self.pf.hierarchy.get_box_grids(
+                            self.left_edge - buffer,
+                            self.right_edge + buffer)
+        level_ind = (self.pf.hierarchy.gridLevels.ravel()[ind] <= self.level)
+        sort_ind = na.argsort(self.pf.h.gridLevels.ravel()[ind][level_ind])
+        self._grids = self.pf.hierarchy.grids[ind][level_ind][(sort_ind,)][::-1]
+
+    def _refresh_data(self):
+        AMR3DData._refresh_data(self)
+        self['dx'] = self.dds[0] * na.ones(self.ActiveDimensions, dtype='float64')
+        self['dy'] = self.dds[1] * na.ones(self.ActiveDimensions, dtype='float64')
+        self['dz'] = self.dds[2] * na.ones(self.ActiveDimensions, dtype='float64')
+
+    def get_data(self, fields=None):
+        if self._grids is None:
+            self._get_list_of_grids()
+        if fields is None:
+            fields = self.fields[:]
+        else:
+            fields = ensure_list(fields)
+        obtain_fields = []
+        for field in fields:
+            if self.data.has_key(field): continue
+            if field not in self.hierarchy.field_list:
+                try:
+                    #print "Generating", field
+                    self._generate_field(field)
+                    continue
+                except NeedsOriginalGrid, ngt_exception:
+                    pass
+            obtain_fields.append(field)
+            self[field] = na.zeros(self.ActiveDimensions, dtype='float64') -999
+        if len(obtain_fields) == 0: return
+        mylog.debug("Getting fields %s from %s possible grids",
+                   obtain_fields, len(self._grids))
+        if self._use_pbar: pbar = \
+                get_pbar('Searching grids for values ', len(self._grids))
+        for i, grid in enumerate(self._grids):
+            if self._use_pbar: pbar.update(i)
+            self._get_data_from_grid(grid, obtain_fields)
+            if not na.any(self[obtain_fields[0]] == -999): break
+        if self._use_pbar: pbar.finish()
+        if na.any(self[obtain_fields[0]] == -999):
+            # and self.dx < self.hierarchy.grids[0].dx:
+            n_bad = na.where(self[obtain_fields[0]]==-999)[0].size
+            mylog.error("Covering problem: %s cells are uncovered", n_bad)
+            raise KeyError(n_bad)
+            
+    def _generate_field(self, field):
+        if self.pf.field_info.has_key(field):
+            # First we check the validator; this might even raise!
+            self.pf.field_info[field].check_available(self)
+            self[field] = self.pf.field_info[field](self)
+        else: # Can't find the field, try as it might
+            raise exceptions.KeyError(field)
+
+    def flush_data(self, field=None):
+        """
+        Any modifications made to the data in this object are pushed back
+        to the originating grids, except the cells where those grids are both
+        below the current level `and` have child cells.
+        """
+        self._get_list_of_grids()
+        # We don't generate coordinates here.
+        if field == None:
+            fields_to_get = self.fields
+        else:
+            fields_to_get = ensure_list(field)
+        for grid in self._grids:
+            self._flush_data_to_grid(grid, fields_to_get)
+
+    @restore_grid_state
+    def _get_data_from_grid(self, grid, fields):
+        ll = int(grid.Level == self.level)
+        ref_ratio = self.pf["RefineBy"]**(self.level - grid.Level)
+        g_fields = [grid[field] for field in fields]
+        c_fields = [self[field] for field in fields]
+        PointCombine.FillRegion(ref_ratio,
+            grid.get_global_startindex(), self.global_startindex,
+            c_fields, g_fields, 
+            self.ActiveDimensions, grid.ActiveDimensions,
+            grid.child_mask, self.domain_width, ll, 0)
+
+    def _flush_data_to_grid(self, grid, fields):
+        ll = int(grid.Level == self.level)
+        ref_ratio = self.pf["RefineBy"]**(self.level - grid.Level)
+        g_fields = []
+        for field in fields:
+            if not grid.has_key(field): grid[field] = \
+               na.zeros(grid.ActiveDimensions, dtype=self[field].dtype)
+            g_fields.append(grid[field])
+        c_fields = [self[field] for field in fields]
+        PointCombine.FillRegion(ref_ratio,
+            grid.get_global_startindex(), self.global_startindex,
+            c_fields, g_fields, 
+            self.ActiveDimensions, grid.ActiveDimensions,
+            grid.child_mask, self.domain_width, ll, 1)
+
+    @property
+    def LeftEdge(self):
+        return self.left_edge
+
+    @property
+    def RightEdge(self):
+        return self.right_edge
+
+class AMRNewSmoothedCoveringGridBase(AMRNewCoveringGridBase):
+    def _get_list_of_grids(self):
+        buffer = self.pf.h.select_grids(0)[0].dds
+        AMRNewCoveringGridBase._get_list_of_grids(buffer)
+        self._grids = self._grids[::-1]
+
+    def _get_data_from_grid(self, grid, fields):
+        pass
 
 class EnzoOrthoRayBase(AMROrthoRayBase): pass
 class EnzoRayBase(AMRRayBase): pass
