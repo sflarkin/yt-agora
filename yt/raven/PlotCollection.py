@@ -5,7 +5,7 @@ Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
 Homepage: http://yt.enzotools.org/
 License:
-  Copyright (C) 2007-2008 Matthew Turk.  All Rights Reserved.
+  Copyright (C) 2007-2009 Matthew Turk.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -25,9 +25,18 @@ License:
 
 from yt.raven import *
 
-class PlotCollection:
+# No better place to put this
+def concatenate_pdfs(output_fn, input_fns):
+    from pyPdf import PdfFileWriter, PdfFileReader
+    outfile = PdfFileWriter()
+    for fn in input_fns:
+        infile = PdfFileReader(open(fn, 'rb'))
+        outfile.addPage(infile.getPage(0))
+    outfile.write(open(output_fn, "wb"))
+
+class PlotCollection(object):
     __id_counter = 0
-    def __init__(self, pf, deliverator_id=-1, center=None):
+    def __init__(self, pf, center=None, deliverator_id=-1):
         """
         Generate a collection of linked plots using *pf* as a source,
         optionally submitting to the deliverator with *deliverator_id*
@@ -39,9 +48,9 @@ class PlotCollection:
         self._run_id = deliverator_id
         self.pf = pf
         if center == None:
-            v,self.c = pf.h.findMax("Density") # @todo: ensure no caching
+            v,self.c = pf.h.find_max("Density") # @todo: ensure no caching
         else:
-            self.c = center
+            self.c = na.array(center, dtype='float64')
         if deliverator_id > 0:
             self.submit = True
             self._run_id = deliverator_id
@@ -53,6 +62,10 @@ class PlotCollection:
             self.submit = False
         mylog.info("Created plot collection with default plot-center = %s",
                     list(self.c))
+
+    def __iter__(self):
+        for p in self.plots:
+            yield p
 
     def save(self, basename, format="png", override=False):
         """
@@ -146,8 +159,7 @@ class PlotCollection:
         self.plots.append(plot)
         return plot
 
-    def add_slice(self, field, axis, coord=None, center=None,
-                 use_colorbar=True, figure = None, axes = None, fig_size=None):
+    def add_slice(self, *args, **kwargs):
         """
         Generate a slice through *field* along *axis*, optionally at
         [axis]=*coord*, with the *center* attribute given (some 
@@ -156,22 +168,55 @@ class PlotCollection:
         providing pre-existing Matplotlib *figure* and *axes* objects.
         *fig_size* in (height_inches, width_inches)
         """
+        return self.__add_slice(PlotTypes.SlicePlot, *args, **kwargs)
+
+    def add_slice_interpolated(self, *args, **kwargs):
+        """
+        Generate a slice through *field* along *axis*, optionally at
+        [axis]=*coord*, with the *center* attribute given (some 
+        degeneracy with *coord*, but not complete), with *use_colorbar*
+        specifying whether the plot is naked or not and optionally
+        providing pre-existing Matplotlib *figure* and *axes* objects.
+        *fig_size* in (height_inches, width_inches)
+
+        The slice will be interpolated using the delaunay module, with natural
+        neighbor interpolation.
+        """
+        return self.__add_slice(PlotTypes.SlicePlotNaturalNeighbor, *args, **kwargs)
+
+    def __add_slice(self, ptype, field, axis, coord=None, center=None,
+                 use_colorbar=True, figure = None, axes = None, fig_size=None,
+                 periodic = True, data_source = None, **kwargs):
         if center == None:
             center = self.c
         if coord == None:
             coord = center[axis]
-        slice = self.pf.hierarchy.slice(axis, coord, field, center)
-        p = self._add_plot(PlotTypes.SlicePlot(slice, field, use_colorbar=use_colorbar,
+        if data_source is None:
+            data_source = self.pf.hierarchy.slice(axis, coord, field, center, **kwargs)
+        p = self._add_plot(ptype(data_source, field, use_colorbar=use_colorbar,
                          axes=axes, figure=figure,
-                         size=fig_size))
+                         size=fig_size, periodic=periodic))
         mylog.info("Added slice of %s at %s = %s with 'center' = %s", field,
                     axis_names[axis], coord, list(center))
         p["Axis"] = lagos.axis_names[axis]
         return p
 
+    def add_particles(self, axis, width, p_size=1.0, col='k', stride=1.0,
+                      data_source=None):
+        LE = self.pf["DomainLeftEdge"].copy()
+        RE = self.pf["DomainRightEdge"].copy()
+        LE[axis] = self.c[axis] - width/2.0
+        RE[axis] = self.c[axis] + width/2.0
+        if data_source is None: data_source = self.pf.h.region(self.c, LE, RE)
+        p = self._add_plot(PlotTypes.ParticlePlot(data_source, axis,
+                                        width, p_size, col, stride))
+        p["Axis"] = lagos.axis_names[axis]
+        return p
+
     def add_cutting_plane(self, field, normal,
                           center=None, use_colorbar=True,
-                          figure = None, axes = None, fig_size=None, obj=None):
+                          figure = None, axes = None, fig_size=None, obj=None,
+                           **kwargs):
         """
         Generate a cutting plane of *field* with *normal*, centered at *center*
         (defaults to PlotCollection center) with *use_colorbar*
@@ -183,7 +228,7 @@ class PlotCollection:
         if center == None:
             center = self.c
         if not obj:
-            cp = self.pf.hierarchy.cutting(normal, center, field)
+            cp = self.pf.hierarchy.cutting(normal, center, field, **kwargs)
         else:
             cp = obj
         p = self._add_plot(PlotTypes.CuttingPlanePlot(cp, field,
@@ -194,9 +239,7 @@ class PlotCollection:
         p["Axis"] = "CuttingPlane"
         return p
 
-    def add_projection(self, field, axis, weight_field=None,
-                      center=None, use_colorbar=True,
-                      figure = None, axes = None, fig_size=None):
+    def add_projection(self, *args, **kwargs):
         """
         Generate a projection of *field* along *axis*, optionally giving
         a *weight_field*-weighted average with *use_colorbar*
@@ -204,12 +247,33 @@ class PlotCollection:
         providing pre-existing Matplotlib *figure* and *axes* objects.
         *fig_size* in (height_inches, width_inches)
         """
+        return self._add_projection(PlotTypes.ProjectionPlot, *args, **kwargs)
+
+    def add_projection_interpolated(self, *args, **kwargs):
+        """
+        Generate a projection of *field* along *axis*, optionally giving
+        a *weight_field*-weighted average with *use_colorbar*
+        specifying whether the plot is naked or not and optionally
+        providing pre-existing Matplotlib *figure* and *axes* objects.
+        *fig_size* in (height_inches, width_inches)
+
+        The projection will be interpolated using the delaunay module, with
+        natural neighbor interpolation.
+        """
+        return self._add_projection(PlotTypes.ProjectionPlotNaturalNeighbor, *args, **kwargs)
+
+    def _add_projection(self, ptype, field, axis, weight_field=None,
+                      center=None, use_colorbar=True,
+                      figure = None, axes = None, fig_size=None,
+                      periodic = True, data_source = None, **kwargs):
         if center == None:
             center = self.c
-        proj = self.pf.hierarchy.proj(axis, field, weight_field, center=center)
-        p = self._add_plot(PlotTypes.ProjectionPlot(proj, field,
+        if data_source is None:
+            data_source = self.pf.hierarchy.proj(axis, field, weight_field,
+                                center=center, **kwargs)
+        p = self._add_plot(ptype(data_source, field,
                          use_colorbar=use_colorbar, axes=axes, figure=figure,
-                         size=fig_size))
+                         size=fig_size, periodic=periodic))
         p["Axis"] = lagos.axis_names[axis]
         return p
 
@@ -228,7 +292,8 @@ class PlotCollection:
         memory-conservative status.
         """
         if x_bounds is None:
-            x_min, x_max = data_source[fields[0]].min(), data_source[fields[0]].max()
+            x_min, x_max = data_source.quantities["Extrema"](
+                            fields[0], lazy_reader=lazy_reader)[0]
         else:
             x_min, x_max = x_bounds
         profile = lagos.BinnedProfile1D(data_source,
@@ -237,8 +302,6 @@ class PlotCollection:
         if len(fields) > 1:
             profile.add_fields(fields[1], weight=weight, accumulation=accumulation)
         # These next two lines are painful.
-        profile.pf = self.pf
-        profile.hierarchy = self.pf.hierarchy
         if id is None: id = self._get_new_id()
         p = self._add_plot(PlotTypes.Profile1DPlot(profile, fields, id,
                                                    axes=axes, figure=figure))
@@ -277,11 +340,13 @@ class PlotCollection:
         arguments are identical to :meth:`add_profile_object`.
         """
         if x_bounds is None:
-            x_min, x_max = data_source[fields[0]].min(), data_source[fields[0]].max()
+            x_min, x_max = data_source.quantities["Extrema"](
+                                    fields[0], lazy_reader=lazy_reader)[0]
         else:
             x_min, x_max = x_bounds
         if y_bounds is None:
-            y_min, y_max = data_source[fields[1]].min(), data_source[fields[1]].max()
+            y_min, y_max = data_source.quantities["Extrema"](
+                                    fields[1], lazy_reader=lazy_reader)[0]
         else:
             y_min, y_max = y_bounds
         profile = lagos.BinnedProfile2D(data_source,
@@ -289,8 +354,6 @@ class PlotCollection:
                                      y_bins, fields[1], y_min, y_max, y_log,
                                      lazy_reader)
         # These next two lines are painful.
-        profile.pf = self.pf
-        profile.hierarchy = self.pf.hierarchy
         if id is None: id = self._get_new_id()
         p = self._add_plot(PlotTypes.PhasePlot(profile, fields, 
                                                id, cmap=cmap,
@@ -320,6 +383,22 @@ class PlotCollection:
         p["Axis"] = None
         return p
 
+    def add_fixed_resolution_plot(self, frb, field, center=None, use_colorbar=True,
+                      figure = None, axes = None, fig_size=None, **kwargs):
+        p = self._add_plot(PlotTypes.FixedResolutionPlot(frb, field,
+                         use_colorbar=use_colorbar, axes=axes, figure=figure,
+                         size=fig_size))
+        p["Axis"] = "na"
+        return p
+
+    def add_ortho_ray(self, axis, coords, field, axes = None,
+                      figure = None, **kwargs):
+        data_source = self.pf.h.ortho_ray(axis, coords, field)
+        p = self._add_plot(PlotTypes.LineQueryPlot(data_source,
+                [axis_names[axis], field], self._get_new_id(),
+                figure, axes, plot_options=kwargs))
+        return p
+
     def _get_new_id(self):
         self.__id_counter += 1
         return self.__id_counter-1
@@ -333,18 +412,31 @@ class PlotCollection:
             del self.plots[-1].data
             del self.plots[-1]
 
+    @rootonly
+    def save_book(self, filename):
+        from pyPdf import PdfFileWriter, PdfFileReader
+        outfile = PdfFileWriter()
+        fns = self.save("__temp", format="pdf")
+        concatenate_pdfs(filename, fns)
+        for fn in fns: os.unlink(fn)
+
 def wrap_pylab_newplot(func):
     @wraps(func)
     def pylabify(self, *args, **kwargs):
         # Let's assume that axes and figure are not in the positional
         # arguments -- probably safe!
         new_fig = self.pylab.figure()
+        try:
+            new_fig.canvas.set_window_title("%s" % (self.pf))
+        except AttributeError:
+            pass
         kwargs['axes'] = self.pylab.gca()
         kwargs['figure'] = self.pylab.gcf()
         retval = func(self, *args, **kwargs)
         retval._redraw_image()
         retval._fig_num = new_fig.number
         self.pylab.show()
+        self.pylab.draw()
         return retval
     return pylabify
 
@@ -352,30 +444,41 @@ def wrap_pylab_show(func):
     @wraps(func)
     def pylabify(self, *args, **kwargs):
         retval = func(self, *args, **kwargs)
-        self.pylab.show()
+        fig_num = self.pylab.gcf().number
+        for p in self.plots:
+            self.pylab.figure(p._fig_num)
+            self.pylab.draw()
+        self.pylab.figure(fig_num)
         return retval
     return pylabify
 
+class _Interactify(type):
+    # All inherited methods get wrapped if they start with add_ or set_
+    # So anything inheriting this automatically gets set up; additional
+    # wrappings can be done manually.  Note that this does NOT modify
+    # methods that are only in the subclasses.
+    def __init__(cls, name, bases, d):
+        super(_Interactify, cls).__init__(name, bases, d)
+        for base in bases:
+            for attrname in dir(base):
+                if attrname in d: continue # If overridden, don't reset
+                attr = getattr(cls, attrname)
+                if type(attr) == types.MethodType:
+                    if attrname.startswith("add_"):
+                        setattr(cls, attrname, wrap_pylab_newplot(attr))
+                    elif attrname.startswith("set_"):
+                        setattr(cls, attrname, wrap_pylab_show(attr))
+
 class PlotCollectionInteractive(PlotCollection):
-    add_slice = wrap_pylab_newplot(PlotCollection.add_slice)
-    add_cutting_plane = wrap_pylab_newplot(PlotCollection.add_cutting_plane)
-    add_projection = wrap_pylab_newplot(PlotCollection.add_projection)
-    add_profile_object = wrap_pylab_newplot(PlotCollection.add_profile_object)
-    add_phase_object = wrap_pylab_newplot(PlotCollection.add_phase_object)
-    
-    set_xlim = wrap_pylab_show(PlotCollection.set_xlim)
-    set_ylim = wrap_pylab_show(PlotCollection.set_ylim)
-    set_zlim = wrap_pylab_show(PlotCollection.set_zlim)
-    set_lim = wrap_pylab_show(PlotCollection.set_lim)
+    __metaclass__ = _Interactify
+
     autoscale = wrap_pylab_show(PlotCollection.autoscale)
-    set_width = wrap_pylab_show(PlotCollection.set_width)
-    set_cmap = wrap_pylab_show(PlotCollection.set_cmap)
     switch_field = wrap_pylab_show(PlotCollection.switch_field)
 
     def __init__(self, *args, **kwargs):
         import pylab
         self.pylab = pylab
-        PlotCollection.__init__(self, *args, **kwargs)
+        super(PlotCollectionInteractive, self).__init__(*args, **kwargs)
 
     def redraw(self):
         for plot in self.plots:
@@ -384,6 +487,53 @@ class PlotCollectionInteractive(PlotCollection):
 
     def clear_plots(self):
         for plot in self.plots:
-            self.pylab.figure(pylab._fig_num)
+            self.pylab.figure(plot._fig_num)
             self.pylab.clf()
-        PlotCollection.clear_data(self)
+        PlotCollection.clear_plots(self)
+
+def get_multi_plot(nx, ny, colorbar = 'vertical', bw = 4, dpi=300):
+    """
+    This returns *nx* and *ny* axes on a single figure, set up so that the
+    *colorbar* can be placed either vertically or horizontally in a bonus
+    column or row, respectively.  The axes all have base width of *bw* inches.
+    """
+    PlotTypes.Initialize()
+    hf, wf = 1.0/ny, 1.0/nx
+    fudge_x = fudge_y = 1.0
+    if colorbar.lower() == 'vertical':
+        fudge_x = nx/(0.25+nx)
+        fudge_y = 1.0
+    elif colorbar.lower() == 'horizontal':
+        fudge_x = 1.0
+        fudge_y = ny/(0.40+ny)
+    fig = matplotlib.figure.Figure((bw*nx/fudge_x, bw*ny/fudge_y), dpi=dpi)
+    fig.set_canvas(be.engineVals["canvas"](fig))
+    fig.subplots_adjust(wspace=0.0, hspace=0.0,
+                        top=1.0, bottom=0.0,
+                        left=0.0, right=1.0)
+    tr = []
+    print fudge_x, fudge_y
+    for j in range(ny):
+        tr.append([])
+        for i in range(nx):
+            left = i*wf*fudge_x
+            bottom = fudge_y*(1.0-(j+1)*hf) + (1.0-fudge_y)
+            ax = fig.add_axes([left, bottom, wf*fudge_x, hf*fudge_y])
+            tr[-1].append(ax)
+    cbars = []
+    if colorbar.lower() == 'horizontal':
+        for i in range(nx):
+            # left, bottom, width, height
+            # Here we want 0.10 on each side of the colorbar
+            # We want it to be 0.05 tall
+            # And we want a buffer of 0.15
+            ax = fig.add_axes([wf*(i+0.10)*fudge_x, hf*fudge_y*0.20,
+                               wf*(1-0.20)*fudge_x, hf*fudge_y*0.05])
+            cbars.append(ax)
+    elif colorbar.lower() == 'vertical':
+        for j in range(nx):
+            ax = fig.add_axes([wf*(nx+0.05)*fudge_x, hf*fudge_y*(ny-(j+0.95)),
+                               wf*fudge_x*0.05, hf*fudge_y*0.90])
+            ax.clear()
+            cbars.append(ax)
+    return fig, tr, cbars

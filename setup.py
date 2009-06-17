@@ -10,7 +10,7 @@ import setuptools
 APP = ['reason.py']
 DATA_FILES = []
 PY2APP_OPTIONS = {'argv_emulation': True}
-VERSION = "1.0dev"
+VERSION = "1.5dev"
 
 if os.path.exists('MANIFEST'): os.remove('MANIFEST')
 
@@ -24,6 +24,7 @@ def configuration(parent_package='',top_path=None):
                        quiet=True)
     
     config.make_config_py()
+    config.make_svn_version_py()
     config.add_subpackage('yt','yt')
     config.add_scripts("scripts/*")
 
@@ -53,7 +54,11 @@ def setup_package():
         keywords='astronomy astrophysics visualization amr adaptivemeshrefinement',
         install_requires = ['matplotlib', 'numpy','ipython'],
         extras_require = { 'GUI' : ['wxPython'],
-                           'storage' : ['tables'], },
+                           'storage' : ['h5py'], 
+                           'pdf' : ['pypdf']},
+        entry_points = { 'console_scripts' : [
+                            'yt = yt.commands:run_main',
+                       ]},
         author="Matthew J. Turk",
         author_email="matthewturk@gmail.com",
         url = "http://yt.enzotools.org/",

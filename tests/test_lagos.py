@@ -2,7 +2,7 @@
 Test that we can get outputs, and interact with them in some primitive ways.
 """
 
-# @TODO: Add unit test for deleting field from fieldInfo
+# @TODO: Add unit test for deleting field from FieldInfo
 
 import unittest, glob, os.path, os, sys, StringIO
 
@@ -15,8 +15,11 @@ ytcfg["yt","logFile"] = "False"
 ytcfg["yt","suppressStreamLogging"] = "True"
 ytcfg["lagos","serialize"] = "False"
 
+import cPickle
 import yt.lagos
+import yt.lagos.OutputTypes
 import numpy as na
+from yt.fido import ParameterFileStore
 
 # The dataset used is located at:
 # http://yt.spacepope.org/DD0018.zip
@@ -40,6 +43,41 @@ class LagosTestingBase:
         if hasattr(self,'ind_to_get'): del self.ind_to_get
         del self.OutputFile, self.hierarchy
         
+class TestParameterFileStore(unittest.TestCase):
+    def setUp(self):
+        self.original = (yt.config.ytcfg.get("yt","ParameterFileStore"),
+                         yt.config.ytcfg.get("lagos","serialize"))
+        ytcfg['yt','ParameterFileStore'] = "testing.csv"
+        pfs = ParameterFileStore()
+        os.unlink(pfs._get_db_name())
+        self.pfs = ParameterFileStore() # __init__ gets called again
+        ytcfg['lagos', 'serialize'] = "True"
+
+    def testCacheFile(self):
+        pf1 = yt.lagos.EnzoStaticOutput(fn)
+        pf2 = self.pfs.get_pf_hash(pf1._hash())
+        self.assertTrue(pf1 is pf2)
+
+    def testGrabFile(self):
+        pf1 = yt.lagos.EnzoStaticOutput(fn)
+        hash = pf1._hash()
+        del pf1
+        pf2 = self.pfs.get_pf_hash(hash)
+        self.assertTrue(hash == pf2._hash())
+
+    def testGetCurrentTimeID(self):
+        pf1 = yt.lagos.EnzoStaticOutput(fn)
+        hash = pf1._hash()
+        ctid = pf1["CurrentTimeIdentifier"]
+        del pf1
+        pf2 = self.pfs.get_pf_ctid(ctid)
+        self.assertTrue(hash == pf2._hash())
+
+    def tearDown(self):
+        os.unlink(self.pfs._get_db_name())
+        ytcfg['yt', 'ParameterFileStore'] = self.original[0]
+        ytcfg['lagos', 'serialize'] = self.original[1]
+        self.pfs.__init__()
 
 class TestHierarchy(LagosTestingBase, unittest.TestCase):
     def testGetHierarchy(self):
@@ -155,6 +193,10 @@ class DataTypeTestingBase:
     def setUp(self):
         LagosTestingBase.setUp(self)
 
+    def testRepr(self):
+        self.assertTrue(
+            ("%s" % self.data).startswith(self.data.__class__.__name__))
+
 class Data3DBase:
     def testProfileAccumulateMass(self):
         self.data.set_field_parameter("center",[0.5]*3)
@@ -166,9 +208,31 @@ class Data3DBase:
         v2 = na.abs(1.0 - v2/v1)
         self.assertAlmostEqual(v2, 0.0, 7)
 
+    def testExtractConnectedSetsNoCache(self):
+        mi = self.data["Density"].min() * 2.0
+        ma = self.data["Density"].max() * 0.99
+        cons, contours = self.data.extract_connected_sets(
+            "Density", 2, mi, ma)
+        self.assertEqual(len(contours), 2) # number of contour levels
+        self.assertEqual(len(contours[0]), 2)
+        self.assertEqual(len(contours[1]), 1)
+
+    def testExtractConnectedSetsCache(self):
+        mi = self.data["Density"].min() * 2.0
+        ma = self.data["Density"].max() * 0.99
+        cons, contours = self.data.extract_connected_sets(
+            "Density", 2, mi, ma, cache=True)
+        self.assertEqual(len(contours), 2) # number of contour levels
+        self.assertEqual(len(contours[0]), 2)
+        self.assertEqual(len(contours[1]), 1)
+
+    def testContoursCache(self):
+        cid = yt.lagos.identify_contours(self.data, "Density",
+                self.data["Density"].min()*2.00,
+                self.data["Density"].max()*1.01)
+        self.assertEqual(len(cid), 2)
+
     def testContoursObtain(self):
-        # As a note, unfortunately this dataset only has one sphere.
-        # Frownie face.
         cid = yt.lagos.identify_contours(self.data, "Density",
                 self.data["Density"].min()*2.00, self.data["Density"].max()*1.01)
         self.assertEqual(len(cid), 2)
@@ -189,8 +253,13 @@ class Data3DBase:
                     and na.all(v2 > self.data["Density"][cid[0]]))
         self.assertEqual(len(cid), 3)
 
+    def testPickle(self):
+        ps = cPickle.dumps(self.data)
+        pf, obj = cPickle.loads(ps)
+        self.assertEqual(obj["CellMassMsun"].sum(), self.data["CellMassMsun"].sum())
 
-for field in yt.lagos.fieldInfo.values():
+for field_name in yt.lagos.FieldInfo:
+    field = yt.lagos.FieldInfo[field_name]
     setattr(DataTypeTestingBase, "test%s" % field.name, _returnFieldFunction(field))
 
 field = "Temperature"
@@ -271,7 +340,7 @@ class TestDataCube(LagosTestingBase, unittest.TestCase):
             self.assertTrue(na.all(cube1["Density"] == cube2a["Density"]))
             self.assertTrue(na.all(cube1["Temperature"] == cube2b["Temperature"]))
     
-    def testFlushBack(self):
+    def testFlushBackToGrids(self):
         ml = self.hierarchy.max_level
         cg = self.hierarchy.covering_grid(3, [0.0]*3, [1.0]*3, [64,64,64])
         cg["Ones"] *= 2.0
@@ -279,8 +348,14 @@ class TestDataCube(LagosTestingBase, unittest.TestCase):
         for g in na.concatenate([self.hierarchy.select_grids(i) for i in range(3)]):
             self.assertEqual(g["Ones"].max(), 2.0)
             self.assertEqual(g["Ones"][g["Ones"]*g.child_mask>0].min(), 2.0)
+
+    def testFlushBackToNewCover(self):
+        ml = self.hierarchy.max_level
+        cg = self.hierarchy.covering_grid(3, [0.0]*3, [1.0]*3, [64,64,64])
+        cg["tempContours"] = cg["Ones"] * 2.0
+        cg.flush_data(field="tempContours")
         cg2 = self.hierarchy.covering_grid(3, [0.0]*3, [1.0]*3, [64,64,64])
-        self.assertTrue(na.all(cg["Ones"] == cg2["Ones"]))
+        self.assertTrue(na.all(cg["tempContours"] == cg2["tempContours"]))
 
     def testRawFlushBack(self):
         ml = self.hierarchy.max_level
@@ -303,6 +378,10 @@ class TestDataCube(LagosTestingBase, unittest.TestCase):
         self.assertTrue(cg["Density"].min() \
                      == self.hierarchy.grids[0]["Density"].min())
 
+    def testCellVolume(self):
+        cg = self.hierarchy.covering_grid(2, [0.0]*3, [1.0]*3, [64,64,64])
+        self.assertEqual(na.unique(cg["CellVolume"]).size, 1)
+
 class TestDiskDataType(Data3DBase, DataTypeTestingBase, LagosTestingBase, unittest.TestCase):
     def setUp(self):
         DataTypeTestingBase.setUp(self)
@@ -315,6 +394,37 @@ class TestRegionDataType(Data3DBase, DataTypeTestingBase, LagosTestingBase, unit
         self.data=self.hierarchy.region(
                      [0.5,0.5,0.5],[0.0, 0.0, 0.0],
                      [1.0, 1.0, 1.0])
+    def testVolume(self):
+        vol = self.data["CellVolume"].sum() / self.data.convert("cm")**3.0
+        self.assertAlmostEqual(vol,1.0,7)
+
+class TestRegionStrictDataType(Data3DBase, DataTypeTestingBase, LagosTestingBase, unittest.TestCase):
+    def setUp(self):
+        DataTypeTestingBase.setUp(self)
+        self.data=self.hierarchy.region_strict(
+                     [0.5,0.5,0.5],[0.0, 0.0, 0.0],
+                     [1.0, 1.0, 1.0])
+    def testVolume(self):
+        vol = self.data["CellVolume"].sum() / self.data.convert("cm")**3.0
+        self.assertAlmostEqual(vol,1.0,7)
+
+class TestPeriodicRegionDataType(Data3DBase, DataTypeTestingBase, LagosTestingBase, unittest.TestCase):
+    def setUp(self):
+        DataTypeTestingBase.setUp(self)
+        self.data=self.hierarchy.periodic_region(
+                     [0.5,0.5,0.5],[0.5, 0.5, 0.5],
+                     [1.5,1.5,1.5])
+    def testVolume(self):
+        vol = self.data["CellVolume"].sum() / self.data.convert("cm")**3.0
+        self.assertAlmostEqual(vol,1.0,7)
+
+class TestPeriodicRegionStrictDataType(Data3DBase,
+            DataTypeTestingBase, LagosTestingBase, unittest.TestCase):
+    def setUp(self):
+        DataTypeTestingBase.setUp(self)
+        self.data=self.hierarchy.periodic_region_strict(
+                     [0.5,0.5,0.5],[0.5, 0.5, 0.5],
+                     [1.5,1.5,1.5])
     def testVolume(self):
         vol = self.data["CellVolume"].sum() / self.data.convert("cm")**3.0
         self.assertAlmostEqual(vol,1.0,7)
@@ -335,7 +445,7 @@ class TestSliceDataType(DataTypeTestingBase, LagosTestingBase, unittest.TestCase
 class TestCuttingPlane(DataTypeTestingBase, LagosTestingBase, unittest.TestCase):
     def setUp(self):
         DataTypeTestingBase.setUp(self)
-        self.data = self.hierarchy.cutting([0.1,0.3,0.4], [0.5,0.5,0.5])
+        self.data = self.hierarchy.cutting([0.1,0.3,0.4], [0.5,0.5,0.5], ["Density"])
     def testAxisVectors(self):
         x_v = self.data._x_vec
         y_v = self.data._y_vec
@@ -366,6 +476,13 @@ class TestExtractFromSphere(TestSphereDataType):
             / self.data.convert("cm")**3.0
         self.assertAlmostEqual(vol,1.0,7)
 
+    def testJoin(self):
+        new_region = self.region.extract_region(
+                self.region["Temperature"]<=500)
+        joined_region = self.data.join(new_region)
+        self.assertEqual(joined_region["CellMassMsun"].sum(),
+                         self.region["CellMassMsun"].sum())
+
 class TestExtractFromRegion(TestRegionDataType):
     def setUp(self):
         TestRegionDataType.setUp(self)
@@ -380,6 +497,14 @@ class TestExtractFromRegion(TestRegionDataType):
         vol = self.region.extract_region(ind_to_get)["CellVolume"].sum() \
             / self.data.convert("cm")**3.0
         self.assertAlmostEqual(vol,1.0,7)
+
+    def testJoin(self):
+        new_region = self.region.extract_region(
+                self.region["Temperature"]<=500)
+        joined_region = self.data.join(new_region)
+        self.assertEqual(joined_region["CellMassMsun"].sum(),
+                         self.region["CellMassMsun"].sum())
+
 
 class TestUnilinearInterpolator(unittest.TestCase):
     def setUp(self):

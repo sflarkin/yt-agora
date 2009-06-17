@@ -5,7 +5,7 @@ Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
 Homepage: http://yt.enzotools.org/
 License:
-  Copyright (C) 2007-2008 Matthew Turk.  All Rights Reserved.
+  Copyright (C) 2007-2009 Matthew Turk.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -26,7 +26,6 @@ License:
 
 import yt.lagos as lagos
 import yt.raven as raven
-import yt.enki as enki
 import yt.fido as fido
 import yt
 

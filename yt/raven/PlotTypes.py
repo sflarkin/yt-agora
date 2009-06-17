@@ -7,7 +7,7 @@ Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
 Homepage: http://yt.enzotools.org/
 License:
-  Copyright (C) 2007-2008 Matthew Turk.  All Rights Reserved.
+  Copyright (C) 2007-2009 Matthew Turk.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -30,73 +30,48 @@ from yt.funcs import *
 
 import _MPL
 
-# We only get imported if matplotlib was imported successfully
-
-def ClusterFilePlot(cls, x, y, xlog=None, ylog=None, fig=None, filename=None,
-                    format="png", xbounds = None, ybounds = None):
-    """
-
-    """
-    if not fig:
-        from matplotlib.backends.backend_agg import FigureCanvasAgg
-        fig = matplotlib.figure.Figure(figsize=(8,8))
-        canvas = FigureCanvasAgg(fig)
-    ax = fig.add_subplot(111)
-    if not iterable(cls):
-        cls = [cls]
-    if xlog == None:
-        if lagos.CFfieldInfo.has_key(x):
-            xlog = lagos.CFfieldInfo[x][2]
-    if ylog == None:
-        if lagos.CFfieldInfo.has_key(y):
-            ylog = lagos.CFfieldInfo[y][2]
-    if xlog and ylog:
-        pp=ax.loglog
-    elif xlog and not ylog:
-        pp=ax.semilogx
-    elif ylog and not xlog:
-        pp=ax.semilogy
-    else:
-        pp=ax.plot
-
-    fig.hold(True)
-    colors = 'krbgm' * 10
-    for cl, cc in zip(cls, colors):
-        #pp(cl[x],cl[y], lw=2.5)
-        pp(cl[x], cl[y], lw=2.5, color=cc)
-    if lagos.CFfieldInfo.has_key(x):
-        ax.set_xlabel(lagos.CFfieldInfo[x][1], fontsize=18)
-        print lagos.CFfieldInfo[x][1]
-    if lagos.CFfieldInfo.has_key(y):
-        ax.set_ylabel(lagos.CFfieldInfo[y][1], fontsize=18)
-        print lagos.CFfieldInfo[y][1]
-    if xbounds:
-        ax.set_xlim(xbounds)
-    if ybounds:
-        ax.set_ylim(ybounds)
-    ax.axesFrame.set_linewidth(2)
-    for tickLabel in ax.get_xticklabels() + ax.get_yticklabels():
-        tickLabel.set_fontsize(14)
-    if filename:
-        canvas.print_figure(filename, format=format)
-    return fig
-
 engineVals = {}
 
 def Initialize(*args, **kwargs):
     engineVals["initialized"] = True
-    if not kwargs.has_key("canvas"):
+    if 'canvas' in kwargs:
+        FigureCanvas = kwargs["canvas"]
+    else:
         from matplotlib.backends.backend_agg \
                 import FigureCanvasAgg as FigureCanvas
-    else:
-        FigureCanvas = kwargs["canvas"]
     engineVals["canvas"] = FigureCanvas
     return
 
-def CleanUp(*args, **kwargs):
-    pass
+class CallbackRegistryHandler(object):
+    def __init__(self, plot):
+        self.plot = plot
+        self._callbacks = {}
 
-class RavenPlot:
+    def __getitem__(self, item):
+        if item not in self._callbacks:
+            raise KeyError(item)
+        cb = self._callbacks[item]
+
+        @wraps(cb)
+        def get_wrapper(*args, **kwargs):
+            cbo = cb(*args, **kwargs)
+            return self.plot.add_callback(cbo)
+
+        return get_wrapper
+
+    def __setitem__(self, item, val):
+        self._callbacks[item] = val
+
+    def __delitem__(self, item):
+        del self._callbacks[item]
+
+    def __iter__(self):
+        for k in sorted(self._callbacks): yield k
+
+    def keys(self):
+        return self._callbacks.keys()
+
+class RavenPlot(object):
 
     datalabel = None
     colorbar = None
@@ -107,6 +82,7 @@ class RavenPlot:
         self.set_autoscale(True)
         self.im = defaultdict(lambda: "")
         self["ParameterFile"] = "%s" % self.data.pf
+        self.pf = self.data.pf
         self.axis_names = {}
         if not figure:
             self._figure = matplotlib.figure.Figure(size)
@@ -117,6 +93,7 @@ class RavenPlot:
         else:
             self._axes = axes
         self._callbacks = []
+        self._setup_callback_registry()
 
     def set_autoscale(self, val):
         self.do_autoscale = val
@@ -124,7 +101,7 @@ class RavenPlot:
     def __getitem__(self, item):
         return self.data[item] # Should be returned in CGS
 
-    def save_image(self, prefix, format, submit=None, override=False):
+    def save_image(self, prefix, format="png", submit=None, override=True):
         """
         Save this plot image.  Will generate a filename based on the *prefix*,
         *format*.  *submit* will govern the submission to the Deliverator and
@@ -138,10 +115,9 @@ class RavenPlot:
             my_prefix = prefix
         fn = ".".join([my_prefix, format])
         canvas = engineVals["canvas"](self._figure)
-        #self._figure.savefig(fn, format)
-        canvas.print_figure(fn)
+        only_on_root(canvas.print_figure, fn)
         self["Type"] = self._type_name
-        self["GeneratedAt"] = self.data.hierarchy["CurrentTimeIdentifier"]
+        self["GeneratedAt"] = self.data.pf["CurrentTimeIdentifier"]
         return fn
 
     def _redraw_image(self):
@@ -214,10 +190,10 @@ class RavenPlot:
         self.datalabel = label
         if self.colorbar != None: self.colorbar.set_label(str(label))
 
-    def setup_domain_edges(self, axis):
+    def setup_domain_edges(self, axis, periodic=False):
         DLE = self.data.pf["DomainLeftEdge"]
         DRE = self.data.pf["DomainRightEdge"]
-        DD = DRE - DLE
+        DD = float(periodic)*(DRE - DLE)
         if axis < 3:
             xax = lagos.x_dict[axis]
             yax = lagos.y_dict[axis]
@@ -225,17 +201,25 @@ class RavenPlot:
             self.xmax = DRE[xax] + DD[xax]
             self.ymin = DLE[yax] - DD[yax]
             self.ymax = DRE[yax] + DD[yax]
+            self._period = (DD[xax], DD[yax])
         else:
             # Not quite sure how to deal with this, particularly
             # in the Orion case.  Cutting planes are tricky.
             self.xmin = self.ymin = 0.0
             self.xmax = self.ymax = 1.0
 
+    def _setup_callback_registry(self):
+        from yt.raven.Callbacks import callback_registry
+        self.modify = CallbackRegistryHandler(self)
+        for c in callback_registry.values():
+            if not hasattr(c, '_type_name'): continue
+            self.modify[c._type_name] = c
 
 class VMPlot(RavenPlot):
     _antialias = True
+    _period = (0.0, 0.0)
     def __init__(self, data, field, figure = None, axes = None,
-                 use_colorbar = True, size=None):
+                 use_colorbar = True, size=None, periodic = False):
         fields = ['X', 'Y', field, 'X width', 'Y width']
         if not size:
             size = (10,8)
@@ -243,14 +227,14 @@ class VMPlot(RavenPlot):
         RavenPlot.__init__(self, data, fields, figure, axes, size=size)
         self._figure.subplots_adjust(hspace=0, wspace=0, bottom=0.0,
                                     top=1.0, left=0.0, right=1.0)
-        self.setup_domain_edges(self.data.axis)
+        self.setup_domain_edges(self.data.axis, periodic)
         self.cmap = None
         self.__setup_from_field(field)
         self.__init_temp_image(use_colorbar)
 
     def __setup_from_field(self, field):
         self.set_log_field(field in lagos.log_fields
-                           or lagos.fieldInfo[field].take_log)
+                           or self.pf.field_info[field].take_log)
         self.axis_names["Z"] = field
 
     def set_log_field(self, val):
@@ -300,14 +284,14 @@ class VMPlot(RavenPlot):
                             self.data['pdx'],
                             self.data['pdy'],
                             self[self.axis_names["Z"]],
-                            int(width), int(width),
-                            (x0, x1, y0, y1),aa).transpose()
+                            int(height), int(width),
+                            (x0, x1, y0, y1),aa,self._period).transpose()
         return buff
 
     def _redraw_image(self, *args):
         self._axes.clear() # To help out the colorbar
         buff = self._get_buff()
-        mylog.debug("Received buffer of min %s and max %s (%s %s)",
+        mylog.debug("Received buffer of min %s and max %s (data: %s %s)",
                     na.nanmin(buff), na.nanmax(buff),
                     self[self.axis_names["Z"]].min(),
                     self[self.axis_names["Z"]].max())
@@ -320,13 +304,10 @@ class VMPlot(RavenPlot):
             newmax = na.nanmax(buff)
         if self.do_autoscale:
             self.norm.autoscale(na.array((newmin,newmax)))
+        aspect = (self.ylim[1]-self.ylim[0])/(self.xlim[1]-self.xlim[0])
         self.image = \
             self._axes.imshow(buff, interpolation='nearest', norm = self.norm,
-                            aspect=1.0, picker=True, origin='lower')
-        if self.cmap is not None:
-            self.image.set_cmap(self.cmap)
-            if self.colorbar is not None:
-                self.colorbar.set_cmap(self.cmap)
+                            aspect=aspect, picker=True, origin='lower')
         self._reset_image_parameters()
         self._run_callbacks()
 
@@ -340,8 +321,9 @@ class VMPlot(RavenPlot):
         if self.colorbar != None:
             self.image.set_norm(self.norm)
             self.colorbar.set_norm(self.norm)
+            if self.cmap: self.colorbar.set_cmap(self.cmap)
             if self.do_autoscale: _notify(self.image, self.colorbar)
-        self.autoset_label()
+        self._autoset_label()
 
     def set_xlim(self, xmin, xmax):
         self.xlim = (xmin,xmax)
@@ -359,8 +341,8 @@ class VMPlot(RavenPlot):
     def set_width(self, width, unit):
         self["Unit"] = str(unit)
         self["Width"] = float(width)
-        if isinstance(unit, types.StringType):
-            unit = self.data.hierarchy[unit]
+        if isinstance(unit, types.StringTypes):
+            unit = self.data.hierarchy[str(unit)]
         self.width = width / unit
         self._refresh_display_width()
 
@@ -395,44 +377,109 @@ class VMPlot(RavenPlot):
 
     def switch_z(self, field):
         self.set_log_field(field in lagos.log_fields
-                           or lagos.fieldInfo[field].take_log)
+                           or self.pf.field_info[field].take_log)
         self.axis_names["Z"] = field
         self._redraw_image()
 
     def selfSetup(self):
         pass
 
+    def _autoset_label(self):
+        if self.datalabel is None:
+            field_name = self.axis_names["Z"]
+            proj = "Proj" in self._type_name and \
+                   self.data._weight is None
+            data_label = self.pf.field_info[field_name].get_label(proj)
+        else: data_label = self.datalabel
+        if self.colorbar != None:
+            self.colorbar.set_label(str(data_label))
+
+class FixedResolutionPlot(VMPlot):
+
+    # This is a great argument in favor of changing the name
+    # from VMPlot to something else
+
+    _type_name = "FixedResolution"
+
+    def _get_buff(self, width=None):
+        return self.data[self.axis_names["Z"]]
+
+    def set_width(self, width, unit):
+        #mylog.debug("Not changing FixedResolution width")
+        self._refresh_display_width()
+
+    def _refresh_display_width(self, width=None):
+        self.set_xlim(self.data.bounds[0], self.data.bounds[1])
+        self.set_ylim(self.data.bounds[2], self.data.bounds[3])
+        self._redraw_image()
+
+    def setup_domain_edges(self, *args, **kwargs):
+        return
+
 class SlicePlot(VMPlot):
     _type_name = "Slice"
 
-    def autoset_label(self):
-        if self.datalabel != None:
-            self.colorbar.set_label(str(self.datalabel))
-            return
-        field_name = self.axis_names["Z"]
-        data_label = r"$\rm{%s}" % field_name.replace("_","\hspace{0.5}")
-        if lagos.fieldInfo.has_key(field_name):
-            data_label += r"\/\/ (%s)" % (lagos.fieldInfo[field_name].get_units())
-        data_label += r"$"
-        if self.colorbar != None: self.colorbar.set_label(str(data_label))
+    def show_velocity(self, factor = 16, bv_radius = None):
+        xax = lagos.x_dict[self.data.axis]
+        yax = lagos.y_dict[self.data.axis]
+        xf = "%s-velocity" % (lagos.axis_names[xax])
+        yf = "%s-velocity" % (lagos.axis_names[yax])
+        if bv_radius is not None:
+            sp = self.data.pf.h.sphere(self.data.center, bv_radius)
+            bv = sp.quantities["BulkVelocity"]()
+            self.data[xf + "_bv"] = self.data[xf] - bv[xax]
+            self.data[yf + "_bv"] = self.data[yf] - bv[yax]
+            xf += "_bv"; yf += "_bv"
+        from Callbacks import QuiverCallback
+        self.add_callback(QuiverCallback(xf, yf, factor))
+
+class NNVMPlot:
+    def _get_buff(self, width=None):
+        import delaunay as de
+        x0, x1 = self.xlim
+        y0, y1 = self.ylim
+        if width is None:
+            l, b, width, height = _get_bounds(self._axes.bbox)
+        else:
+            height = width
+        self.pix = (width,height)
+        numPoints_x = int(width)
+        numPoints_y = int(width)
+        dx = numPoints_x / (x1-x0)
+        dy = numPoints_y / (y1-y0)
+        xlim = na.logical_and(self.data["px"]+2.0*self.data['pdx'] >= x0,
+                              self.data["px"]-2.0*self.data['pdx'] <= x1)
+        ylim = na.logical_and(self.data["py"]+2.0*self.data['pdy'] >= y0,
+                              self.data["py"]-2.0*self.data['pdy'] <= y1)
+        wI = na.where(na.logical_and(xlim,ylim))
+        xi, yi = na.mgrid[0:numPoints_x, 0:numPoints_y]
+        x = (self.data["px"][wI]-x0)*dx
+        y = (self.data["py"][wI]-y0)*dy
+        z = self.data[self.axis_names["Z"]][wI]
+        if self.log_field: z=na.log10(z)
+        buff = de.Triangulation(x,y).nn_interpolator(z)(xi,yi)
+        buff = buff.clip(z.min(), z.max())
+        if self.log_field: buff = 10**buff
+        return buff.transpose()
+
+
+class SlicePlotNaturalNeighbor(NNVMPlot, SlicePlot):
+    _type_name = "NNSlice"
 
 class ProjectionPlot(VMPlot):
 
     _type_name = "Projection"
-    def autoset_label(self):
-        if self.datalabel != None:
-            self.colorbar.set_label(str(self.datalabel))
-            return
-        field_name = self.axis_names["Z"]
-        data_label = r"$\rm{%s}" % field_name.replace("_","\hspace{0.5}")
-        if lagos.fieldInfo.has_key(field_name):
-            data_label += r"\/\/ (%s)" % (lagos.fieldInfo[field_name].get_projected_units())
-        data_label += r"$"
-        if self.colorbar != None: self.colorbar.set_label(str(data_label))
 
     def switch_z(self, field):
         mylog.warning("Choosing not to change the field of a projection instance")
 
+    def _generate_prefix(self, prefix):
+        VMPlot._generate_prefix(self, prefix)
+        if self.data._weight is not None:
+            self.prefix += "_%s" % (self.data._weight)
+
+class ProjectionPlotNaturalNeighbor(NNVMPlot, ProjectionPlot):
+    _type_name = "NNProj"
 
 class CuttingPlanePlot(SlicePlot):
 
@@ -474,9 +521,77 @@ class CuttingPlanePlot(SlicePlot):
         self.set_ylim(l_edge_y, r_edge_y) # At some point, perhaps calculate them?
         self._redraw_image()
 
+class ParticlePlot(RavenPlot):
+
+    _type_name = "ParticlePlot"
+    def __init__(self, data, axis, width, p_size=1.0, col='k', stride=1.0,
+                 figure = None, axes = None):
+        RavenPlot.__init__(self, data, [], figure, axes)
+        self._figure.subplots_adjust(hspace=0, wspace=0, bottom=0.0,
+                                    top=1.0, left=0.0, right=1.0)
+        self.axis = axis
+        self.setup_domain_edges(axis)
+        self.axis_names['Z'] = col
+        from Callbacks import ParticleCallback
+        self.add_callback(ParticleCallback(axis, width, p_size, col, stride))
+        self.set_width(1,'unitary')
+
+    def _redraw_image(self, *args):
+        self._axes.clear() # To help out the colorbar
+        self._reset_image_parameters()
+        self._run_callbacks()
+
+    def set_xlim(self, xmin, xmax):
+        self.xlim = (xmin,xmax)
+
+    def set_ylim(self, ymin, ymax):
+        self.ylim = (ymin,ymax)
+
+    def _generate_prefix(self, prefix):
+        self.prefix = "_".join([prefix, self._type_name, \
+            lagos.axis_names[self.axis], self.axis_names['Z']])
+        self["Field1"] = self.axis_names["Z"]
+        self["Field2"] = None
+        self["Field3"] = None
+
+    def set_width(self, width, unit):
+        self["Unit"] = str(unit)
+        self["Width"] = float(width)
+        if isinstance(unit, types.StringTypes):
+            unit = self.data.hierarchy[str(unit)]
+        self.width = width / unit
+        self._refresh_display_width()
+
+    def _refresh_display_width(self, width=None):
+        if width:
+            self.width = width
+        else:
+            width = self.width
+        if iterable(width):
+            width_x, width_y = width
+        else:
+            width_x = width
+            width_y = width
+        l_edge_x = self.data.center[lagos.x_dict[self.axis]] - width_x/2.0
+        r_edge_x = self.data.center[lagos.x_dict[self.axis]] + width_x/2.0
+        l_edge_y = self.data.center[lagos.y_dict[self.axis]] - width_y/2.0
+        r_edge_y = self.data.center[lagos.y_dict[self.axis]] + width_y/2.0
+        self.set_xlim(max(l_edge_x,self.xmin), min(r_edge_x,self.xmax))
+        self.set_ylim(max(l_edge_y,self.ymin), min(r_edge_y,self.ymax))
+        self._redraw_image()
+
+    def _reset_image_parameters(self):
+        self._axes.set_xticks(())
+        self._axes.set_yticks(())
+        self._axes.set_ylabel("")
+        self._axes.set_xlabel("")
+
 class ProfilePlot(RavenPlot):
+    _x_label = None
+    _y_label = None
+
     def setup_bins(self, field, func=None):
-        if field in lagos.fieldInfo and lagos.fieldInfo[field].take_log:
+        if field in self.pf.field_info and self.pf.field_info[field].take_log:
             log_field = True
             if func: func('log')
         else:
@@ -485,13 +600,18 @@ class ProfilePlot(RavenPlot):
         mylog.debug("Field: %s, log_field: %s", field, log_field)
         return log_field
 
-    def autoset_label(self, field, func):
-        dataLabel = r"$\rm{%s}" % (field.replace("_","\hspace{0.5}"))
-        if field in lagos.fieldInfo:
-            dataLabel += r" (%s)" % (lagos.fieldInfo[field].get_units())
-        dataLabel += r"$"
-        func(str(dataLabel))
+    def set_x_label(self, label):
+        self._axes.set_xlabel(label)
+        self._x_label = label
 
+    def set_y_label(self, label):
+        self._axes.set_ylabel(label)
+        self._y_label = label
+
+    def _autoset_label(self, field, function, axis):
+        label = getattr(self, '_%s_label' % axis)
+        if label is None: label = self.pf.field_info[field].get_label()
+        function(label)
 
 class Profile1DPlot(ProfilePlot):
 
@@ -531,8 +651,8 @@ class Profile1DPlot(ProfilePlot):
         func(self.data[self.fields[0]][indices],
              self.data[self.fields[1]][indices],
              **self.plot_options)
-        self.autoset_label(self.fields[0], self._axes.set_xlabel)
-        self.autoset_label(self.fields[1], self._axes.set_ylabel)
+        self._autoset_label(self.fields[0], self.set_x_label, 'x')
+        self._autoset_label(self.fields[1], self.set_y_label, 'y')
         self._run_callbacks()
 
     def set_log_field(self, val):
@@ -561,6 +681,8 @@ class PhasePlot(ProfilePlot):
     _type_name = "Profile2D"
     _xlim = None
     _ylim = None
+    _z_label = None
+
     def __init__(self, data, fields, id, ticker=None, cmap=None,
                  figure=None, axes=None):
         self._semi_unique_id = id
@@ -666,9 +788,9 @@ class PhasePlot(ProfilePlot):
         self.vals = vals
 
         _notify(self.image, self.colorbar)
-        self.autoset_label(self.fields[0], self._axes.set_xlabel)
-        self.autoset_label(self.fields[1], self._axes.set_ylabel)
-        self.autoset_label(self.fields[2], self.colorbar.set_label)
+        self._autoset_label(self.fields[0], self.set_x_label, 'x')
+        self._autoset_label(self.fields[1], self.set_y_label, 'y')
+        self._autoset_label(self.fields[2], self.set_z_label, 'z')
         self._run_callbacks()
 
     def _generate_prefix(self, prefix):
@@ -680,19 +802,85 @@ class PhasePlot(ProfilePlot):
         self["Field2"] = self.axis_names["Y"]
         self["Field3"] = self.axis_names["Z"]
 
-    def autoset_label(self, field_name, func):
+    def set_width(self, width, unit):
+        mylog.warning("Choosing not to change the width of a phase plot instance")
+
+    def set_z_label(self, label):
+        self.colorbar.set_label(label)
+        self._z_label = label
+
+class LineQueryPlot(RavenPlot):
+    _type_name = "LineQueryPlot"
+
+    def __init__(self, data, fields, id, ticker=None,
+                 figure=None, axes=None, plot_options=None):
+        self._semi_unique_id = id
+        RavenPlot.__init__(self, data, fields, figure, axes)
+
+        self.axis_names["X"] = fields[0]
+        self.axis_names["Y"] = fields[1]
+
+        self._log_x = False
+        if fields[1] in self.pf.field_info and \
+            self.pf.field_info[fields[1]].take_log:
+            self._log_y = True
+        else:
+            self._log_y = False
+
+        if plot_options is None: plot_options = {}
+        self.plot_options = plot_options
+
+    def _generate_prefix(self, prefix):
+        self.prefix = "_".join([prefix, self._type_name,
+                       str(self._semi_unique_id),
+                       self.axis_names['X'], self.axis_names['Y']])
+        self["Field1"] = self.axis_names["X"]
+        self["Field2"] = self.axis_names["Y"]
+
+    def _redraw_image(self):
+        self._axes.clear()
+        if not self._log_x and not self._log_y:
+            func = self._axes.plot
+        elif self._log_x and not self._log_y:
+            func = self._axes.semilogx
+        elif not self._log_x and self._log_y:
+            func = self._axes.semilogy
+        elif self._log_x and self._log_y:
+            func = self._axes.loglog
+        indices = na.argsort(self.data[self.fields[0]])
+        func(self.data[self.fields[0]][indices],
+             self.data[self.fields[1]][indices],
+             **self.plot_options)
+        self._autoset_label(self.fields[0], self._axes.set_xlabel)
+        self._autoset_label(self.fields[1], self._axes.set_ylabel)
+        self._run_callbacks()
+
+    def set_log_field(self, val):
+        if val:
+            self._log_y = True
+        else:
+            self._log_y = False
+
+    def switch_x(self, field, weight="CellMassMsun", accumulation=False):
+        self.fields[0] = field
+        self.axis_names["X"] = field
+    
+    def switch_z(self, field, weight="CellMassMsun", accumulation=False):
+        self.fields[1] = field
+        self.axis_names["Y"] = field
+
+    def _autoset_label(self, field_name, func):
         if self.datalabel != None:
             func(str(self.datalabel))
             return
         data_label = r"$\rm{%s}" % field_name.replace("_"," ")
-        if field_name in lagos.fieldInfo:
-            data_label += r"\/\/ (%s)" % (lagos.fieldInfo[field_name].get_units())
+        if field_name in self.pf.field_info:
+            data_label += r"\/\/ (%s)" % (self.pf.field_info[field_name].get_units())
         data_label += r"$"
         func(str(data_label))
 
-    def set_width(self, width, unit):
-        mylog.warning("Choosing not to change the width of a phase plot instance")
 
+    switch_y = switch_z # Compatibility...
 
 # Now we provide some convenience functions to get information about plots.
 # With Matplotlib 0.98.x, the 'transforms' branch broke backwards

@@ -6,7 +6,7 @@ Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
 Homepage: http://yt.enzotools.org/
 License:
-  Copyright (C) 2007-2008 Matthew Turk.  All Rights Reserved.
+  Copyright (C) 2007-2009 Matthew Turk.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -55,51 +55,28 @@ reasonLogger = logging.getLogger("yt.reason")
 mb = 10*1024*1024
 bc = 10
 
+loggers = []
+file_handlers = []
+
 if ytcfg.getboolean("yt","logfile") and os.access(".", os.W_OK):
-    if ytcfg.getboolean("yt","unifiedlogfile"):
-        log_file_name = ytcfg.get("yt","LogFileName")
-        ytHandler = handlers.RotatingFileHandler(log_file_name,
-                                                 maxBytes=mb, backupCount=bc)
-        k = logging.Formatter(fstring)
-        ytHandler.setFormatter(k)
-        ytLogger.addHandler(ytHandler)
-    else:
-        # If we *don't* want a unified file handler (which is the default now!)
-        fidoHandler = handlers.RotatingFileHandler("fido.log",
-                                                   maxBytes=mb, backupCount=bc)
-        fidoHandler.setFormatter(f)
-        fidoLogger.addHandler(fidoHandler)
-
-        ravenHandler = handlers.RotatingFileHandler("raven.log",
-                                                    maxBytes=mb, backupCount=bc)
-        ravenHandler.setFormatter(f)
-        ravenLogger.addHandler(ravenHandler)
-
-        lagosHandler = handlers.RotatingFileHandler("lagos.log",
-                                                    maxBytes=mb, backupCount=bc)
-        lagosHandler.setFormatter(f)
-        lagosLogger.addHandler(lagosHandler)
-
-        enkiHandler = handlers.RotatingFileHandler("enki.log",
-                                                   maxBytes=mb, backupCount=bc)
-        enkiHandler.setFormatter(f)
-        enkiLogger.addHandler(enkiHandler)
-
-        deliveratorHandler = handlers.RotatingFileHandler("deliverator.log",
-                                                maxBytes=mb, backupCount=bc)
-        deliveratorHandler.setFormatter(f)
-        deliveratorLogger.addHandler(deliveratorHandler)
-
-        reasonHandler = handlers.RotatingFileHandler("reason.log",
-                                                    maxBytes=mb, backupCount=bc)
-        reasonHandler.setFormatter(f)
-        reasonLogger.addHandler(reasonHandler)
+    log_file_name = ytcfg.get("yt","LogFileName")
+    ytFileHandler = handlers.RotatingFileHandler(log_file_name,
+                                             maxBytes=mb, backupCount=bc)
+    k = logging.Formatter(fstring)
+    ytFileHandler.setFormatter(k)
+    ytLogger.addHandler(ytFileHandler)
+    loggers.append(ytLogger)
+    file_handlers.append(ytFileHandler)
 
 def disable_stream_logging():
     # We just remove the root logger's handlers
     for handler in rootLogger.handlers:
         if isinstance(handler, logging.StreamHandler):
             rootLogger.removeHandler(handler)
+
+def disable_file_logging():
+    for logger, handler in zip(loggers, file_handlers):
+        logger.removeHandler(handler)
 
 if ytcfg.getboolean("yt","suppressStreamLogging"):
     disable_stream_logging()

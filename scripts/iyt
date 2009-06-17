@@ -1,5 +1,5 @@
 #!python
-
+import os
 from yt.mods import *
 namespace = locals().copy()
 
@@ -18,7 +18,13 @@ except:
     code.interact(doc, None, namespace)
     sys.exit()
 
-ip_shell = IPython.Shell.IPShellMatplotlibWX(user_ns=namespace)
+if "DISPLAY" in os.environ:
+    try:
+        ip_shell = IPython.Shell.IPShellMatplotlibWX(user_ns=namespace)
+    except ImportError:
+        ip_shell = IPython.Shell.IPShellMatplotlib(user_ns=namespace)
+else:
+    ip_shell = IPython.Shell.IPShellMatplotlib(user_ns=namespace)
 
 # The rest is a modified version of the IPython default profile code
 
@@ -158,7 +164,7 @@ ip.ex("from yt.mods import *")
 def do_pfall(self, arg):
     if arg.strip() == "": arg = 0
     for i in range(int(arg)+1):
-        for f in glob.glob("".join(["*/"]*i) + "*.hierarchy" ):
+        for f in sorted(glob.glob("".join(["*/"]*i) + "*.hierarchy" )):
             #print i, f
             fn = f[:-10]
             # Make this a bit smarter

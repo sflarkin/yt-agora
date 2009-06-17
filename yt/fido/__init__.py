@@ -8,7 +8,7 @@ Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
 Homepage: http://yt.enzotools.org/
 License:
-  Copyright (C) 2007-2008 Matthew Turk.  All Rights Reserved.
+  Copyright (C) 2007-2009 Matthew Turk.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -42,9 +42,12 @@ NewDirectoryPattern = ytcfg.get("fido","NewDirectoryPattern",raw=True)
 def get_parameter_line(filename, parameter):
     f = open(filename)
     lines = filter(lambda a: a.startswith(parameter), f)
-    if len(lines) > 1:
+    if len(lines) == 0:
+        raise KeyError(parameter)
+    elif len(lines) > 1:
         raise KeyError, "More than one line matches that parameter!"
-    else: return lines[0]
+    else:
+        return lines[0]
 
 def get_parent_dir(filename):
     return os.path.normpath( \
@@ -54,3 +57,4 @@ from OutputCollection import *
 from FileHandling import *
 from OutputWatcher import *
 from RunStandalones import *
+from ParameterFileStorage import *

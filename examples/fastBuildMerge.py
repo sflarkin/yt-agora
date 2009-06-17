@@ -24,8 +24,6 @@
 # 'chmod u+x mergeScript.py'
 # './mergeScript.py'
 
-# the name of the python script
-name = "merger_yt"
 # the GraphViz file
 outfile = "157-120.dot"
 # the directory basename, no trailing slash needed
@@ -60,11 +58,12 @@ print "#!/usr/bin/env /Library/Frameworks/Python.framework/Versions/Current/bin/
 # -----------------------------------------------------------------
 # -----------------------------------------------------------------
 
-print "import %s" % name
-print "import yt.raven as raven"
+name = 'Merger'
+
 print "import yt.lagos as lagos"
-print "import yt.lagos.hop as hop"
 print "from yt.lagos import mylog"
+print "from yt.mods import *"
+print "import yt.lagos.hop.Merger as %s" % name
 
 print """
 def instantiateSnapshots(dirbasename,filebasename,start,end):
@@ -116,8 +115,8 @@ for i in range(start-end):
         break
     
     # we need to run hop on the snapshot
-    print "sphere = snapshots[%d].h.sphere([0.5,0.5,0.5],1.0)" % nextsnapshot
-    print "hop_results = lagos.hop.HopList(sphere, %f, dm_only=dmonly)" % hopthreshold
+    print "hop_results = HaloFinder.HOPHaloFinder(snapshots[%d], threshold=%f, dm_only=dmonly)" % \
+        (nextsnapshot,hopthreshold)
     
     # get the group info for the next snapshot
     # get group positions
@@ -134,8 +133,8 @@ for i in range(start-end):
     # in the beginning we need to read in two groups before we build the links, so do everything above
     # again
     if (snapshot==start):
-        print "sphere = snapshots[%d].h.sphere([0.5,0.5,0.5],1.0)" % snapshot
-        print "hop_results = lagos.hop.HopList(sphere, %f, dm_only=dmonly)" % hopthreshold
+        print "hop_results = HaloFinder.HOPHaloFinder(snapshots[%d], threshold=%f, dm_only=dmonly)" % \
+            (snapshot,hopthreshold)
         print "positions = %s.convertPositionsSelected(hop_results,%d,positions,indices)" % (name,snapshot)
         print "g%04d = %s.convertGroupsSelected(hop_results,%d,indices)" % (snapshot,name,snapshot)
         print "for g in g%04d: g.particles.sort()\n" % snapshot

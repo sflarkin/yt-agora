@@ -1,5 +1,5 @@
 /************************************************************************
-* Copyright (C) 2007-2008 Matthew Turk.  All Rights Reserved.
+* Copyright (C) 2007-2009 Matthew Turk.  All Rights Reserved.
 *
 * This file is part of yt.
 *
@@ -43,23 +43,29 @@ static PyObject *
 Py_CombineGrids(PyObject *obj, PyObject *args)
 {
     PyObject    *ogrid_src_x, *ogrid_src_y, *ogrid_src_vals,
-        *ogrid_src_mask, *ogrid_src_wgt;
+        *ogrid_src_mask, *ogrid_src_wgt, *ogrid_used_mask;
     PyObject    *ogrid_dst_x, *ogrid_dst_y, *ogrid_dst_vals,
         *ogrid_dst_mask, *ogrid_dst_wgt;
 
     PyArrayObject    *grid_src_x, *grid_src_y, **grid_src_vals,
-            *grid_src_mask, *grid_src_wgt;
+            *grid_src_mask, *grid_src_wgt, *grid_used_mask;
     PyArrayObject    *grid_dst_x, *grid_dst_y, **grid_dst_vals,
             *grid_dst_mask, *grid_dst_wgt;
 
-    int NumArrays, src_len, dst_len, refinement_factor;
+    grid_src_x = grid_src_y = //grid_src_vals =
+            grid_src_mask = grid_src_wgt = grid_used_mask =
+    grid_dst_x = grid_dst_y = //grid_dst_vals = 
+            grid_dst_mask = grid_dst_wgt = NULL;
 
-    if (!PyArg_ParseTuple(args, "OOOOOOOOOOi",
+    int NumArrays, src_len, dst_len, refinement_factor;
+    NumArrays = 0;
+
+    if (!PyArg_ParseTuple(args, "OOOOOOOOOOiO",
             &ogrid_src_x, &ogrid_src_y, 
         &ogrid_src_mask, &ogrid_src_wgt, &ogrid_src_vals,
             &ogrid_dst_x, &ogrid_dst_y,
         &ogrid_dst_mask, &ogrid_dst_wgt, &ogrid_dst_vals,
-        &refinement_factor))
+        &refinement_factor, &ogrid_used_mask))
     return PyErr_Format(_combineGridsError,
             "CombineGrids: Invalid parameters.");
 
@@ -94,6 +100,15 @@ Py_CombineGrids(PyObject *obj, PyObject *args)
     if((grid_src_wgt == NULL) || (PyArray_SIZE(grid_src_wgt) != src_len)) {
     PyErr_Format(_combineGridsError,
              "CombineGrids: src_x and src_wgt must be the same shape.");
+    goto _fail;
+    }
+
+    grid_used_mask  = (PyArrayObject *) PyArray_FromAny(ogrid_used_mask,
+                    PyArray_DescrFromType(NPY_INT64), 1, 1,
+                    NPY_INOUT_ARRAY | NPY_UPDATEIFCOPY, NULL);
+    if((grid_used_mask == NULL) || (PyArray_SIZE(grid_used_mask) != src_len)) {
+    PyErr_Format(_combineGridsError,
+             "CombineGrids: src_x and used_mask must be the same shape.");
     goto _fail;
     }
 
@@ -172,6 +187,7 @@ Py_CombineGrids(PyObject *obj, PyObject *args)
     npy_int64     *src_y    = (npy_int64 *) PyArray_GETPTR1(grid_src_y,0);
     npy_float64 *src_wgt  = (npy_float64 *) PyArray_GETPTR1(grid_src_wgt,0);
     npy_int64     *src_mask = (npy_int64 *) PyArray_GETPTR1(grid_src_mask,0);
+    npy_int64    *src_used_mask = (npy_int64 *) PyArray_GETPTR1(grid_used_mask,0);
 
     npy_int64     *dst_x    = (npy_int64 *) PyArray_GETPTR1(grid_dst_x,0);
     npy_int64     *dst_y    = (npy_int64 *) PyArray_GETPTR1(grid_dst_y,0);
@@ -183,7 +199,7 @@ Py_CombineGrids(PyObject *obj, PyObject *args)
     int num_found = 0;
 
     for (si = 0; si < src_len; si++) {
-      if (src_x[si] < 0) continue;
+      if (src_used_mask[si] == 0) continue;
       init_x = refinement_factor * src_x[si];
       init_y = refinement_factor * src_y[si];
       for (x_off = 0; x_off < refinement_factor; x_off++) {
@@ -191,7 +207,6 @@ Py_CombineGrids(PyObject *obj, PyObject *args)
           fine_x = init_x + x_off;
           fine_y = init_y + y_off;
           for (di = 0; di < dst_len; di++) {
-            if (dst_x[di] < 0) continue;
             if ((fine_x == dst_x[di]) &&
                 (fine_y == dst_y[di])) {
               num_found++;
@@ -200,7 +215,7 @@ Py_CombineGrids(PyObject *obj, PyObject *args)
                   ((refinement_factor != 1) && (dst_mask[di])));
               // So if they are on the same level, then take the logical and
               // otherwise, set it to the destination mask
-              src_x[si] = -2;
+              src_used_mask[si] = 0;
               for (i = 0; i < NumArrays; i++) {
                 dst_vals[i][di] += src_vals[i][si];
               }
@@ -215,6 +230,7 @@ Py_CombineGrids(PyObject *obj, PyObject *args)
     Py_DECREF(grid_src_y);
     Py_DECREF(grid_src_mask);
     Py_DECREF(grid_src_wgt);
+    Py_DECREF(grid_used_mask);
 
     Py_DECREF(grid_dst_x);
     Py_DECREF(grid_dst_y);
@@ -241,6 +257,7 @@ _fail:
     Py_XDECREF(grid_src_y);
     Py_XDECREF(grid_src_wgt);
     Py_XDECREF(grid_src_mask);
+    Py_XDECREF(grid_used_mask);
 
     Py_XDECREF(grid_dst_x);
     Py_XDECREF(grid_dst_y);
@@ -534,6 +551,7 @@ static PyObject *DataCubeGeneric(PyObject *obj, PyObject *args,
              *oc_le, *oc_re, *oc_dx, *oc_data, *odr_edge, *odl_edge;
     PyArrayObject *g_le, *g_dx, *g_cm,
                   *c_le, *c_re, *c_dx, *dr_edge, *dl_edge;
+    g_dx=g_cm=c_le=c_re=c_dx=NULL;
     PyArrayObject **g_data, **c_data;
     g_data = c_data = NULL;
     npy_int *ag_cm;
@@ -654,7 +672,7 @@ static PyObject *DataCubeGeneric(PyObject *obj, PyObject *args,
       tc_data = (PyObject *) PyList_GetItem(oc_data, n);
       c_data[n]    = (PyArrayObject *) PyArray_FromAny(tc_data,
           PyArray_DescrFromType(NPY_FLOAT64), 3, 3,
-          NPY_INOUT_ARRAY | NPY_UPDATEIFCOPY, NULL);
+          NPY_UPDATEIFCOPY, NULL);
       if((c_data[n]==NULL) || (c_data[n]->nd != 3)) {
         PyErr_Format(_dataCubeError,
             "CombineGrids: Three dimensions required for c_data[%i].",n);
@@ -674,10 +692,13 @@ static PyObject *DataCubeGeneric(PyObject *obj, PyObject *args,
              malloc(sizeof(PyArrayObject*)*n_fields);
     for (n=0;n<n_fields;n++)g_data[n]=NULL;
     for (n=0;n<n_fields;n++){
+      /* Borrows a reference */
       tg_data = (PyObject *) PyList_GetItem(og_data, n);
+      /* We set up an array so we only have to do this once 
+         Note that this is an array in the C sense, not the NumPy sense */
       g_data[n]    = (PyArrayObject *) PyArray_FromAny(tg_data,
           PyArray_DescrFromType(NPY_FLOAT64), 3, 3,
-          NPY_INOUT_ARRAY | NPY_UPDATEIFCOPY, NULL);
+          NPY_UPDATEIFCOPY, NULL);
       if((g_data[n]==NULL) || (g_data[n]->nd != 3)) {
         PyErr_Format(_dataCubeError,
             "CombineGrids: Three dimensions required for g_data[%i].",n);
@@ -689,7 +710,6 @@ static PyObject *DataCubeGeneric(PyObject *obj, PyObject *args,
 
     npy_int64 xg, yg, zg, xc, yc, zc, cmax_x, cmax_y, cmax_z,
               cmin_x, cmin_y, cmin_z, cm, pxl, pyl, pzl;
-    npy_float64 *val1, *val2;
     long int total=0;
 
     int p_niter[3] = {1,1,1};
@@ -697,50 +717,66 @@ static PyObject *DataCubeGeneric(PyObject *obj, PyObject *args,
     npy_float64 ac_le_p[3][3];
     npy_float64 ac_re_p[3][3];
     npy_float64 ag_re[3];
-    for (i=0;i<3;i++){ag_re[i] = ag_le[i]+ag_dx[i]*(g_data[0]->dimensions[i]+1);}
+    /* This is for checking for periodic boundary conditions.
+       Manually set the right edge to be offset from the left. */
+    for(i=0;i<3;i++){ag_re[i] = ag_le[i]+ag_dx[i]*(g_data[0]->dimensions[i]+1);}
 
-    for (i=0;i<3;i++){ac_le_p[i][0] = ac_le[i]; ac_re_p[i][0] = ac_re[i];}
+    for(i=0;i<3;i++){ac_le_p[i][0] = ac_le[i]; ac_re_p[i][0] = ac_re[i];}
     for(i=0;i<3;i++) {
             itc = 1;
             if (ac_le[i] < adl_edge[i]) {
-                ac_le_p[i][itc  ] = adr_edge[i] + ac_le[i];
-                ac_re_p[i][itc++] = adr_edge[i] + ac_re[i];
-                //fprintf(stderr, "le axis: %d (%d) le: %0.5f re: %0.5f\n", 
-                //        i, itc-1, ac_le_p[i][itc-1], ac_re_p[i][itc-1]);
+                ac_le_p[i][itc  ] = adr_edge[i] - (adl_edge[i] - ac_le[i]);
+                ac_re_p[i][itc++] = adr_edge[i] + (ac_re[i] - adl_edge[i]);
             }
             if (ac_re[i] > adr_edge[i]) {
-                ac_le_p[i][itc  ] = adl_edge[i] - (adr_edge[i]-adl_edge[i])
-                                  + ac_le[i];
-                ac_re_p[i][itc++] = adl_edge[i] - (adr_edge[i]-adl_edge[i])
-                                  + ac_re[i];
-                //fprintf(stderr, "re axis: %d (%d) le: %0.5f re: %0.5f\n", 
-                //        i, itc-1, ac_le_p[i][itc-1], ac_re_p[i][itc-1]);
+                ac_le_p[i][itc  ] = ac_le[i] - (adr_edge[i] - adl_edge[i]);
+                ac_re_p[i][itc++] = adl_edge[i] + (ac_re[i] - adr_edge[i]);
             }
             p_niter[i] = itc;
-            //fprintf(stderr, "Iterating on %d %d (%d) times\n",
-            //        i, itc, p_niter[i]);
     }
+    npy_intp nx, ny, nz;
+    /* This is easier than doing a lookup every loop */
+    nx = PyArray_DIM(c_data[0], 0);
+    ny = PyArray_DIM(c_data[0], 1);
+    nz = PyArray_DIM(c_data[0], 2);
+    npy_int64 xg_min, yg_min, zg_min;
+    npy_int64 xg_max, yg_max, zg_max;
 
-    for (xg = 0; xg < g_data[0]->dimensions[0]; xg++) {
+    /* Periodic iterations, *if necessary* */
     for (pxl = 0; pxl < p_niter[0]; pxl++) {
+    xg_min = max(floor((ac_le_p[0][pxl]-ag_le[0])/ag_dx[0]) - 1, 0);
+    xg_max = min(ceil((ac_re_p[0][pxl]-ag_le[0])/ag_dx[0]) + 1, 
+                 g_data[0]->dimensions[0]);
+    for (xg = xg_min; xg < xg_max; xg++) {
+      /* If we're off the destination cell boundary, skip */
       if (ag_le[0]+ag_dx[0]*xg     > ac_re_p[0][pxl]) continue;
       if (ag_le[0]+ag_dx[0]*(xg+1) < ac_le_p[0][pxl]) continue;
+      /* Floor to the source edge */
       cmin_x = max(floorl((ag_le[0]+ag_dx[0]*xg     - ac_le_p[0][pxl])/ac_dx[0]),0);
-      cmax_x = min( ceill((ag_le[0]+ag_dx[0]*(xg+1) - ac_le_p[0][pxl])/ac_dx[0]),PyArray_DIM(c_data[0],0));
-      for (yg = 0; yg < g_data[0]->dimensions[1]; yg++) {
+      cmax_x = min( ceill((ag_le[0]+ag_dx[0]*(xg+1) - ac_le_p[0][pxl])/ac_dx[0]),nx);
+      if(cmin_x==cmax_x)continue;
       for (pyl = 0; pyl < p_niter[1]; pyl++) {
+      yg_min = max(floor((ac_le_p[1][pyl]-ag_le[1])/ag_dx[1]) - 1, 0);
+      yg_max = min(ceil((ac_re_p[1][pyl]-ag_le[1])/ag_dx[1]),
+                   g_data[0]->dimensions[1]);
+      for (yg = yg_min; yg < yg_max; yg++) {
         if (ag_le[1]+ag_dx[1]*yg     > ac_re_p[1][pyl]) continue;
         if (ag_le[1]+ag_dx[1]*(yg+1) < ac_le_p[1][pyl]) continue;
         cmin_y = max(floorl((ag_le[1]+ag_dx[1]*yg     - ac_le_p[1][pyl])/ac_dx[1]),0);
-        cmax_y = min( ceill((ag_le[1]+ag_dx[1]*(yg+1) - ac_le_p[1][pyl])/ac_dx[1]),PyArray_DIM(c_data[0],1));
-        for (zg = 0; zg < g_data[0]->dimensions[2]; zg++) {
+        cmax_y = min( ceill((ag_le[1]+ag_dx[1]*(yg+1) - ac_le_p[1][pyl])/ac_dx[1]),ny);
+        if(cmin_y==cmax_y)continue;
         for (pzl = 0; pzl < p_niter[2]; pzl++) {
-          cm = *(npy_int *)PyArray_GETPTR3(g_cm,xg,yg,zg);
-          if ((!ll) && (cm == 0)) continue;
+        zg_min = max(floor((ac_le_p[2][pzl]-ag_le[2])/ag_dx[2]) - 1, 0);
+        zg_max = min(ceil((ac_re_p[2][pzl]-ag_le[2])/ag_dx[2]), 
+                     g_data[0]->dimensions[2]);
+        for (zg = zg_min; zg < zg_max; zg++) {
+        cm = *(npy_int *)PyArray_GETPTR3(g_cm,xg,yg,zg);
+        if ((!ll) && (cm == 0)) continue;
           if (ag_le[2]+ag_dx[2]*zg     > ac_re_p[2][pzl]) continue;
           if (ag_le[2]+ag_dx[2]*(zg+1) < ac_le_p[2][pzl]) continue;
           cmin_z = max(floorl((ag_le[2]+ag_dx[2]*zg     - ac_le_p[2][pzl])/ac_dx[2]),0);
-          cmax_z = min( ceill((ag_le[2]+ag_dx[2]*(zg+1) - ac_le_p[2][pzl])/ac_dx[2]),PyArray_DIM(c_data[0],2));
+          cmax_z = min( ceill((ag_le[2]+ag_dx[2]*(zg+1) - ac_le_p[2][pzl])/ac_dx[2]),nz);
+          if(cmin_z==cmax_z)continue;
           for (xc = cmin_x; xc < cmax_x ; xc++) {
             for (yc = cmin_y; yc < cmax_y ; yc++) {
               for (zc = cmin_z; zc < cmax_z ; zc++) {
@@ -784,8 +820,8 @@ _fail:
     Py_XDECREF(c_re);
     Py_XDECREF(c_dx);
     for(n=0;n<n_fields;n++) {
-        if(g_data!=NULL)Py_XDECREF(g_data[n]);
-        if(c_data!=NULL)Py_XDECREF(c_data[n]);
+        if(g_data[n]!=NULL){Py_XDECREF(g_data[n]);}
+        if(c_data[n]!=NULL){Py_XDECREF(c_data[n]);}
     }
     if(g_data!=NULL)free(g_data);
     if(c_data!=NULL)free(c_data);
@@ -836,6 +872,7 @@ Py_FindContours(PyObject *obj, PyObject *args)
 {
     PyObject *ocon_ids, *oxi, *oyi, *ozi;
     PyArrayObject *con_ids, *xi, *yi, *zi;
+    xi=yi=zi=con_ids=NULL;
     npy_int64 i, j, k, n;
 
     i = 0;
@@ -846,7 +883,7 @@ Py_FindContours(PyObject *obj, PyObject *args)
     
     con_ids   = (PyArrayObject *) PyArray_FromAny(ocon_ids,
                     PyArray_DescrFromType(NPY_INT64), 3, 3,
-                    NPY_INOUT_ARRAY | NPY_UPDATEIFCOPY, NULL);
+                    0 | NPY_UPDATEIFCOPY, NULL);
     if((con_ids==NULL) || (con_ids->nd != 3)) {
     PyErr_Format(_findContoursError,
              "FindContours: Three dimensions required for con_ids.");
@@ -855,7 +892,7 @@ Py_FindContours(PyObject *obj, PyObject *args)
 
     xi = (PyArrayObject *) PyArray_FromAny(oxi,
                     PyArray_DescrFromType(NPY_INT64), 1, 1,
-                    NPY_IN_ARRAY, NULL);
+                    0, NULL);
     if(xi==NULL) {
     PyErr_Format(_findContoursError,
              "Bin2DProfile: One dimension required for xi.");
@@ -864,7 +901,7 @@ Py_FindContours(PyObject *obj, PyObject *args)
     
     yi = (PyArrayObject *) PyArray_FromAny(oyi,
                     PyArray_DescrFromType(NPY_INT64), 1, 1,
-                    NPY_IN_ARRAY, NULL);
+                    0, NULL);
     if((yi==NULL) || (PyArray_SIZE(xi) != PyArray_SIZE(yi))) {
     PyErr_Format(_findContoursError,
              "Bin2DProfile: One dimension required for yi, same size as xi.");
@@ -873,7 +910,7 @@ Py_FindContours(PyObject *obj, PyObject *args)
     
     zi = (PyArrayObject *) PyArray_FromAny(ozi,
                     PyArray_DescrFromType(NPY_INT64), 1, 1,
-                    NPY_IN_ARRAY, NULL);
+                    0, NULL);
     if((zi==NULL) || (PyArray_SIZE(xi) != PyArray_SIZE(zi))) {
     PyErr_Format(_findContoursError,
              "Bin2DProfile: One dimension required for zi, same size as xi.");
@@ -1043,6 +1080,7 @@ Py_FindBindingEnergy(PyObject *obj, PyObject *args)
 {
     PyObject *omass, *ox, *oy, *oz;
     PyArrayObject *mass, *x, *y, *z;
+    x=y=z=mass=NULL;
     int truncate;
     double kinetic_energy;
 
@@ -1100,7 +1138,8 @@ Py_FindBindingEnergy(PyObject *obj, PyObject *args)
     /* progress bar stuff */
     float totalWork = 0.5 * (pow(n_q,2.0) - n_q);
     float workDone = 0;
-
+    int every_cells = floor(n_q / 100);
+    int until_output = 1;
     for (q_outer = 0; q_outer < n_q - 1; q_outer++) {
         this_potential = 0;
         mass_o = *(npy_float64*) PyArray_GETPTR1(mass, q_outer);
@@ -1119,8 +1158,13 @@ Py_FindBindingEnergy(PyObject *obj, PyObject *args)
         }
         total_potential += this_potential;
 	workDone += n_q - q_outer - 1;
-	fprintf(stderr,"Calculating Potential for %i cells: %.2f%%\t(pe/ke = %e)\r", n_q,((100*workDone)/totalWork),(total_potential/kinetic_energy));
-	fflush(stdout); fflush(stderr);
+    until_output -= 1;
+    if(until_output == 0){
+        fprintf(stderr,"Calculating Potential for %i cells: %.2f%%\t(pe/ke = %e)\r",
+                n_q,((100*workDone)/totalWork),(total_potential/kinetic_energy));
+        fflush(stdout); fflush(stderr);
+        until_output = every_cells;
+    }
         if ((truncate == 1) && (total_potential > kinetic_energy)){
             fprintf(stderr, "Truncating!\r");
             break;
@@ -1145,6 +1189,60 @@ Py_FindBindingEnergy(PyObject *obj, PyObject *args)
         return NULL;
 }
 
+static PyObject *_outputFloatsToFileError;
+
+static PyObject *
+Py_OutputFloatsToFile(PyObject *obj, PyObject *args)
+{
+    PyObject *oarray;
+    PyArrayObject *array;
+    char *filename, *header = NULL;
+    npy_intp i, j, imax, jmax;
+
+    if (!PyArg_ParseTuple(args, "Os|s", &oarray, &filename, &header))
+        return PyErr_Format(_outputFloatsToFileError,
+                    "OutputFloatsToFile: Invalid parameters.");
+
+    array   = (PyArrayObject *) PyArray_FromAny(oarray,
+                    PyArray_DescrFromType(NPY_FLOAT64), 2, 2,
+                    0, NULL);
+    if(array==NULL){
+    PyErr_Format(_outputFloatsToFileError,
+             "OutputFloatsToFile: Failure to convert array ( nd == 2 ?)");
+    goto _fail;
+    }
+
+    FILE *to_write = fopen(filename, "w");
+    if(to_write == NULL){
+    PyErr_Format(_outputFloatsToFileError,
+             "OutputFloatsToFile: Unable to open %s for writing.", filename);
+      goto _fail;
+    }
+
+    if(header!=NULL)fprintf(to_write,"%s\n", header);
+
+    imax = PyArray_DIM(array, 0);
+    jmax = PyArray_DIM(array, 1);
+    for(i=0;i<imax;i++){
+      for(j=0;j<jmax;j++){
+        fprintf(to_write, "%0.16e",
+                *((npy_float64*)PyArray_GETPTR2(array,i,j)));
+        if(j<jmax-1)fprintf(to_write, "\t");
+      }
+      fprintf(to_write, "\n");
+    }
+    fclose(to_write);
+
+    Py_DECREF(array);
+    return Py_None;
+
+   _fail:
+    Py_XDECREF(array);
+
+    return NULL;
+}
+
+
 static PyMethodDef _combineMethods[] = {
     {"CombineGrids", Py_CombineGrids, METH_VARARGS},
     {"Interpolate", Py_Interpolate, METH_VARARGS},
@@ -1154,6 +1252,7 @@ static PyMethodDef _combineMethods[] = {
     {"Bin3DProfile", Py_Bin3DProfile, METH_VARARGS},
     {"FindContours", Py_FindContours, METH_VARARGS},
     {"FindBindingEnergy", Py_FindBindingEnergy, METH_VARARGS},
+    {"OutputFloatsToFile", Py_OutputFloatsToFile, METH_VARARGS},
     {NULL, NULL} /* Sentinel */
 };
 
@@ -1179,6 +1278,8 @@ void initPointCombine(void)
     PyDict_SetItemString(d, "error", _profile3DError);
     _findContoursError = PyErr_NewException("PointCombine.FindContoursError", NULL, NULL);
     PyDict_SetItemString(d, "error", _findContoursError);
+    _outputFloatsToFileError = PyErr_NewException("PointCombine.OutputFloatsToFileError", NULL, NULL);
+    PyDict_SetItemString(d, "error", _outputFloatsToFileError);
     import_array();
 }
 

@@ -7,7 +7,7 @@ Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
 Homepage: http://yt.enzotools.org/
 License:
-  Copyright (C) 2007-2008 Matthew Turk.  All Rights Reserved.
+  Copyright (C) 2007-2009 Matthew Turk.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -27,10 +27,10 @@ License:
 
 import ConfigParser, os, os.path, types
 
+
 ytcfgDefaults = {
     "fido":{
         'RunDir': os.path.join(os.getenv("HOME"),'.yt/EnzoRuns/'),
-        'WorkDir': os.path.join('/usr/work/', os.getenv("USER")),
         'WaitBetween':'5',
         'OtherFiles':'rates.out,cool_rates.out',
         'NewOutputCreated':'newOutput',
@@ -43,33 +43,31 @@ ytcfgDefaults = {
         'centeronmax':'False',
         'minpbar':'300',
         },
-    "SWIG":{
-        'EnzoInterfacePath':'/usr/work/mturk/local/lib/python2.5/site-packages',
-        },
     "lagos":{
-        'ReconstructHierarchy': 'False',
+        'ReconstructHierarchy': 'True',
         'serialize' : 'True',
         'onlydeserialize' : 'False',
-        'usefortran' : 'False',
-        'useswig' : 'False',
         'loadfieldplugins':'False',
         'pluginfilename':'yt_plugins.py',
-        'nounitslength':'1.0',
         },
     "yt":{
         'LogFile': 'False',
         'LogFileName': 'yt.log',
         'suppressStreamLogging': 'False',
         'LogLevel': '20',
-        'unifiedlogfile': '1',
-        'User':os.getenv("USER"),
         'timefunctions':'False',
         'inGui':'False',
+        '__parallel':'False',
+        '__parallel_rank':'0',
+        '__parallel_size':'1',
+        'StoreParameterFiles': 'True',
+        'ParameterFileStore': 'parameter_files.csv',
+        'MaximumStoredPFs': '500',
          },
     "raven":{
         'ImagePath':".",
         'ImageSkel': '%(bn)s_%(width)010i_%(unit)s',
-        'backend': 'MPL'
+        'colormap': 'jet',
         }
     }
 
@@ -108,8 +106,12 @@ class YTConfigParser(ConfigParser.ConfigParser):
             raise KeyError
         self.set(item[0], item[1], val)
 
-ytcfg = YTConfigParser(['yt.cfg', os.path.expanduser('~/.yt/config')],
-                       ytcfgDefaults)
+if os.path.exists(os.path.expanduser("~/.yt/config")):
+    ytcfg = YTConfigParser(['yt.cfg', os.path.expanduser('~/.yt/config')],
+                           ytcfgDefaults)
+else:
+    ytcfg = YTConfigParser(['yt.cfg'],
+                        ytcfgDefaults)
 
 # Now we have parsed the config file.  Overrides come from the command line.
 

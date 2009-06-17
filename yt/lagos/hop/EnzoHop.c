@@ -1,5 +1,5 @@
 /************************************************************************
-* Copyright (C) 2008 Matthew Turk.  All Rights Reserved.
+* Copyright (C) 2008-2009 Matthew Turk.  All Rights Reserved.
 *
 * This file is part of yt.
 *
@@ -30,6 +30,7 @@
 #include <ctype.h>
 #include "kd.h"
 #include "hop.h"
+#include "hop_numpy.h"
 
 #include "numpy/ndarrayobject.h"
 
@@ -47,13 +48,14 @@ Py_EnzoHop(PyObject *obj, PyObject *args)
     PyArrayObject    *xpos, *ypos, *zpos,
                      *mass;
     xpos=ypos=zpos=mass=NULL;
-    npy_float64 totalmass = 0;
+    npy_float64 totalmass = 0.0;
+    float normalize_to = 1.0;
     float thresh = 160.0;
 
     int i;
 
-    if (!PyArg_ParseTuple(args, "OOOO|f",
-        &oxpos, &oypos, &ozpos, &omass, &thresh))
+    if (!PyArg_ParseTuple(args, "OOOO|ff",
+        &oxpos, &oypos, &ozpos, &omass, &thresh, &normalize_to))
     return PyErr_Format(_HOPerror,
             "EnzoHop: Invalid parameters.");
 
@@ -90,7 +92,7 @@ Py_EnzoHop(PyObject *obj, PyObject *args)
     mass    = (PyArrayObject *) PyArray_FromAny(omass,
                     PyArray_DescrFromType(NPY_FLOAT64), 1, 1,
                     NPY_INOUT_ARRAY | NPY_UPDATEIFCOPY, NULL);
-    if((!zpos)||(PyArray_SIZE(mass) != num_particles)) {
+    if((!mass)||(PyArray_SIZE(mass) != num_particles)) {
     PyErr_Format(_HOPerror,
              "EnzoHop: xpos and mass must be the same length.");
     goto _fail;
@@ -98,6 +100,7 @@ Py_EnzoHop(PyObject *obj, PyObject *args)
 
     for(i = 0; i < num_particles; i++)
         totalmass+=*(npy_float64*)PyArray_GETPTR1(mass,i);
+    totalmass /= normalize_to;
 
   /* initialize the kd hop structure */
 
@@ -112,20 +115,29 @@ Py_EnzoHop(PyObject *obj, PyObject *args)
   }
   
  	/* Copy positions into kd structure. */
+    PyArrayObject *particle_density = (PyArrayObject *)
+            PyArray_SimpleNewFromDescr(1, PyArray_DIMS(xpos),
+                    PyArray_DescrFromType(NPY_FLOAT64));
 
-	for (i = 0; i < num_particles; i++) {
-	  kd->p[i].r[0] = (float)*(npy_float64*) PyArray_GETPTR1(xpos, i);
-	  kd->p[i].r[1] = (float)*(npy_float64*) PyArray_GETPTR1(ypos, i);
-	  kd->p[i].r[2] = (float)*(npy_float64*) PyArray_GETPTR1(zpos, i);
-	  kd->p[i].fMass = (float)(*(npy_float64*) PyArray_GETPTR1(mass, i)/totalmass);
-	}
+    fprintf(stdout, "Copying arrays for %d particles\n", num_particles);
+    kd->np_masses = mass;
+    kd->np_pos[0] = xpos;
+    kd->np_pos[1] = ypos;
+    kd->np_pos[2] = zpos;
+    kd->np_densities = particle_density;
+    kd->totalmass = totalmass;
+	for (i = 0; i < num_particles; i++) kd->p[i].np_index = i;
 
     HC my_comm;
     my_comm.s = newslice();
     my_comm.gl = (Grouplist*)malloc(sizeof(Grouplist));
+    if(my_comm.gl == NULL) {
+        fprintf(stderr, "failed allocating Grouplist\n");
+        goto _fail;
+    }
     initgrouplist(my_comm.gl);
 
-    fprintf(stderr, "Calling hop... %d\n",num_particles);
+    fprintf(stderr, "Calling hop... %d %0.3e\n",num_particles,thresh);
     hop_main(kd, &my_comm, thresh);
 
     fprintf(stderr, "Calling regroup...\n");
@@ -138,17 +150,11 @@ Py_EnzoHop(PyObject *obj, PyObject *args)
     // All we need to do is provide density and group information.
     
     // Tags (as per writetagsf77) are in gl.s->ntag+1 and there are gl.s->numlist of them.
-    PyArrayObject *particle_density = (PyArrayObject *)
-            PyArray_SimpleNewFromDescr(1, PyArray_DIMS(xpos),
-                    PyArray_DescrFromType(NPY_FLOAT64));
     PyArrayObject *particle_group_id = (PyArrayObject *)
             PyArray_SimpleNewFromDescr(1, PyArray_DIMS(xpos),
                     PyArray_DescrFromType(NPY_INT32));
     
     for (i = 0; i < num_particles; i++) {
-      // Density is in kd->p[i].fDensity
-      *(npy_float64*)(PyArray_GETPTR1(particle_density, i)) =
-            (npy_float64) kd->p[i].fDensity;
       // tag is in gl.s->ntag[i+1]
       *(npy_int32*)(PyArray_GETPTR1(particle_group_id, i)) =
             (npy_int32) my_comm.s->ntag[i+1];

@@ -5,7 +5,7 @@ Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
 Homepage: http://yt.enzotools.org/
 License:
-  Copyright (C) 2007-2008 Matthew Turk.  All Rights Reserved.
+  Copyright (C) 2007-2009 Matthew Turk.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -23,17 +23,45 @@ License:
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import time, types, signal, traceback
+import time, types, signal, inspect, traceback, sys, pdb, rpdb
+import warnings
 import progressbar as pb
 from math import floor, ceil
+from yt.logger import ytLogger as mylog
 
 def signal_print_traceback(signo, frame):
     print traceback.print_stack(frame)
 
+def signal_problem(signo, frame):
+    raise RuntimeError()
+
 try:
     signal.signal(signal.SIGUSR1, signal_print_traceback)
+    mylog.debug("SIGUSR1 registered for traceback printing")
+    signal.signal(signal.SIGUSR2, signal_problem)
+    mylog.debug("SIGUSR2 registered for RuntimeError")
 except ValueError:  # Not in main thread
     pass
+
+def paste_traceback(exc_type, exc, tb):
+    sys.__excepthook__(exc_type, exc, tb)
+    import xmlrpclib, cStringIO
+    p = xmlrpclib.ServerProxy(
+            "http://paste.enzotools.org/xmlrpc/",
+            allow_none=True)
+    s = cStringIO.StringIO()
+    traceback.print_exception(exc_type, exc, tb, file=s)
+    s = s.getvalue()
+    ret = p.pastes.newPaste('pytb', s, None, '', '', True)
+    print
+    print "Traceback pasted to http://paste.enzotools.org/show/%s" % (ret)
+    print
+
+if "--paste" in sys.argv:
+    sys.excepthook = paste_traceback
+if "--rpdb" in sys.argv:
+    sys.excepthook = rpdb.rpdb_excepthook
+    del sys.argv[sys.argv.index("--rpdb")]
 
 def blank_wrapper(f):
     return lambda a: a
@@ -71,11 +99,39 @@ def time_execution(func):
         mylog.debug('%s took %0.3f s', func.func_name, (t2-t1))
         return res
     from yt.config import ytcfg
-    from yt.logger import lagosLogger as mylog
     if ytcfg.getboolean("yt","timefunctions") == True:
         return wrapper
     else:
         return func
+
+def pdb_run(func):
+    @wraps(func)
+    def wrapper(*args, **kw):
+        pdb.runcall(func, *args, **kw)
+    return wrapper
+
+__header = """
+== Welcome to the embedded IPython Shell ==
+
+   You are currently inside the function:
+     %(fname)s
+
+   Defined in:
+     %(filename)s:%(lineno)s
+"""
+
+def insert_ipython(num_up=1):
+    from IPython.Shell import IPShellEmbed
+    stack = inspect.stack()
+    frame = inspect.stack()[num_up]
+    loc = frame[0].f_locals.copy()
+    glo = frame[0].f_globals
+    dd = dict(fname = frame[3], filename = frame[1],
+              lineno = frame[2])
+    ipshell = IPShellEmbed()
+    ipshell(header = __header % dd,
+            local_ns = loc, global_ns = glo)
+    del ipshell
 
 class DummyProgressBar:
     def __init__(self, *args, **kwargs):
@@ -111,7 +167,6 @@ def just_one(obj):
 
 def get_pbar(title, maxval):
     from yt.config import ytcfg
-    from yt.logger import lagosLogger as mylog
     if ytcfg.getboolean("yt","inGui"):
         if maxval > ytcfg.getint("reason","minpbar"): # Arbitrary number
             return GUIProgressBar(title, maxval)
@@ -145,12 +200,36 @@ class __defaultdict(dict):
 
 import traceback
 def print_tb(func):
+    @wraps(func)
     def run_func(*args, **kwargs):
         traceback.print_stack()
-        func(*args, **kwargs)
+        return func(*args, **kwargs)
     return run_func
 
 try:
     from collections import defaultdict
 except ImportError:
     defaultdict = __defaultdict
+
+def rootonly(func):
+    @wraps(func)
+    def donothing(*args, **kwargs):
+        return
+    from yt.config import ytcfg
+    if ytcfg.getint("yt","__parallel_rank") > 0: return donothing
+    return func
+
+def only_on_root(func, *args, **kwargs):
+    from yt.config import ytcfg
+    if not ytcfg.getboolean("yt","__parallel"):
+        return func(*args,**kwargs)
+    if ytcfg.getint("yt","__parallel_rank") > 0: return
+    return func(*args, **kwargs)
+
+def deprecate(func):
+    @wraps(func)
+    def run_func(*args, **kwargs):
+        warnings.warn("%s has been deprecated and may be removed without notice!" \
+                % func.func_name, DeprecationWarning, stacklevel=2)
+        func(*args, **kwargs)
+    return run_func

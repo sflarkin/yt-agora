@@ -5,7 +5,7 @@ Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
 Homepage: http://yt.enzotools.org/
 License:
-  Copyright (C) 2007-2008 Matthew Turk.  All Rights Reserved.
+  Copyright (C) 2007-2009 Matthew Turk.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -166,8 +166,8 @@ class PlotPage(wx.Panel):
         self.mw = mw
         self.parent_id = parent_id
 
-        self.figure = be.matplotlib.figure.Figure((1,1))
-        self.axes = self.figure.add_subplot(111)
+        self.figure = be.matplotlib.figure.Figure()
+        self.axes = self.figure.add_subplot(111, aspect='equal')
         self.status_bar = status_bar
 
         self.SetupControls()
@@ -298,7 +298,10 @@ class PlotPage(wx.Panel):
             ccmap_name = self.plot.colorbar.cmap.name
         except AttributeError:
             ccmap_name = "jet"
-        self.cmapmenu.FindItemById(self.cmapmenu.FindItem(ccmap_name)).Check(True)
+        try:
+            self.cmapmenu.FindItemById(self.cmapmenu.FindItem(ccmap_name)).Check(True)
+        except AttributeError:
+            pass
 
     def makePlot(self):
         pass
@@ -351,13 +354,13 @@ class VMPlotPage(PlotPage):
         self.weight_field = weight_field
         self.axis = axis
         if center is None:
-            center = [0.5, 0.5, 0.5]
+            center = [0.501, 0.501, 0.501]
         self.center = center
         self.AmDrawingCircle = False
         self.circles = []
 
         if ytcfg.getboolean("reason","centeronmax"):
-            self.center = outputfile.hierarchy.findMax("Density")[1]
+            self.center = outputfile.hierarchy.find_max("Density")[1]
 
         PlotPage.__init__(self, parent, status_bar, mw, CreationID, parent_id)
         self.SetBackgroundColour(wx.NamedColor("WHITE"))
@@ -454,7 +457,7 @@ class VMPlotPage(PlotPage):
         self.UpdateWidth()
 
     def OnCenterOnMax(self, event):
-        v, c = self.outputfile.h.findMax("Density")
+        v, c = self.outputfile.h.find_max("Density")
         Publisher().sendMessage(('viewchange','center'), c)
         self.UpdateWidth()
 
@@ -502,7 +505,7 @@ class VMPlotPage(PlotPage):
         #xp, yp = self.figure.axes[0].transData.inverse_xy_tup((xp,yp))
         dx = (self.plot.xlim[1] - self.plot.xlim[0])/self.plot.pix[0]
         dy = (self.plot.ylim[1] - self.plot.ylim[0])/self.plot.pix[1]
-        l, b, width, height = self.figure.axes[0].bbox.get_bounds()
+        l, b, width, height = raven.PlotTypes._get_bounds(self.figure.axes[0].bbox)
         x = self.plot.xlim[0] + (dx * (xp-l))
         y = self.plot.ylim[1] - (dy * (yp-b))
         return x, y

@@ -4,7 +4,7 @@ Affiliation:  UC Boulder, KIPAC
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
 License:
-  Copyright (C) 2008 Britton Smith, Matthew Turk  All Rights Reserved.
+  Copyright (C) 2008-2009 Britton Smith, Matthew Turk  All Rights Reserved.
 
   This file is part of yt.
 
@@ -24,12 +24,23 @@ License:
 
 from yt.raven import *
 import matplotlib.colors as cc
+import matplotlib.cm as mcm
+
+def check_color(name):
+    try:
+        ss = cc.colorConverter.to_rgb(name)
+        return True
+    except ValueError:
+        return False
 
 raven_colormaps = {}
 
 def add_cmap(name, cdict):
     raven_colormaps[name] = \
         cc.LinearSegmentedColormap(name,cdict,256)
+    mcm.datad[name] = cdict
+    mcm.__dict__[name] = cdict
+    
 
 # The format is as follows:
 #   First number is the number at which we are defining a color breakpoint
@@ -74,3 +85,14 @@ cdict = {'red':zip(_vs,_kamae_red,_kamae_red),
          'green':zip(_vs,_kamae_grn,_kamae_grn),
          'blue':zip(_vs,_kamae_blu,_kamae_blu)}
 add_cmap('kamae', cdict)
+
+# This one is a simple black & green map
+
+cdict = {'red':   ((0.0, 0.0, 0.0),
+                   (1.0, 0.0, 0.0)),
+         'green': ((0.0, 0.0, 0.0),
+                   (1.0, 1.0, 1.0)),
+         'blue':  ((0.0, 0.0, 0.0),
+                   (1.0, 0.0, 0.0))}
+
+add_cmap('black_green', cdict)

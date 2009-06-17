@@ -6,7 +6,7 @@ Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
 Homepage: http://yt.enzotools.org/
 License:
-  Copyright (C) 2008 Matthew Turk.  All Rights Reserved.
+  Copyright (C) 2008-2009 Matthew Turk.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -24,33 +24,58 @@ License:
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+#
+# ALL IMPORTS GO HERE
+#
 
+# First module imports
 import yt.lagos as lagos
-import yt.lagos.hop as hop
 import yt.raven as raven
 import yt.fido as fido
 import numpy as na
-import sys
+import sys, types
+from logger import ytLogger as mylog
 
+# Now individual component imports from lagos
 from yt.lagos import EnzoStaticOutput, \
     BinnedProfile1D, BinnedProfile2D, BinnedProfile3D, \
-    add_field, fieldInfo, \
-    Clump, write_clump_hierarchy, find_clumps, write_clumps
+    add_field, FieldInfo, EnzoFieldInfo, Enzo2DFieldInfo, OrionFieldInfo, \
+    Clump, write_clump_hierarchy, find_clumps, write_clumps, \
+    OrionStaticOutput, HaloFinder, HOPHaloFinder, FOFHaloFinder
 
-from yt.raven import PlotCollection, PlotCollectionInteractive, \
-    QuiverCallback, ParticleCallback, ContourCallback, \
-    GridBoundaryCallback, UnitBoundaryCallback, \
-    LinePlotCallback, CuttingQuiverCallback, ClumpContourCallback, \
-    HopCircleCallback
+# This is a temporary solution -- in the future, we will allow the user to
+# select this via ytcfg.
 
+fieldInfo = EnzoFieldInfo
+
+# Now individual component imports from raven
+from yt.raven import PlotCollection, PlotCollectionInteractive, get_multi_plot
+from yt.raven.Callbacks import callback_registry
+for name, cls in callback_registry.items():
+    exec("%s = cls" % name)
+
+# Optional component imports from raven
 try:
     from yt.raven import VolumeRenderingDataCube, \
         VolumeRendering3DProfile, HaloMassesPositionPlot
 except ImportError:
     pass
 
+import yt.raven.PlotInterface as plots
+
+# Individual imports from Fido
 from yt.fido import GrabCollections, OutputCollection
 
+import yt.funcs
+
+from yt.convenience import all_pfs, max_spheres, load
+
+# Some convenience functions to ease our time running scripts
+# from the command line
+
 def get_pf():
-    return lagos.EnzoStaticOutput(sys.argv[-1])
+    return EnzoStaticOutput(sys.argv[-1])
+
+def get_pc():
+    return PlotCollection(EnzoStaticOutput(sys.argv[-1]))
 

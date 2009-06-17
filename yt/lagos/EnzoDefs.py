@@ -7,7 +7,7 @@ Homepage: http://yt.enzotools.org/
 
 @todo: Move into yt.Defs, along with enki.EnkiDefs
 License:
-  Copyright (C) 2007-2008 Matthew Turk.  All Rights Reserved.
+  Copyright (C) 2007-2009 Matthew Turk.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -41,6 +41,9 @@ vm_axis_names = {0:'x', 1:'y', 2:'z', 3:'dx', 4:'dy'}
 x_dict = [1,0,0]
 y_dict = [2,2,1]
 
+x_names = ['y','x','x']
+y_names = ['z','z','y']
+
 mh = 1.67e-24
 mu = 1.22
 
@@ -60,6 +63,7 @@ parameterDict = {"CosmologyCurrentRedshift": float,
                  "ComovingCoordinates": int,
                  "DensityUnits": float,
                  "LengthUnits": float,
+                 "LengthUnit": float,
                  "TemperatureUnits": float,
                  "TimeUnits": float,
                  "GravitationalConstant": float,
@@ -67,8 +71,12 @@ parameterDict = {"CosmologyCurrentRedshift": float,
                  "MultiSpecies": int,
                  "CompilerPrecision": str,
                  "CurrentTimeIdentifier": int,
+                 "RefineBy": int,
                  "BoundaryConditionName": str,
                  "TopGridRank": int,
+                 "TopGridDimensions": int,
+                 "EOSSoundSpeed": float,
+                 "EOSType": int,
                 }
 
 mpc_conversion = {'mpc'   : 1e0,
