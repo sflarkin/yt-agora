@@ -357,9 +357,11 @@ class AMRGridPatch(AMRData):
                   'num_ghost_zones':n_zones,
                   'use_pbar':False, 'fields':fields}
         if smoothed:
-            cube = self.hierarchy.smoothed_covering_grid(*args, **kwargs)
+            cube = self.hierarchy.smoothed_covering_grid(
+                level, new_left_edge, new_right_edge, **kwargs)
         else:
-            cube = self.hierarchy.covering_grid(*args, **kwargs)
+            cube = self.hierarchy.covering_grid(
+                level, new_left_edge, new_right_edge, **kwargs)
         return cube
 
     def get_vertex_centered_data(self, field, smoothed=True):
@@ -407,6 +409,9 @@ class EnzoGridBase(AMRGridPatch):
         """
         #All of the field parameters will be passed to us as needed.
         AMRGridPatch.__init__(self, id, filename, hierarchy)
+        self.Parent = []
+        self.Children = []
+        self.Level = -1
 
     def _guess_properties_from_parent(self):
         """
