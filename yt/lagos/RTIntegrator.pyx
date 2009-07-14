@@ -115,10 +115,11 @@ def VoxelTraversal(np.ndarray[np.int_t, ndim=3] grid_mask,
     # Now get the indices of the intersection
     intersect = u + intersect_t * v
     for i in range(3):
-        cur_ind[i] = np.floor((intersect[i] - left_edge[i])/dx[i])
+        cur_ind[i] = min(np.floor((intersect[i] - left_edge[i])/dx[i]),
+                         grid_mask.shape[i] - 1)
         tmax[i] = (((cur_ind[i]+step[i])*dx[i])+left_edge[i]-u[i])/v[i]
-        if step[i] < 0:
-            cur_ind[i] -= 1
+        if step[i] > 0: tmax[i] = (((cur_ind[i]+1)*dx[i])+left_edge[i]-u[i])/v[i]
+        if step[i] < 0: tmax[i] = (((cur_ind[i]+0)*dx[i])+left_edge[i]-u[i])/v[i]
         tdelta[i] = abs(dx[i]/v[i])
     # The variable intersect contains the point we first pierce the grid
     enter_t = intersect_t
@@ -128,43 +129,33 @@ def VoxelTraversal(np.ndarray[np.int_t, ndim=3] grid_mask,
            not (0 <= cur_ind[1] < grid_mask.shape[1]) or \
            not (0 <= cur_ind[2] < grid_mask.shape[2]):
             break
+        else:
+            grid_mask[cur_ind[0], cur_ind[1], cur_ind[2]] = 1
         # Note that we are calculating t on the fly, but we get *negative* t
         # values from what they should be.
         # If we've reached t = 1, we are done.
-        if tmax[0] >= 1 and tmax[1] >= 1 and tmax[2] >= 1:
+        if (tmax[0] >= 1.0) and (tmax[1] >= 1.0) and (tmax[2] >= 1.0):
             grid_t[cur_ind[0], cur_ind[1], cur_ind[2]] = 1.0 - enter_t
-            print "Ending index: ", cur_ind[0],cur_ind[1],cur_ind[2]
-            print "tmax: ",tmax[0],tmax[1],tmax[2]
-            if grid_t[cur_ind[0], cur_ind[1], cur_ind[2]] > 0:
-                grid_mask[cur_ind[0], cur_ind[1], cur_ind[2]] = 1
             break
         if tmax[0] < tmax[1]:
             if tmax[0] < tmax[2]:
                 grid_t[cur_ind[0], cur_ind[1], cur_ind[2]] = tmax[0] - enter_t
-                if grid_t[cur_ind[0], cur_ind[1], cur_ind[2]] > 0:
-                    grid_mask[cur_ind[0], cur_ind[1], cur_ind[2]] = 1
                 enter_t = tmax[0]
                 tmax[0] += tdelta[0]
                 cur_ind[0] += step[0]
             else:
                 grid_t[cur_ind[0], cur_ind[1], cur_ind[2]] = tmax[2] - enter_t
-                if grid_t[cur_ind[0], cur_ind[1], cur_ind[2]] > 0:
-                    grid_mask[cur_ind[0], cur_ind[1], cur_ind[2]] = 1
                 enter_t = tmax[2]
                 tmax[2] += tdelta[2]
                 cur_ind[2] += step[2]
         else:
             if tmax[1] < tmax[2]:
                 grid_t[cur_ind[0], cur_ind[1], cur_ind[2]] = tmax[1] - enter_t
-                if grid_t[cur_ind[0], cur_ind[1], cur_ind[2]] > 0:
-                    grid_mask[cur_ind[0], cur_ind[1], cur_ind[2]] = 1
                 enter_t = tmax[1]
                 tmax[1] += tdelta[1]
                 cur_ind[1] += step[1]
             else:
                 grid_t[cur_ind[0], cur_ind[1], cur_ind[2]] = tmax[2] - enter_t
-                if grid_t[cur_ind[0], cur_ind[1], cur_ind[2]] > 0:
-                    grid_mask[cur_ind[0], cur_ind[1], cur_ind[2]] = 1
                 enter_t = tmax[2]
                 tmax[2] += tdelta[2]
                 cur_ind[2] += step[2]
