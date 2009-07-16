@@ -343,7 +343,7 @@ class AMRGridPatch(AMRData):
     child_indices = property(fget=_get_child_indices, fdel = _del_child_indices)
 
     def retrieve_ghost_zones(self, n_zones, fields, all_levels=False,
-                             smoothed=False):
+                             smoothed=False, old=False):
         # We will attempt this by creating a datacube that is exactly bigger
         # than the grid by nZones*dx in each direction
         nl = self.get_global_startindex() - n_zones
@@ -359,9 +359,15 @@ class AMRGridPatch(AMRData):
                   'num_ghost_zones':n_zones,
                   'use_pbar':False, 'fields':fields}
         if smoothed:
-            cube = self.hierarchy.smoothed_covering_grid(*args, **kwargs)
+            cube = self.hierarchy.smoothed_covering_grid(
+                level, new_left_edge, new_right_edge, **kwargs)
         else:
-            cube = self.hierarchy.covering_grid(*args, **kwargs)
+            if old:
+                cube = self.hierarchy.covering_grid(
+                    level, new_left_edge, new_right_edge, **kwargs)
+            else:
+                cube = self.hierarchy.new_covering_grid(
+                    level, new_left_edge, **kwargs)
         return cube
 
     def get_vertex_centered_data(self, field, smoothed=True):
