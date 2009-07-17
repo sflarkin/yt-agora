@@ -100,9 +100,9 @@ class AMRGridPatch(AMRData):
         # So first we figure out what the index is.  We don't assume
         # that dx=dy=dz , at least here.  We probably do elsewhere.
         id = self.id - self._id_offset
-        self.dds = na.array([self.hierarchy.gridDxs[id,0],
-                                     self.hierarchy.gridDys[id,0],
-                                     self.hierarchy.gridDzs[id,0]])
+        LE, RE = self.hierarchy.gridRightEdge[id,:], \
+                 self.hierarchy.gridLeftEdge[id,:]
+        self.dds = na.array((RE-LE)/self.ActiveDimensions)
         self.data['dx'], self.data['dy'], self.data['dz'] = self.dds
 
     @property
@@ -178,12 +178,6 @@ class AMRGridPatch(AMRData):
         # This might be needed for streaming formats
         #self.Time = h.gridTimes[my_ind,0]
         self.NumberOfParticles = h.gridNumberOfParticles[my_ind,0]
-        self.Children = h.gridTree[my_ind]
-        pID = h.gridReverseTree[my_ind]
-        if pID != None and pID != -1:
-            self.Parent = weakref.proxy(h.grids[pID - self._id_offset])
-        else:
-            self.Parent = None
 
     def __len__(self):
         return na.prod(self.ActiveDimensions)
@@ -415,6 +409,9 @@ class EnzoGridBase(AMRGridPatch):
         """
         #All of the field parameters will be passed to us as needed.
         AMRGridPatch.__init__(self, id, filename, hierarchy)
+        self.Parent = []
+        self.Children = []
+        self.Level = -1
 
     def _guess_properties_from_parent(self):
         """
