@@ -25,6 +25,8 @@ License:
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+data_object_registry = {}
+
 from yt.lagos import *
 
 def restore_grid_state(func):
@@ -99,7 +101,7 @@ class FakeGridForParticles(object):
         else: tr = self.data[field]
         return tr
 
-class AMRData:
+class AMRData(object):
     """
     Generic AMRData container.  By itself, will attempt to
     generate field, read fields (method defined by derived classes)
@@ -108,6 +110,13 @@ class AMRData:
     _grids = None
     _num_ghost_zones = 0
     _con_args = ()
+    _skip_add = False
+
+    class __metaclass__(type):
+        def __init__(cls, name, b, d):
+            type.__init__(cls, name, b, d)
+            if hasattr(cls, "_type_name") and not cls._skip_add:
+                data_object_registry[cls._type_name] = cls
 
     def __init__(self, pf, fields, **kwargs):
         """
@@ -119,6 +128,8 @@ class AMRData:
         if pf != None:
             self.pf = pf
             self.hierarchy = pf.hierarchy
+        self.hierarchy.objects.append(weakref.proxy(self))
+        mylog.debug("Appending object to %s", self.pf)
         if fields == None: fields = []
         self.fields = ensure_list(fields)[:]
         self.data = {}
@@ -1776,6 +1787,7 @@ class AMRRegionStrictBase(AMRRegionBase):
     """
     AMRRegion without any dx padding for cell selection
     """
+    _type_name = "region_strict"
     _dx_pad = 0.0
 
 class AMRPeriodicRegionBase(AMR3DData):
@@ -1837,9 +1849,10 @@ class AMRPeriodicRegionStrictBase(AMRPeriodicRegionBase):
     """
     AMRPeriodicRegion without any dx padding for cell selection
     """
+    _type_name = "periodic_region_strict"
     _dx_pad = 0.0
 
-class AMRGridCollection(AMR3DData):
+class AMRGridCollectionBase(AMR3DData):
     """
     An arbitrary selection of grids, within which we accept all points.
     """
@@ -1895,7 +1908,7 @@ class AMRSphereBase(AMR3DData):
         # Now we sort by level
         grids = grids.tolist()
         grids.sort(key=lambda x: (x.Level, x.LeftEdge[0], x.LeftEdge[1], x.LeftEdge[2]))
-        self._grids = na.array(grids)
+        self._grids = na.array(grids, dtype='object')
 
     def _is_fully_enclosed(self, grid):
         r = na.abs(grid._corners - self.center)
@@ -1917,7 +1930,7 @@ class AMRSphereBase(AMR3DData):
             self._cut_masks[grid.id] = cm
         return cm
 
-class AMRCoveringGridBase(AMR3DData):
+class AMRFloatCoveringGridBase(AMR3DData):
     """
     Covering grids represent fixed-resolution data over a given region.
     In order to achieve this goal -- for instance in order to obtain ghost
@@ -1926,7 +1939,7 @@ class AMRCoveringGridBase(AMR3DData):
     scales) on the input data.
     """
     _spatial = True
-    _type_name = "covering_grid"
+    _type_name = "float_covering_grid"
     _con_args = ('level', 'left_edge', 'right_edge', 'ActiveDimensions')
     def __init__(self, level, left_edge, right_edge, dims, fields = None,
                  pf = None, num_ghost_zones = 0, use_pbar = True, **kwargs):
@@ -2066,7 +2079,7 @@ class AMRCoveringGridBase(AMR3DData):
     def RightEdge(self):
         return self.right_edge
 
-class AMRSmoothedCoveringGridBase(AMRCoveringGridBase):
+class AMRSmoothedCoveringGridBase(AMRFloatCoveringGridBase):
     _type_name = "smoothed_covering_grid"
     def __init__(self, *args, **kwargs):
         dlog2 = na.log10(kwargs['dims'])/na.log10(2)
@@ -2075,7 +2088,7 @@ class AMRSmoothedCoveringGridBase(AMRCoveringGridBase):
             #mylog.warning("Must be power of two dimensions")
             #raise ValueError
         kwargs['num_ghost_zones'] = 0
-        AMRCoveringGridBase.__init__(self, *args, **kwargs)
+        AMRFloatCoveringGridBase.__init__(self, *args, **kwargs)
 
     def _get_list_of_grids(self):
         if na.any(self.left_edge - self.dds < self.pf["DomainLeftEdge"]) or \
@@ -2171,10 +2184,10 @@ class AMRSmoothedCoveringGridBase(AMRCoveringGridBase):
     def flush_data(self, *args, **kwargs):
         raise KeyError("Can't do this")
 
-class AMRNewCoveringGridBase(AMR3DData):
+class AMRCoveringGridBase(AMR3DData):
     _spatial = True
-    _type_name = "new_covering_grid"
-    _con_argss = ('level', 'left_edge', 'right_edge', 'ActiveDimensions')
+    _type_name = "covering_grid"
+    _con_args = ('level', 'left_edge', 'right_edge', 'ActiveDimensions')
     def __init__(self, level, left_edge, dims, fields = None,
                  pf = None, num_ghost_zones = 0, use_pbar = True, **kwargs):
         AMR3DData.__init__(self, center=None, fields=fields, pf=pf, **kwargs)
@@ -2305,27 +2318,15 @@ class AMRNewCoveringGridBase(AMR3DData):
     def RightEdge(self):
         return self.right_edge
 
-class AMRNewSmoothedCoveringGridBase(AMRNewCoveringGridBase):
+class AMRIntSmoothedCoveringGridBase(AMRCoveringGridBase):
+    _skip_add = True
     def _get_list_of_grids(self):
         buffer = self.pf.h.select_grids(0)[0].dds
-        AMRNewCoveringGridBase._get_list_of_grids(buffer)
+        AMRCoveringGridBase._get_list_of_grids(buffer)
         self._grids = self._grids[::-1]
 
     def _get_data_from_grid(self, grid, fields):
         pass
-
-class EnzoOrthoRayBase(AMROrthoRayBase): pass
-class EnzoRayBase(AMRRayBase): pass
-class EnzoSliceBase(AMRSliceBase): pass
-class EnzoCuttingPlaneBase(AMRCuttingPlaneBase): pass
-class EnzoProjBase(AMRProjBase): pass
-class EnzoCylinderBase(AMRCylinderBase): pass
-class EnzoRegionBase(AMRRegionBase): pass
-class EnzoPeriodicRegionBase(AMRPeriodicRegionBase): pass
-class EnzoGridCollection(AMRGridCollection): pass
-class EnzoSphereBase(AMRSphereBase): pass
-class EnzoCoveringGrid(AMRCoveringGridBase): pass
-class EnzoSmoothedCoveringGrid(AMRSmoothedCoveringGridBase): pass
 
 def _reconstruct_object(*args, **kwargs):
     pfid = args[0]
