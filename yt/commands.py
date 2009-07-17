@@ -241,7 +241,6 @@ class YTCommands(cmdln.Cmdln):
     def do_halos(self, subcmd, opts, arg):
         """
         Run HaloProfiler on one dataset.
-
         ${cmd_option_list}
         """
         import yt.extensions.HaloProfiler as HP
@@ -255,6 +254,7 @@ class YTCommands(cmdln.Cmdln):
             hp.makeProfiles()
         if opts.make_projections:
             hp.makeProjections()
+        del hp
 
     @add_cmd_options(["maxw", "minw", "proj", "axis", "field", "weight",
                       "zlim", "nframes", "output", "cmap", "uboxes", "dex",
