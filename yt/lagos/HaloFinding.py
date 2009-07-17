@@ -27,13 +27,14 @@ License:
 
 from yt.lagos import *
 from yt.lagos.hop.EnzoHop import RunHOP
+from yt.lagos.chainHOP.chainHOP import *
 try:
     from yt.lagos.fof.EnzoFOF import RunFOF
 except ImportError:
     pass
 
 from kd import *
-import math
+import math,sys
 
 class Halo(object):
     """
@@ -147,6 +148,9 @@ class Halo(object):
         self._processing = False
 
 class HOPHalo(Halo):
+    pass
+
+class chainHOPHalo(Halo):
     pass
 
 class FOFHalo(Halo):
@@ -393,8 +397,181 @@ class FOFHaloList(HaloList):
     def write_out(self, filename="FOFAnalysis.out"):
         HaloList.write_out(self, filename)
 
+class chainHOPHaloList(HaloList):
+    _name = "chainHOP"
+    _halo_class = chainHOPHalo
+    _fields = ["particle_position_%s" % ax for ax in 'xyz'] + \
+              ["ParticleMassMsun"]
+    
+    def __init__(self, data_source, padding, num_neighbors, bounds, total_mass,
+        threshold=160.0, dm_only=True):
+        """
+        Run hop on *data_source* with a given density *threshold*.  If
+        *dm_only* is set, only run it on the dark matter particles, otherwise
+        on all particles.  Returns an iterable collection of *HopGroup* items.
+        """
+        self.threshold = threshold
+        self.num_neighbors = num_neighbors
+        self.bounds = bounds
+        self.total_mass = total_mass
+        self.period = self._data_source.pf['DomainRightEdge'] - \
+            self._data_source.pf['DomainLeftEdge']
+        mylog.info("Initializing HOP")
+        HaloList.__init__(self, data_source, dm_only)
+
+    def _is_inside(self,point):
+        # test to see if this point is inside the 'real' region
+        (LE,RE) = self.bounds
+        point = na.array(point)
+        if (point >= LE).all() and (point < RE).all():
+            return True
+        else:
+            return False
+
+    def _build_task_chain_map(self):
+        """
+        From padded_particles build a mapping that identifies chains on each
+        task to a different chain on another task.
+        """
+        self.particle_fields["particle_index"] = self._data_source["particle_index"][self._base_indices]
+        # Figure out our offset
+        #my_first_id = sum([v for k,v in halo_info.items() if k < mine])
+        #after = my_first_id + max(self.tags) + 1
+        # build the list of [particle_index, taskID, grpID]
+        if len(self.padded_particles):
+            self.particle_index_map = self.particle_fields["particle_index"][self.padded_particles]
+            tag_map = self.tags[self.padded_particles]
+            temp_map = []
+            for i,particle in enumerate(self.particle_index_map):
+                temp_map.append([particle,self.mine,tag_map[i]]) # real ID, task ID, chainID
+            self.particle_index_map = na.array(temp_map)
+        else:
+            self.particle_index_map = na.array([])
+        # concatenate the map on all tasks, it would be faster to
+        # intelligently send this to only the processors that need each 
+        # part of the data, but that's harder. Maybe later.
+        #mylog.info("%s" % str(self.particle_index_map))
+        self.particle_index_map = self._mpi_catarray(self.particle_index_map)
+        if len(self.particle_index_map) == 0:
+            # none of the chains cross the boundaries, so we're done here.
+            mylog.info("No chains need to be merged.")
+            return
+        # but if there are crossings, move forward.
+        # On each processor, if one of the particles it owns (in the real
+        # region!) is in the map, add an entry to the task_chain_map
+        self.task_chain_map = []
+        particle_map_column = self.particle_index_map[:,0]
+        for index,ownPart in enumerate(self.particle_fields["particle_index"]):
+            if ownPart in particle_map_column:
+                remote_index = 0
+                while particle_map_column[remote_index] != ownPart:
+                    remote_index += 1
+                if self.is_inside[index]:
+                    #mylog.info('point %s bound %s ownPart %s' % \
+                    #(str(point),str(self.bounds),str(ownPart)))
+                    # find out which local chain this particle lives in
+                    local_chainID = self.particle_fields["tags"][index]
+                    # add a mapping, if it isn't already there
+                    # put lower-indexed task ID first
+                    if self.particle_index_map[remote_index][1] < self.mine:
+                        map = [self.particle_index_map[remote_index][1],\
+                        self.particle_index_map[remote_index][2], \
+                        self.mine, local_chainID]
+                    else:
+                        map = [self.mine, local_chainID, \
+                        self.particle_index_map[remote_index][1],\
+                        self.particle_index_map[remote_index][2] ]
+                    #mylog.info("map %s" % str(map))
+                    if map not in self.task_chain_map:
+                        self.task_chain_map.append(map)
+        # concatenate the task_chain_map on all tasks
+        self.task_chain_map = self._mpi_catlist(self.task_chain_map)
+        #mylog.info("end %s" % str(self.task_chain_map))
+
+    def _build_task_densest_in_chain(self):
+        """
+        'Upgrade' self.densest_in_chain to include the task each chain is on.
+        The result will be accessed: self.densest_in_chain[task][chainID].
+        """
+        temp = {}
+        temp[self.mine] = self.densest_in_chain
+        self._mpi_joindict(temp)
+        self.densest_in_chain = temp
+
+    def _build_task_chain_densest_n(self):
+        """
+        'Upgrade' self.chain_densest_n to include the task each chain is on.
+        For now we'll be cheap and make the keys into strings, with the form
+        'taskID,chainID'
+        """
+        temp = {}
+        for chain_high in self.chain_densest_n:
+            h = '%d,%d' % (self.mine, chain_high)
+            temp[h] = {}
+            for chain_low in self.chain_densest_n[chain_high]:
+                l = '%d,%d' % (self.mine, chain_low)
+                temp[h][l] = self.chain_densest_n[chain_high][chain_low]
+        self._mpi_joindict(temp)
+        self.chain_densest_n = temp
+    
+    def _update_chain_densest_n(self):
+        """
+        Update chain_densest_n to reflect the potential neighbors from
+        chain_potential_n. This involves figuring out the real
+        particle_index for each of the potential partcles, and communicating
+        this to the neighboring task. Then, if that task finds that particle
+        is in a chain on in its domain, adding that information to a list which
+        is then communicated back to the first. chain_densest_n is updated to
+        consider the neighboring chains, taking note of identified chains in
+        task_chain_map.
+        """
+    
+    def _update_chain_densest_n(self):
+        """
+        Using chain_potential_n as a source of potential mergings between
+        chains, update chain_densest_n while refering to self.task_chain_map
+        as to not merge chains that are already identified as being
+        connected.
+        """
+        
+        
+
+    def _run_finder(self):
+        xt = self.particle_fields["particle_position_x"] - 0.961
+        yt = self.particle_fields["particle_position_y"] - 0.369
+        zt = self.particle_fields["particle_position_z"] - 0.710
+        for i,x in enumerate(xt):
+            if x < 0:
+                xt[i] = 1+x
+        for i,y in enumerate(yt):
+            if y < 0:
+                yt[i] = 1+y
+        for i,z in enumerate(zt):
+            if z < 0:
+                zt[i] = 1+z
+        obj = RunChainHOP(self.period, self.padding,
+            self.num_neighbors, self.bounds,xt,yt,zt,
+            self.particle_fields["ParticleMassMsun"]/self.total_mass,
+            self.threshold)
+        self.densities, self.tags = obj.density, obj.chainID
+        self.padded_particles = obj.padded_particles
+        self.is_inside = obj.is_inside
+        self.densest_in_chain = obj.densest_in_chain
+        self.chain_densest_n = obj.chain_densest_n
+        self.particle_fields["densities"] = self.densities
+        self.particle_fields["tags"] = self.tags
+        if self._distributed:
+            self.mine, halo_info = self._mpi_info_dict(max(self.tags) + 1)
+            #nhalos = sum(halo_info.values())
+            self._build_task_chain_map()
+            self._build_task_densest_in_chain()
+            self._build_task_chain_densest_n()
+
+    def write_out(self, filename="chainHopAnalysis.out"):
+        HaloList.write_out(self, filename)
+
 class GenericHaloFinder(ParallelAnalysisInterface):
-    def __init__(self, pf, dm_only=True, padding=0.02):
+    def __init__(self, pf, dm_only=True, padding=0.0):
         self.pf = pf
         self.hierarchy = pf.h
         self.center = (pf["DomainRightEdge"] + pf["DomainLeftEdge"])/2.0
@@ -487,15 +664,54 @@ class GenericHaloFinder(ParallelAnalysisInterface):
             if not self._is_mine(halo): continue
             halo.write_particle_list(f)
 
+class chainHF(GenericHaloFinder, chainHOPHaloList):
+    def __init__(self, pf, threshold=160, dm_only=True):
+        GenericHaloFinder.__init__(self, pf, dm_only, padding=0.0)
+        self.padding = 0.0 
+        self.num_neighbors = 65
+        # get the total number of particles across all procs, with no padding
+        padded, LE, RE, self._data_source = self._partition_hierarchy_3d(padding=self.padding)
+        # also get the total mass of particles
+        if dm_only:
+            select = self._data_source["creation_time"] < 0
+            total_mass = self._mpi_allsum((self._data_source["ParticleMassMsun"][select]).sum())
+            n_parts = self._mpi_allsum((self._data_source["particle_position_x"][select]).size)
+        else:
+            total_mass = self._mpi_allsum(self._data_source["ParticleMassMsun"].sum())
+            n_parts = self._mpi_allsum(self._data_source["particle_position_x"].size)
+        # get the average spacing between particles
+        l = pf["DomainRightEdge"] - pf["DomainLeftEdge"]
+        vol = l[0] * l[1] * l[2]
+        avg_spacing = (float(vol) / n_parts)**(1./3.)
+        # padding is a function of inter-particle spacing, this is an
+        # approximation, but it's OK with the safety factor
+        safety = 4
+        self.padding = (self.num_neighbors)**(1./3.) * safety * avg_spacing
+        print 'padding',self.padding,'avg_spacing',avg_spacing,'vol',vol,'nparts',n_parts
+        padded, LE, RE, self._data_source = self._partition_hierarchy_3d(padding=self.padding)
+        if not padded:
+            self.padding = 0.0
+        self.bounds = (LE, RE)
+        chainHOPHaloList.__init__(self, self._data_source, self.padding, \
+        self.num_neighbors, self.bounds, total_mass, threshold=threshold, dm_only=dm_only)
+        self._parse_halolist(1.)
+        self._join_halolists()
+
 class HOPHaloFinder(GenericHaloFinder, HOPHaloList):
     def __init__(self, pf, threshold=160, dm_only=True, padding=0.02):
         GenericHaloFinder.__init__(self, pf, dm_only, padding)
         
         # do it once with no padding so the total_mass is correct (no duplicated particles)
         self.padding = 0.0
-        padded, LE, RE, data_source = self._partition_hierarchy_3d(padding=self.padding)
+        padded, LE, RE, self._data_source = self._partition_hierarchy_3d(padding=self.padding)
         # For scaling the threshold, note that it's a passthrough
-        total_mass = self._mpi_allsum(data_source["ParticleMassMsun"].sum())
+        if dm_only:
+            select = self._data_source["creation_time"] > 0
+            total_mass = self._mpi_allsum((self._data_source["ParticleMassMsun"][select]).sum())
+            sub_mass = (self._data_source["ParticleMassMsun"][select]).sum()
+        else:
+            total_mass = self._mpi_allsum(self._data_source["ParticleMassMsun"].sum())
+            sub_mass = self._data_source["ParticleMassMsun"].sum()
         # MJT: Note that instead of this, if we are assuming that the particles
         # are all on different processors, we should instead construct an
         # object representing the entire domain and sum it "lazily" with
@@ -504,8 +720,8 @@ class HOPHaloFinder(GenericHaloFinder, HOPHaloList):
         padded, LE, RE, self._data_source = self._partition_hierarchy_3d(padding=self.padding)
         self.bounds = (LE, RE)
         # reflect particles around the periodic boundary
-        self._reposition_particles((LE, RE))
-        sub_mass = self._data_source["ParticleMassMsun"].sum()
+        #self._reposition_particles((LE, RE))
+        #sub_mass = self._data_source["ParticleMassMsun"].sum()
         HOPHaloList.__init__(self, self._data_source, threshold*total_mass/sub_mass, dm_only)
         self._parse_halolist(total_mass/sub_mass)
         self._join_halolists()
@@ -527,7 +743,7 @@ class FOFHaloFinder(GenericHaloFinder, FOFHaloList):
         padded, LE, RE, self._data_source = self._partition_hierarchy_3d(padding=self.padding)
         self.bounds = (LE, RE)
         # reflect particles around the periodic boundary
-        self._reposition_particles((LE, RE))
+        #self._reposition_particles((LE, RE))
         # here is where the FOF halo finder is run
         FOFHaloList.__init__(self, self._data_source, link * avg_spacing, dm_only)
         self._parse_halolist(1.)
