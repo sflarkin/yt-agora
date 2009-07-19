@@ -259,6 +259,38 @@ class ParallelAnalysisInterface(object):
                 LE, RE, self.hierarchy.periodic_region_strict(self.center, LE-padding, RE+padding)
 
         return False, LE, RE, self.hierarchy.region_strict(self.center, LE, RE)
+
+    def _find_neighbor_3d(self, shift):
+        """ Given a shift array, 1x3 long, find the task ID
+        of that neighbor. For example, shift=[1,0,0] finds the neighbor
+        immediately to the right, in the positive x direction.
+        """
+        cc = na.array(MPI.Compute_dims(MPI.COMM_WORLD.size, 3))
+        mi = MPI.COMM_WORLD.rank
+        si = MPI.COMM_WORLD.size
+        # store some facts about myself
+        mi_cx,mi_cy,mi_cz = na.unravel_index(mi,cc)
+        mi_ar = na.array([mi_cx,mi_cy,mi_cz])
+        # these are identical on all tasks
+        # should these be calculated once and stored?
+        #dLE = na.empty((si,3), dtype='float64') # positions not needed yet...
+        #dRE = na.empty((si,3), dtype='float64')
+        tasks = na.empty((cc[0],cc[1],cc[2]), dtype='int64')
+        
+        for i in range(si):
+            cx,cy,cz = na.unravel_index(i,cc)
+            tasks[cx,cy,cz] = i
+            #x = na.mgrid[LE[0]:RE[0]:(cc[0]+1)*1j][cx:cx+2]
+            #y = na.mgrid[LE[1]:RE[1]:(cc[1]+1)*1j][cy:cy+2]
+            #z = na.mgrid[LE[2]:RE[2]:(cc[2]+1)*1j][cz:cz+2]
+            #dLE[i, :] = na.array([x[0], y[0], z[0]], dtype='float64')
+            #dRE[i, :] = na.array([x[1], y[1], z[1]], dtype='float64')
+        
+        # find the neighbor
+        ne = (mi_ar + shift) % cc
+        ne = tasks[ne[0],ne[1],ne[2]]
+        return ne
+        
         
     def _barrier(self):
         if not self._distributed: return
@@ -294,6 +326,29 @@ class ParallelAnalysisInterface(object):
         if MPI.COMM_WORLD.rank == 0:
             for i in range(1,MPI.COMM_WORLD.size):
                 data.update(MPI.COMM_WORLD.recv(source=i, tag=0))
+        else:
+            MPI.COMM_WORLD.send(data, dest=0, tag=0)
+        data = MPI.COMM_WORLD.bcast(data, root=0)
+        self._barrier()
+        return data
+
+    @parallel_passthrough
+    def _mpi_maxdict(self, data):
+        """
+        For each key in data, find the maximum value across all tasks, and
+        then broadcast it back.
+        """
+        self._barrier()
+        if MPI.COMM_WORLD.rank == 0:
+            for i in range(1,MPI.COMM_WORLD.size):
+                temp_data = MPI.COMM_WORLD.recv(source=i, tag=0)
+                for key in temp_data:
+                    try:
+                        max = data[key]
+                    except KeyError:
+                        max = 0.
+                    if max < temp_data[key]:
+                        data[key] = temp_data[key]
         else:
             MPI.COMM_WORLD.send(data, dest=0, tag=0)
         data = MPI.COMM_WORLD.bcast(data, root=0)
