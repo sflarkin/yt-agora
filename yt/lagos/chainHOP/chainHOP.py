@@ -4,11 +4,19 @@ from sets import Set
 
 from yt.lagos import *
 from yt.extensions.kdtree import *
+from yt.lagos.ParallelTools import _send_array, _recv_array
 from Forthon import *
 
-class RunChainHOP(object):
+class PaddedPart(object):
+    def __init__(self, local_index, particle_index, chainID, shift):
+        self.local_index = local_index
+        self.particle_index = particle_index
+        self.chainID = chainID
+        self.shift = shift
+
+class RunChainHOP(ParallelAnalysisInterface):
     def __init__(self,period, padding, num_neighbors, bounds,
-            xpos, ypos, zpos, mass, threshold=160.0):
+            xpos, ypos, zpos, index, mass, threshold=160.0):
         self.threshold = threshold
         self.saddlethresh = 2.5 * threshold
         self.peakthresh = 3 * threshold
@@ -19,6 +27,7 @@ class RunChainHOP(object):
         self.xpos = xpos
         self.ypos = ypos
         self.zpos = zpos
+        self.index = index
         self.mass = mass
         self.padded_particles = []
         self.size = len(self.xpos)
@@ -55,8 +64,44 @@ class RunChainHOP(object):
         points = fKD.pos.transpose()
         self.is_inside = ( (points >= LE).all(axis=1) * \
             (points < RE).all(axis=1) )
-        # also mark padded particles that are in a right side padding:
-        self.padded_right = (points >= RE).any(axis=1)
+
+    def _find_shift(self, i):
+        # Find the shift vector for a padded particle
+        # This shouldn't happen, but just in case, an internal particle
+        # has no shift.
+        if self.is_inside[i]: return numpy.array([0,0,0])
+        (LE, RE) = self.bounds
+        xshift, yshift, zshift = 0, 0, 0
+        if self.xpos[i] >= RE[0]: xshift = 1
+        if self.xpos[i] < LE[0]: xshift = -1
+        if self.ypos[i] >= RE[1]: yshift = 1
+        if self.ypos[i] < LE[1]: yshift = -1
+        if self.zpos[i] >= RE[2]: zshift = 1
+        if self.zpos[i] < LE[2]: zshift = -1
+        shift = na.array([xshift,yshift,zshift],dtype='int64')
+        return shift
+        
+    def _translate_shift(self, i=None, shift=None):
+        """
+        Given an integer, return the corresponding shift, and given a shift
+        return the integer.
+        """
+        d = {0:[-1,-1,-1], 1:[-1,-1,0], 2:[-1,-1,1], 3:[-1,0,-1], 4:[-1,0,0],
+            5:[-1,0,1], 6:[-1,1,-1], 7:[-1,1,0], 8:[-1,1,1,], 9:[0,-1,-1],
+            10:[0,-1,0], 11:[0,-1,1], 12:[0,0,-1], 13:[0,0,0], 14:[0,0,1],
+            15:[0,1,-1], 16:[0,1,0], 17:[0,1,1], 18:[1,-1,-1], 19:[1,-1,0],
+            20:[1,-1,1], 21:[1,0,-1], 22:[1,0,0], 23:[1,0,1], 24:[1,1,-1],
+            25:[1,1,0], 26:[1,1,1]}
+        for key in d:
+            d[key] = na.array(d[key], dtype='int64')
+        if i==None and shift==None: return None
+        if i!=None:
+            return d[i]
+        if shift!=None:
+            shift = na.array(shift)
+            for key in d:
+                if d[key].all() == shift.all():
+                    return key
 
     def _densestNN(self):
         """
@@ -138,6 +183,157 @@ class RunChainHOP(object):
             chainIDnew = self._recurse_links(nn, chainIDmax)
             self.chainID[pi] = chainIDnew
             return chainIDnew
+
+    def _globally_assign_chainIDs(self, chain_count):
+        """
+        Convert local chainIDs into globally unique chainIDs.
+        """
+        # First find out the number of chains on each processor.
+        self.mine, chain_info = self._mpi_info_dict(chain_count)
+        self.nchains = sum(chain_info.values())
+        # Figure out our offset.
+        self.my_first_id = sum([v for k,v in chain_info.items() if k < self.mine])
+        # Change particle IDs, -1 still means no chain.
+        for i in xrange(self.size):
+            if self.chainID[i] != -1:
+                self.chainID[i] += self.my_first_id
+
+    def _create_global_densest_in_chain(self):
+        """
+        With the globally unique chainIDs, update densest_in_chain.
+        """
+        # shift the values over
+        temp = self.densest_in_chain.copy()
+        self.densest_in_chain = {}
+        for dens in temp:
+            self.densest_in_chain[dens + self.my_first_id] = temp[dens]
+        # distribute this
+        self.densest_in_chain = self._mpi_joindict(self.densest_in_chain)
+
+    def _build_uphill_info(self):
+        """
+        Use self.padded_particles to build the data that will be transferred
+        to neighboring regions.
+        """
+        self.uphill_info = {}
+        self.uphill_info_count = {}
+        for i in range(27):
+            self.uphill_info[i] = []
+            self.uphill_info_count[i] = 0
+        for part in self.padded_particles:
+            # figure out the real particle_index
+            real_index = self.index[part]
+            shift = self._find_shift(part)
+            shift_index = self._translate_shift(shift=shift)
+            self.uphill_info_count[shift_index] += 1
+            chainID = self.chainID[part]
+            self.uphill_info[shift_index].append(PaddedPart(part, real_index, chainID, shift))
+
+    def _communicate_uphill_info(self):
+        """
+        Communicate the links to the correct neighbors from uphill_info.
+        """
+        self.uphill_recv_count = {} # shift_index -> count
+        self.uphill_recv = [] # ea. entry a list (array) [particle_index, chainID]
+        # first we need to tell our neighbors how many values to expect
+        for i in range(27):
+            # this is ourselves, move on
+            if i==13: continue
+            shift = self._translate_shift(i=i)
+            neighbor = self._find_neighbor_3d(shift)
+            _send_array(self.uphill_info_count[i], neighbor)
+        # now we receive them, the order doesn't matter because each of my 
+        # neighbors is only sending me one thing.
+        for i in range(27):
+            if i==13: continue
+            shift = self._translate_shift(i=i)
+            neighbor = self._find_neighbor_3d(shift)
+            self.uphill_recv_count[i] = _recv_array(neighbor)
+        # now we send the information to neighbors who have non-zero information
+        # to receive.
+        for shift_index in self.uphill_info_count:
+            if self.uphill_info_count[shift_index] == 0:
+                continue
+            shift = self._translate_shift(i=shift_index)
+            neighbor = self._find_neighbor_3d(shift)
+            for info in self.uphill_info[shift_index]:
+                data = na.array([info.particle_index, info.chainID])
+                _send_array(data, neighbor)
+        # now we receive the data from non-zero neighbors
+        for shift_index in self.uphill_recv_count:
+            if self.uphill_recv_count[shift_index] == 0:
+                continue
+            shift = self._translate_shift(i=shift_index)
+            neighbor = self._find_neighbor_3d(shift)
+            for i in xrange(self.uphill_recv_count[shift_index]):
+                data = _recv_array(neighbor)
+                self.uphill_recv.append(data)
+
+    def _translate_global_to_local_particle_index(self,real_index):
+        """
+        Take a real_index and convert it to the local index for that particle.
+        I'm not sure there's a better way to do this.
+        """
+        for index,particle_index in enumerate(self.index):
+            if particle_index == real_index:
+                return particle_index
+        # oopsie below... how'd this happen? If it does, big trouble!
+        return -1
+        
+
+    def _connect_chains_across_tasks(self):
+        """
+        Using communication, push chainIDs uphill iteratively until the act of
+        pushing changes no chainIDs.
+        """
+        changes = 1
+        while changes:
+            mylog.info('loop')
+            chainID_translate_map_local = {} # local->received (new)
+            changes = 0
+            # rebuild this every time
+            self._build_uphill_info()
+            # send 'em
+            self._communicate_uphill_info()
+            # fix the IDs
+            for i,particle in enumerate(self.uphill_recv):
+                localID = self._translate_global_to_local_particle_index(particle[0])
+                self.uphill_recv[i] = na.array([localID, particle[1]])
+            # Now update our chainIDs to the received chainIDs
+            for particle in self.uphill_recv:
+                # if the 'new' chainID is different that what we already have,
+                # we need to change it.
+                if particle[1] != self.chainID[particle[0]]:
+                    changes += 1
+                    chainID_translate_map_local[self.chainID[particle[0]]] = \
+                        particle[1]
+            # an allsum will do to make it positive everywhere if it is anywhere
+            changes = self._mpi_allsum(changes)
+            # We need to update densest_in_chain, putting our local value into
+            # the slot for the new, updated chainID, remembering that these 
+            # chain links are going uphill, so *our* peak density is
+            # necessarily higher than the other thread's. But the chainID of the
+            # least-densest part of the chain is what persists, so that's where
+            # we put it.
+            for local_chainID in chainID_translate_map_local:
+                if local_chainID == -1: continue # Do we want this?
+                remote_chainID = chainID_translate_map_local[local_chainID]
+                self.densest_in_chain[remote_chainID] = \
+                    self.densest_in_chain[local_chainID]
+            # now we update densest_in_chain, finding the max across all tasks
+            self.densest_in_chain = self._mpi_maxdict(self.densest_in_chain)
+            # I may eventually do this more efficently, but for now...
+            # Convert local particles to their new chainID
+            for i in xrange(self.size):
+                old_chainID = self.chainID[i]
+                try:
+                    new_chainID = chainID_translate_map_local[old_chainID]
+                except KeyError:
+                    continue
+                self.chainID[i] = new_chainID
+            # At this point, the while loop should continue until chains are no
+            # longer changing ID.
+        sys.exit()
 
     def _connect_chains(self,chain_count):
         """
@@ -383,9 +579,16 @@ class RunChainHOP(object):
         # Build the chain of links.
         mylog.info('Building particle chains...')
         chain_count = self._build_chains()
+        mylog.info('Gobally assigning chainIDs...')
+        self._globally_assign_chainIDs(chain_count)
+        mylog.info('Global densest in chain...')
+        self._create_global_densest_in_chain()
+        #self._build_uphill_info()
+        mylog.info('Connecting chains across tasks...')
+        self._connect_chains_across_tasks()
         # Connect the chains into groups.
-        mylog.info('Connecting %d chains into groups...' % chain_count)
-        self._connect_chains(chain_count)
+        #mylog.info('Connecting %d chains into groups...' % chain_count)
+        #self._connect_chains(chain_count)
         #group_count = self._build_groups(chain_count)
         #mylog.info('Paring %d groups...' % group_count)
         # Don't pare groups here, it has to happen later.
