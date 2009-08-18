@@ -241,7 +241,6 @@ class YTCommands(cmdln.Cmdln):
     def do_halos(self, subcmd, opts, arg):
         """
         Run HaloProfiler on one dataset.
-
         ${cmd_option_list}
         """
         import yt.extensions.HaloProfiler as HP
