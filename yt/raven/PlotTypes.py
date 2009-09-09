@@ -270,6 +270,7 @@ class VMPlot(RavenPlot):
                                     top=1.0, left=0.0, right=1.0)
         self.setup_domain_edges(self.data.axis, periodic)
         self.cmap = None
+        self.label_kws = {}
         self.__setup_from_field(field)
         self.__init_temp_image(use_colorbar)
 
@@ -438,7 +439,7 @@ class VMPlot(RavenPlot):
             data_label = self.pf.field_info[field_name].get_label(proj)
         else: data_label = self.datalabel
         if self.colorbar != None:
-            self.colorbar.set_label(str(data_label))
+            self.colorbar.set_label(str(data_label), **self.label_kws)
 
 class FixedResolutionPlot(VMPlot):
 
@@ -737,7 +738,7 @@ class PhasePlot(ProfilePlot):
         self.image = None
         self.set_cmap(cmap)
         self._zlim = None
-
+     
         self.axis_names["X"] = fields[0]
         self.axis_names["Y"] = fields[1]
         self.axis_names["Z"] = fields[2]
@@ -748,6 +749,14 @@ class PhasePlot(ProfilePlot):
         self._log_y = self.data._y_log
         self._log_z = self.setup_bins(self.fields[2])
         self.__init_colorbar()
+
+    def _run_callbacks(self):
+        # We sublcass to avoid the problem of replacing self.image,
+        # which is a collection
+        self._axes.patches = []
+        self._axes.texts = []
+        for cb in self._callbacks:
+            cb(self)
 
     def __init_colorbar(self):
         temparray = na.ones((self.x_bins.size, self.y_bins.size))
@@ -764,10 +773,10 @@ class PhasePlot(ProfilePlot):
         if self.image != None and self.cmap != None:
             self.image.set_cmap(self.cmap)
 
-    def switch_z(self, field, weight="CellMassMsun", accumulation=False):
+    def switch_z(self, field, weight="CellMassMsun", accumulation=False, fractional=False):
         self.fields[2] = field
         self.axis_names["Z"] = field
-        if field not in self.data.keys(): self.data.add_fields(field, weight, accumulation)
+        if field not in self.data.keys(): self.data.add_fields(field, weight, accumulation, fractional=fractional)
         self._log_z = self.setup_bins(self.fields[2])
 
     def set_xlim(self, xmin, xmax):
