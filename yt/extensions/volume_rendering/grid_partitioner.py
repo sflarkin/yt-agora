@@ -28,12 +28,17 @@ from yt.funcs import *
 
 from VolumeIntegrator import PartitionedGrid
 
-def partition_grid(start_grid, field, log_field = True):
+def partition_grid(start_grid, field, log_field = True, threshold = None):
+    if threshold is not None:
+        if start_grid[field].max() < threshold[0] or \
+           start_grid[field].min() > threshold[1]: return None
     to_cut_up = start_grid.get_vertex_centered_data(field).astype('float64')
+
     if log_field: to_cut_up = na.log10(to_cut_up)
+
     if len(start_grid.Children) == 0:
         pg = PartitionedGrid(
-                to_cut_up,
+                to_cut_up.copy('F'),
                 na.array(start_grid.LeftEdge, dtype='float64'),
                 na.array(start_grid.RightEdge, dtype='float64'),
                 na.array(start_grid.ActiveDimensions, dtype='int64'))
@@ -61,6 +66,7 @@ def partition_grid(start_grid, field, log_field = True):
 
     grids = []
 
+    covered = na.zeros(start_grid.ActiveDimensions)
     for xs, xe in zip(x_vert[:-1], x_vert[1:]):
         for ys, ye in zip(y_vert[:-1], y_vert[1:]):
             for zs, ze in zip(z_vert[:-1], z_vert[1:]):
@@ -70,13 +76,16 @@ def partition_grid(start_grid, field, log_field = True):
                 uniq = na.unique(dd)
                 if uniq.size > 1: continue
                 if uniq[0] > -1: continue
-                data = to_cut_up[xs:xe+1,ys:ye+1,zs:ze+1]
+                data = to_cut_up[xs:xe+1,ys:ye+1,zs:ze+1].copy('F')
                 dims = na.array(dd.shape, dtype='int64')
                 start_index = na.array([xs,ys,zs], dtype='int64')
                 left_edge = start_grid.LeftEdge + start_index * start_grid.dds
-                right_edge = left_edge + (dims + 1) * start_grid.dds
+                right_edge = left_edge + dims * start_grid.dds
                 grids.append(PartitionedGrid(
                     data, left_edge, right_edge, dims))
+                covered[xs:xe,ys:ye,zs:ze] += 1
+    assert(na.all(covered == start_grid.child_mask))
+    assert(covered.max() <= 1)
 
     return grids
 
@@ -85,6 +94,7 @@ def partition_all_grids(grid_list, field = "Density", threshold = (-1e300, 1e300
     pbar = get_pbar("Partitioning", len(grid_list))
     for i, g in enumerate(grid_list):
         pbar.update(i)
-        new_grids += partition_grid(g, field, threshold)
+        to_add = partition_grid(g, field, True, threshold)
+        if to_add is not None: new_grids += to_add
     pbar.finish()
     return na.array(new_grids, dtype='object')

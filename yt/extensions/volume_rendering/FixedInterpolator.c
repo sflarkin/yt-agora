@@ -26,45 +26,25 @@
 
 #include "FixedInterpolator.h"
 
-npy_float64 fast_interpolate(npy_float64 left_edge[3], npy_float64 dds[3],
-               int *ds, int ci[3], npy_float64 cp[3], npy_float64 *data)
-{
-    npy_float64 xm, xp, ym, yp, zm, zp, dv;
+#define VINDEX(A,B,C) data[((((C)+ci[2])*(ds[1]+1)+((B)+ci[1]))*(ds[0]+1)+ci[0]+(A))]
+//  (((C*ds[1])+B)*ds[0]+A)
 
-    xm = (((ci[0]+1)*dds[0] + left_edge[0]) - cp[0])/dds[0];
-    ym = (((ci[1]+1)*dds[1] + left_edge[1]) - cp[1])/dds[1];
-    zm = (((ci[2]+1)*dds[2] + left_edge[2]) - cp[2])/dds[2];
-    xp = ((cp[0] - (ci[0]*dds[0] + left_edge[0]))/dds[0]);
-    yp = ((cp[1] - (ci[1]*dds[1] + left_edge[1]))/dds[1]);
-    zp = ((cp[2] - (ci[2]*dds[2] + left_edge[2]))/dds[2]);
-    dv = data[(((ci[0]+0)*(ds[1]+1)+(ci[1]+0))*(ds[2]+1)+ci[2]+0)]*(xm*ym*zm)
-       + data[(((ci[0]+1)*(ds[1]+1)+(ci[1]+0))*(ds[2]+1)+ci[2]+0)]*(xp*ym*zm)
-       + data[(((ci[0]+0)*(ds[1]+1)+(ci[1]+1))*(ds[2]+1)+ci[2]+0)]*(xm*yp*zm)
-       + data[(((ci[0]+0)*(ds[1]+1)+(ci[1]+0))*(ds[2]+1)+ci[2]+1)]*(xm*ym*zp)
-       + data[(((ci[0]+1)*(ds[1]+1)+(ci[1]+0))*(ds[2]+1)+ci[2]+1)]*(xp*ym*zp)
-       + data[(((ci[0]+0)*(ds[1]+1)+(ci[1]+1))*(ds[2]+1)+ci[2]+1)]*(xm*yp*zp)
-       + data[(((ci[0]+1)*(ds[1]+1)+(ci[1]+1))*(ds[2]+1)+ci[2]+0)]*(xp*yp*zm)
-       + data[(((ci[0]+1)*(ds[1]+1)+(ci[1]+1))*(ds[2]+1)+ci[2]+1)]*(xp*yp*zp);
+npy_float64 fast_interpolate(int *ds, int *ci, npy_float64 *dp,
+                             npy_float64 *data)
+{
+    int i;
+    npy_float64 dv, dm[3];
+    for(i=0;i<3;i++)dm[i] = (1.0 - dp[i]);
+    dv  = 0.0;
+    dv += VINDEX(0,0,0) * (dm[0]*dm[1]*dm[2]);
+    dv += VINDEX(0,0,1) * (dm[0]*dm[1]*dp[2]);
+    dv += VINDEX(0,1,0) * (dm[0]*dp[1]*dm[2]);
+    dv += VINDEX(0,1,1) * (dm[0]*dp[1]*dp[2]);
+    dv += VINDEX(1,0,0) * (dp[0]*dm[1]*dm[2]);
+    dv += VINDEX(1,0,1) * (dp[0]*dm[1]*dp[2]);
+    dv += VINDEX(1,1,0) * (dp[0]*dp[1]*dm[2]);
+    dv += VINDEX(1,1,1) * (dp[0]*dp[1]*dp[2]);
+    /*assert(dv < -20);*/
     return dv;
 }
 
-inline void eval_shells(int nshells, npy_float64 dv,
-                    npy_float64 *shells, npy_float64 rgba[4],
-                    npy_float64 dt)
-{
-    npy_float64 dist, alpha, blend;
-    int n;
-    for (n = 0; n < nshells; n++) {
-        dist = shells[n*6+0] - dv;
-        if (dist < 0.0) dist *= -1.0;
-        if (dist < shells[n*6+1]) {
-            blend = shells[n*6+5]*exp(-dist/8.0)*rgba[3];
-            alpha = shells[n*6+5];
-            rgba[0] += blend*shells[n*6+2];
-            rgba[1] += blend*shells[n*6+3];
-            rgba[2] += blend*shells[n*6+4];
-            rgba[3] *= (1.0 - alpha);
-            break;
-        }
-    }
-}
