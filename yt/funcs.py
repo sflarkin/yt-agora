@@ -308,3 +308,9 @@ if "--rpdb" in sys.argv:
     sys.excepthook = rpdb.rpdb_excepthook
     del sys.argv[sys.argv.index("--rpdb")]
 
+#
+# Some exceptions
+#
+
+class NoCUDAException(Exception):
+    pass
