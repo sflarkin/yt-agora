@@ -81,7 +81,7 @@ class BaseIOHandler(object):
     def _read_exception(self):
         return None
 
-class IOHandlerHDF4(BaseIOHandler):
+class IOHandlerEnzoHDF4(BaseIOHandler):
 
     _data_style = "enzo_hdf4"
 
@@ -125,7 +125,7 @@ class IOHandlerHDF4(BaseIOHandler):
     def _read_exception(self):
         return SD.HDF4Error
 
-class IOHandlerHDF4_2D(IOHandlerHDF4):
+class IOHandlerEnzoHDF4_2D(IOHandlerEnzoHDF4):
 
     _data_style = "enzo_hdf4_2d"
 
@@ -140,7 +140,7 @@ class IOHandlerHDF4_2D(IOHandlerHDF4):
     def modify(self, field):
         return field
 
-class IOHandlerHDF5(BaseIOHandler):
+class IOHandlerEnzoHDF5(BaseIOHandler):
 
     _data_style = "enzo_hdf5"
 
@@ -412,3 +412,10 @@ def readDataSliceNative(self, grid, field, axis, coord):
     sl[axis] = slice(coord, coord + 1)
     #sl = tuple(reversed(sl))
     return grid.readDataFast(field)[sl]
+
+#
+# Chombo readers
+#
+
+class IOHandlerChomboHDF5(BaseIOHandler):
+    pass
