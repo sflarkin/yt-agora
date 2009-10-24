@@ -111,4 +111,3 @@ if ytcfg.getboolean("lagos","loadfieldplugins"):
         mylog.info("Loading plugins from %s", fn)
         execfile(fn)
 
-log_fields = [] # @todo: GET RID OF THIS
