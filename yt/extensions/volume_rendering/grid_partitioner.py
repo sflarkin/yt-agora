@@ -27,16 +27,15 @@ import numpy as na
 from yt.funcs import *
 import h5py
 
-from VolumeIntegrator import PartitionedGrid
+from yt.utils import PartitionedGrid
 
 def partition_grid(start_grid, field, log_field = True, threshold = None):
     if threshold is not None:
         if start_grid[field].max() < threshold[0] or \
            start_grid[field].min() > threshold[1]: return None
-    to_cut_up = start_grid.get_vertex_centered_data(field).astype('float64')
+    to_cut_up = start_grid.get_vertex_centered_data(field, smoothed=True).astype('float64')
 
     if log_field: to_cut_up = na.log10(to_cut_up)
-    assert(na.any(na.isnan(to_cut_up)) == False)
 
     if len(start_grid.Children) == 0:
         pg = PartitionedGrid(
@@ -58,19 +57,19 @@ def partition_grid(start_grid, field, log_field = True, threshold = None):
         y_vert += [si[1], ei[1]]
         z_vert += [si[2], ei[2]]
 
-    cim = start_grid.child_index_mask
-
     # Now we sort by our vertices, in axis order
 
     x_vert.sort()
     y_vert.sort()
     z_vert.sort()
 
-    grids = []
+    return [g for g in _partition(start_grid, to_cut_up, x_vert, y_vert, z_vert)]
 
-    covered = na.zeros(start_grid.ActiveDimensions)
+def _partition(grid, grid_data, x_vert, y_vert, z_vert):
+    grids = []
+    cim = grid.child_index_mask
     for xs, xe in zip(x_vert[:-1], x_vert[1:]):
-        for ys, ye in zip(y_vert[:-1], y_vert[1:]):
+        for ys, ye in zip(y_vert[:-1:-1], y_vert[1::-1]):
             for zs, ze in zip(z_vert[:-1], z_vert[1:]):
                 sl = (slice(xs, xe), slice(ys, ye), slice(zs, ze))
                 dd = cim[sl]
@@ -78,30 +77,28 @@ def partition_grid(start_grid, field, log_field = True, threshold = None):
                 uniq = na.unique(dd)
                 if uniq.size > 1: continue
                 if uniq[0] > -1: continue
-                data = to_cut_up[xs:xe+1,ys:ye+1,zs:ze+1].copy()
+                data = grid_data[xs:xe+1,ys:ye+1,zs:ze+1].copy()
                 dims = na.array(dd.shape, dtype='int64')
                 start_index = na.array([xs,ys,zs], dtype='int64')
-                left_edge = start_grid.LeftEdge + start_index * start_grid.dds
-                right_edge = left_edge + dims * start_grid.dds
-                grids.append(PartitionedGrid(
-                    data, left_edge, right_edge, dims))
-                covered[xs:xe,ys:ye,zs:ze] += 1
-    assert(na.all(covered == start_grid.child_mask))
-    assert(covered.max() <= 1)
-
-    return grids
+                left_edge = grid.LeftEdge + start_index * grid.dds
+                right_edge = left_edge + dims * grid.dds
+                yield PartitionedGrid(
+                    data, left_edge, right_edge, dims)
 
 def partition_all_grids(grid_list, field = "Density",
                         threshold = (-1e300, 1e300), eval_func = None):
     new_grids = []
     pbar = get_pbar("Partitioning ", len(grid_list))
     if eval_func is None: eval_func = lambda a: True
+    dx = 1e300
     for i, g in enumerate(grid_list):
         if not eval_func(g): continue
         pbar.update(i)
+        if g.dds[0] < dx: dx = g.dds[0]
         to_add = partition_grid(g, field, True, threshold)
         if to_add is not None: new_grids += to_add
     pbar.finish()
+    for g in new_grids: g.min_dds = dx
     return na.array(new_grids, dtype='object')
 
 def export_partitioned_grids(grid_list, fn):
@@ -110,6 +107,7 @@ def export_partitioned_grids(grid_list, fn):
     nelem = sum((grid.my_data.size for grid in grid_list))
     ngrids = len(grid_list)
     group = f.create_group("/PGrids")
+    group.attrs["min_dds"] = grid_list[0].min_dds
     left_edge = na.concatenate([[grid.LeftEdge,] for grid in grid_list])
     f.create_dataset("/PGrids/LeftEdges", data=left_edge); del left_edge
     right_edge = na.concatenate([[grid.RightEdge,] for grid in grid_list])
@@ -131,12 +129,14 @@ def import_partitioned_grids(fn):
     data = f["/PGrids/Data"][:]
     pbar = get_pbar("Reading Grids", dims.shape[0])
     curpos = 0
+    dx = f["/PGrids"].attrs["min_dds"]
     for i in xrange(dims.shape[0]):
         gd = dims[i,:]
         gle, gre = left_edges[i,:], right_edges[i,:]
         gdata = data[curpos:curpos+gd.prod()].reshape(gd)
         # Vertex -> Grid, so we -1 from dims in this
         grid_list.append(PartitionedGrid(gdata, gle, gre, gd - 1))
+        grid_list[-1].min_dds = dx
         curpos += gd.prod()
         pbar.update(i)
     pbar.finish()
