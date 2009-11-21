@@ -1046,7 +1046,6 @@ class AMRFixedResCuttingPlaneBase(AMR2DData):
             na.where(leftOverlap & rightOverlap)]]
         self._grids = self._grids[::-1]
 
-
     def _generate_coords(self):
         self['px'] = self._coord[:,0].ravel()
         self['py'] = self._coord[:,1].ravel()
