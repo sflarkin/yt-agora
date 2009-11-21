@@ -55,6 +55,8 @@ import shelve
 
 import time
 
+import yt.amr_utils as amr_utils
+
 from Cosmology import *
 from EnzoCosmology import *
 
@@ -86,9 +88,11 @@ from DataReadingFuncs import *
 from ClusterFiles import *
 from ContourFinder import *
 from Clump import *
+from ParticleIO import *
 from BaseDataTypes import *
 from BaseGridType import *
 from EnzoRateData import *
+from ObjectFindingMixin import *
 from HierarchyType import *
 from OutputTypes import *
 from Profiles import *
