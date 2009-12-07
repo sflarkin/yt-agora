@@ -95,7 +95,7 @@ add_field('z', function=_coordZ, display_field=False,
           validators=[ValidateSpatial(0)])
 
 def _GridLevel(field, data):
-    return na.ones(data["Density"].shape)*(data.Level)
+    return na.ones(data.ActiveDimensions)*(data.Level)
 add_field("GridLevel", function=_GridLevel,
           validators=[ValidateGridType(),
                       ValidateSpatial(0)])
@@ -372,7 +372,7 @@ add_field("TotalMassMsun", units=r"M_{\odot}",
           convert_function=_convertCellMassMsun)
 
 def _StarMass(field,data):
-    return data["star_density"] * data["CellVolume"]
+    return data["star_density_pyx"] * data["CellVolume"]
 add_field("StarMassMsun", units=r"M_{\odot}",
           function=_StarMass,
           convert_function=_convertCellMassMsun)
@@ -457,17 +457,17 @@ def _DivV(field, data):
         sl_left = slice(None,-2,None)
         sl_right = slice(2,None,None)
         div_fac = 2.0
-    div_x = (data["x-velocity"][sl_right,1:-1,1:-1] -
-             data["x-velocity"][sl_left,1:-1,1:-1]) \
-          / (div_fac*data["dx"].flat[0])
-    div_y = (data["y-velocity"][1:-1,sl_right,1:-1] -
-             data["y-velocity"][1:-1,sl_left,1:-1]) \
-          / (div_fac*data["dy"].flat[0])
-    div_z = (data["z-velocity"][1:-1,1:-1,sl_right] -
-             data["z-velocity"][1:-1,1:-1,sl_left]) \
-          / (div_fac*data["dz"].flat[0])
-    new_field = na.zeros(data["x-velocity"].shape)
-    new_field[1:-1,1:-1,1:-1] = div_x+div_y+div_z
+    ds = div_fac * data['dx'].flat[0]
+    f  = data["x-velocity"][sl_right,1:-1,1:-1]/ds
+    f -= data["x-velocity"][sl_left ,1:-1,1:-1]/ds
+    ds = div_fac * data['dy'].flat[0]
+    f += data["y-velocity"][1:-1,sl_right,1:-1]/ds
+    f -= data["y-velocity"][1:-1,sl_left ,1:-1]/ds
+    ds = div_fac * data['dz'].flat[0]
+    f += data["z-velocity"][1:-1,1:-1,sl_right]/ds
+    f -= data["z-velocity"][1:-1,1:-1,sl_left ]/ds
+    new_field = na.zeros(data["x-velocity"].shape, dtype='float64')
+    new_field[1:-1,1:-1,1:-1] = f
     return na.abs(new_field)
 def _convertDivV(data):
     return data.convert("cm")**-1.0
@@ -543,24 +543,29 @@ add_field("SpecificAngularMomentumKMSMPC",
 def _AngularMomentum(field, data):
     return data["CellMass"] * data["SpecificAngularMomentum"]
 add_field("AngularMomentum", function=_AngularMomentum,
-         units=r"\rm{g}\/\rm{cm}^2/\rm{s}", vector_field=True)
+         units=r"\rm{g}\/\rm{cm}^2/\rm{s}", vector_field=True,
+         validators=[ValidateParameter('center')])
 def _AngularMomentumMSUNKMSMPC(field, data):
     return data["CellMassMsun"] * data["SpecificAngularMomentumKMSMPC"]
 add_field("AngularMomentumMSUNKMSMPC", function=_AngularMomentum,
-          units=r"M_{\odot}\rm{km}\rm{Mpc}/\rm{s}", vector_field=True)
+          units=r"M_{\odot}\rm{km}\rm{Mpc}/\rm{s}", vector_field=True,
+         validators=[ValidateParameter('center')])
 
 def _AngularMomentumX(field, data):
     return data["CellMass"] * data["SpecificAngularMomentumX"]
 add_field("AngularMomentumX", function=_AngularMomentumX,
-         units=r"\rm{g}\/\rm{cm}^2/\rm{s}", vector_field=True)
+         units=r"\rm{g}\/\rm{cm}^2/\rm{s}", vector_field=True,
+         validators=[ValidateParameter('center')])
 def _AngularMomentumY(field, data):
     return data["CellMass"] * data["SpecificAngularMomentumY"]
 add_field("AngularMomentumY", function=_AngularMomentumY,
-         units=r"\rm{g}\/\rm{cm}^2/\rm{s}", vector_field=True)
+         units=r"\rm{g}\/\rm{cm}^2/\rm{s}", vector_field=True,
+         validators=[ValidateParameter('center')])
 def _AngularMomentumZ(field, data):
     return data["CellMass"] * data["SpecificAngularMomentumZ"]
 add_field("AngularMomentumZ", function=_AngularMomentumZ,
-         units=r"\rm{g}\/\rm{cm}^2/\rm{s}", vector_field=True)
+         units=r"\rm{g}\/\rm{cm}^2/\rm{s}", vector_field=True,
+         validators=[ValidateParameter('center')])
 
 def _ParticleSpecificAngularMomentum(field, data):
     """
@@ -595,13 +600,13 @@ def _ParticleAngularMomentum(field, data):
     return data["ParticleMass"] * data["ParticleSpecificAngularMomentum"]
 add_field("ParticleAngularMomentum",
           function=_ParticleAngularMomentum, units=r"\rm{g}\/\rm{cm}^2/\rm{s}",
-          particle_type=True)
+          particle_type=True, validators=[ValidateParameter('center')])
 def _ParticleAngularMomentumMSUNKMSMPC(field, data):
     return data["ParticleMass"] * data["ParticleSpecificAngularMomentumKMSMPC"]
 add_field("ParticleAngularMomentumMSUNKMSMPC",
           function=_ParticleAngularMomentumMSUNKMSMPC,
           units=r"M_{\odot}\rm{km}\rm{Mpc}/\rm{s}",
-          particle_type=True)
+          particle_type=True, validators=[ValidateParameter('center')])
 
 def _ParticleRadius(field, data):
     center = data.get_field_parameter("center")

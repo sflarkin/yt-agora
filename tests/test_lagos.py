@@ -259,6 +259,7 @@ class Data3DBase:
         self.assertEqual(obj["CellMassMsun"].sum(), self.data["CellMassMsun"].sum())
 
 for field_name in yt.lagos.FieldInfo:
+    if field_name.startswith("PT"): continue
     field = yt.lagos.FieldInfo[field_name]
     setattr(DataTypeTestingBase, "test%s" % field.name, _returnFieldFunction(field))
 
@@ -312,7 +313,21 @@ class TestSmoothedCoveringGrid(LagosTestingBase, unittest.TestCase):
         self.assertFalse(na.any(na.isnan(cg["Temperature"])))
         self.assertFalse(na.any(cg["Temperature"]==-999))
 
-        
+class TestIntSmoothedCoveringGrid(LagosTestingBase, unittest.TestCase):
+    def setUp(self):        
+        LagosTestingBase.setUp(self)
+
+    def testCoordinates(self):
+        # We skip the first grid because it has ghost zones on all sides
+        for g in self.hierarchy.grids[1:]:
+            LE = g.LeftEdge - g.dds
+            level = g.Level
+            dims = g.ActiveDimensions + 2
+            g1 = self.hierarchy.si_covering_grid(level, LE, dims)
+            g2 = g.retrieve_ghost_zones(1, ["x","y","z"], smoothed=False)
+            for field in 'xyz':
+                diff = na.abs((g1[field] - g2[field])/(g1[field] + g2[field]))
+                self.assertAlmostEqual(diff.max(), 0.0, 1e-14)
 
 class TestDataCube(LagosTestingBase, unittest.TestCase):
     def setUp(self):
@@ -453,7 +468,7 @@ class TestSphereDataType(Data3DBase, DataTypeTestingBase, LagosTestingBase, unit
 class TestSliceDataType(DataTypeTestingBase, LagosTestingBase, unittest.TestCase):
     def setUp(self):
         DataTypeTestingBase.setUp(self)
-        self.data = self.hierarchy.slice(0,0.5)
+        self.data = self.hierarchy.slice(0,0.5, center=[0.5, 0.5, 0.5])
 
 class TestCuttingPlane(DataTypeTestingBase, LagosTestingBase, unittest.TestCase):
     def setUp(self):
