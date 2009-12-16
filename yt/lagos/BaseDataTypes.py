@@ -28,6 +28,7 @@ License:
 data_object_registry = {}
 
 from yt.lagos import *
+import math
 
 def restore_grid_state(func):
     """
@@ -534,9 +535,9 @@ class AMRRayBase(AMR1DData):
         mask = na.zeros(grid.ActiveDimensions, dtype='int')
         dts = na.zeros(grid.ActiveDimensions, dtype='float64')
         ts = na.zeros(grid.ActiveDimensions, dtype='float64')
-        import RTIntegrator as RT
-        RT.VoxelTraversal(mask, ts, dts, grid.LeftEdge, grid.RightEdge,
-                          grid.dds, self.center, self.vec)
+        from yt.amr_utils import VoxelTraversal
+        VoxelTraversal(mask, ts, dts, grid.LeftEdge, grid.RightEdge,
+                       grid.dds, self.center, self.vec)
         self._dts[grid.id] = na.abs(dts)
         self._ts[grid.id] = na.abs(ts)
         return mask
@@ -1047,7 +1048,6 @@ class AMRFixedResCuttingPlaneBase(AMR2DData):
             na.where(leftOverlap & rightOverlap)]]
         self._grids = self._grids[::-1]
 
-
     def _generate_coords(self):
         self['px'] = self._coord[:,0].ravel()
         self['py'] = self._coord[:,1].ravel()
@@ -1482,7 +1482,8 @@ class AMRFixedResProjectionBase(AMR2DData):
         self.dims = na.array([dims]*2)
         self.ActiveDimensions = na.array([dims]*3, dtype='int32')
         self.right_edge = self.left_edge + self.ActiveDimensions*self.dds
-        self.global_startindex = na.rint(self.left_edge/self.dds).astype('int64')
+        self.global_startindex = na.rint((self.left_edge - self.pf["DomainLeftEdge"])
+                                         /self.dds).astype('int64')
         self._dls = {}
         self.domain_width = na.rint((self.pf["DomainRightEdge"] -
                     self.pf["DomainLeftEdge"])/self.dds).astype('int64')
@@ -1988,6 +1989,46 @@ class AMRCylinderBase(AMR3DData):
                  & (r < self._radius))
         return cm
 
+    def volume(self, unit="unitary"):
+        """
+        Return the volume of the cylinder in units of *unit*.
+        """
+        return math.pi * (self._radius)**2. * self._height * pf[unit]**3
+
+class AMRInclinedBox(AMR3DData):
+    """
+    A rectangular prism with arbitrary alignment to the computational domain
+    """
+    _type_name="inclined_box"
+    _con_args = ()
+
+    def __init__(self, left_edge, right_edge, normal, fields=None,
+                 pf=None, **kwargs):
+        self.left_edge = na.array(left_edge)
+        self.right_edge = na.array(right_edge)
+        center = (self.right_edge - self.left_edge)
+        AMR3DData.__init__(self, center, fields, pf, **kwargs)
+        self._norm_vec = na.array(normal)/na.sqrt(na.dot(normal,normal))
+        self.refresh_data()
+
+    def _get_list_of_grids(self):
+        pass
+
+    def _is_fully_enclosed(self, grid):
+        pass
+
+    def _get_cut_mask(self, grid):
+        pass
+
+    def volume(self, unit = "unitary"):
+        """
+        Return the volume of the prism in units *unit*.
+        """
+        diff = na.array(self.right_edge) - na.array(self.left_edge)
+        # Find the full volume
+        vol = na.prod(diff * self.pf[unit])
+        return vol
+
 class AMRRegionBase(AMR3DData):
     """
     AMRRegions are rectangular prisms of data.
@@ -2028,6 +2069,15 @@ class AMRRegionBase(AMR3DData):
                  & (grid['z'] - dzp < self.right_edge[2])
                  & (grid['z'] + dzp > self.left_edge[2]) )
         return cm
+
+    def volume(self, unit = "unitary"):
+        """
+        Return the volume of the region in units *unit*.
+        """
+        diff = na.array(self.right_edge) - na.array(self.left_edge)
+        # Find the full volume
+        vol = na.prod(diff * self.pf[unit])
+        return vol
 
 class AMRRegionStrictBase(AMRRegionBase):
     """
@@ -2090,6 +2140,20 @@ class AMRPeriodicRegionBase(AMR3DData):
                           & (grid['z'] + dzp + off_z > self.left_edge[2]) )
             return cm
 
+    def volume(self, unit = "unitary"):
+        """
+        Return the volume of the region in units *unit*.
+        """
+        period = self.pf["DomainRightEdge"] - self.pf["DomainLeftEdge"]
+        diff = na.array(self.right_edge) - na.array(self.left_edge)
+        # Correct for wrap-arounds.
+        tofix = (diff < 0)
+        toadd = period[tofix]
+        diff += toadd
+        # Find the full volume
+        vol = na.prod(diff * self.pf[unit])
+        return vol
+        
 
 class AMRPeriodicRegionStrictBase(AMRPeriodicRegionBase):
     """
@@ -2175,6 +2239,12 @@ class AMRSphereBase(AMR3DData):
         if not isinstance(grid, (FakeGridForParticles, GridChildMaskWrapper)):
             self._cut_masks[grid.id] = cm
         return cm
+
+    def volume(self, unit = "unitary"):
+        """
+        Return the volume of the sphere in units *unit*.
+        """
+        return 4./3. * math.pi * (self.radius * self.pf[unit])**3.0
 
 class AMRFloatCoveringGridBase(AMR3DData):
     """
@@ -2608,13 +2678,19 @@ class AMRIntSmoothedCoveringGridBase(AMRCoveringGridBase):
                     self._refine(1, field)
             if self.level > 0:
                 self[field] = self[field][1:-1,1:-1,1:-1]
+            if na.any(self[field] == -999):
+                # and self.dx < self.hierarchy.grids[0].dx:
+                n_bad = na.where(self[field]==-999)[0].size
+                mylog.error("Covering problem: %s cells are uncovered", n_bad)
+                raise KeyError(n_bad)
             if self._use_pbar: pbar.finish()
 
     def _update_level_state(self, level, field = None):
         dx = self.pf.h.select_grids(level)[0].dds
         for ax, v in zip('xyz', dx): self['cd%s'%ax] = v
+        LL = self.left_edge - self.pf["DomainLeftEdge"]
         self._old_global_startindex = self.global_startindex
-        self.global_startindex = na.array(na.floor(1.000001*self.left_edge / dx) - 1, dtype='int64')
+        self.global_startindex = na.array(na.floor(1.000001*LL / dx) - 1, dtype='int64')
         self.domain_width = na.rint((self.pf["DomainRightEdge"] -
                     self.pf["DomainLeftEdge"])/dx).astype('int64')
         if level == 0 and self.level > 0:
@@ -2622,7 +2698,8 @@ class AMRIntSmoothedCoveringGridBase(AMRCoveringGridBase):
             idims = na.ceil((self.right_edge-self.left_edge)/dx) + 2
             self[field] = na.zeros(idims,dtype='float64')-999
         elif level == 0 and self.level == 0:
-            self.global_startindex = na.array(na.floor(self.left_edge / dx), dtype='int64')
+            DLE = self.pf["DomainLeftEdge"]
+            self.global_startindex = na.array(na.floor(LL/ dx), dtype='int64')
             idims = na.ceil((self.right_edge-self.left_edge)/dx)
             self[field] = na.zeros(idims,dtype='float64')-999
 

@@ -373,12 +373,8 @@ class HaloProfiler(lagos.ParallelAnalysisInterface):
             for hp in self.profile_fields:
                 profile.add_fields(hp['field'], weight=hp['weight_field'], accumulation=hp['accumulation'])
 
-#         profiledHalo = {}
         if virial_filter:
             self._add_actual_overdensity(profile)
-
-#         profiledHalo['center'] = halo['center']
-#         profiledHalo['id'] = halo['id']
 
         if newProfile:
             mylog.info("Writing halo %d" % halo['id'])
@@ -659,6 +655,8 @@ class HaloProfiler(lagos.ParallelAnalysisInterface):
         hop_results.write_out(hopFile)
 
         del hop_results
+        self.pf.h.clear_all_data()
+        self._barrier()
 
     @lagos.parallel_root_only
     def _write_filtered_halo_list(self, filename, format="%s"):
