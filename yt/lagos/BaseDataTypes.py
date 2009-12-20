@@ -1048,7 +1048,6 @@ class AMRFixedResCuttingPlaneBase(AMR2DData):
             na.where(leftOverlap & rightOverlap)]]
         self._grids = self._grids[::-1]
 
-
     def _generate_coords(self):
         self['px'] = self._coord[:,0].ravel()
         self['py'] = self._coord[:,1].ravel()
@@ -1990,6 +1989,46 @@ class AMRCylinderBase(AMR3DData):
                  & (r < self._radius))
         return cm
 
+    def volume(self, unit="unitary"):
+        """
+        Return the volume of the cylinder in units of *unit*.
+        """
+        return math.pi * (self._radius)**2. * self._height * pf[unit]**3
+
+class AMRInclinedBox(AMR3DData):
+    """
+    A rectangular prism with arbitrary alignment to the computational domain
+    """
+    _type_name="inclined_box"
+    _con_args = ()
+
+    def __init__(self, left_edge, right_edge, normal, fields=None,
+                 pf=None, **kwargs):
+        self.left_edge = na.array(left_edge)
+        self.right_edge = na.array(right_edge)
+        center = (self.right_edge - self.left_edge)
+        AMR3DData.__init__(self, center, fields, pf, **kwargs)
+        self._norm_vec = na.array(normal)/na.sqrt(na.dot(normal,normal))
+        self.refresh_data()
+
+    def _get_list_of_grids(self):
+        pass
+
+    def _is_fully_enclosed(self, grid):
+        pass
+
+    def _get_cut_mask(self, grid):
+        pass
+
+    def volume(self, unit = "unitary"):
+        """
+        Return the volume of the prism in units *unit*.
+        """
+        diff = na.array(self.right_edge) - na.array(self.left_edge)
+        # Find the full volume
+        vol = na.prod(diff * self.pf[unit])
+        return vol
+
 class AMRRegionBase(AMR3DData):
     """
     AMRRegions are rectangular prisms of data.
@@ -2030,6 +2069,15 @@ class AMRRegionBase(AMR3DData):
                  & (grid['z'] - dzp < self.right_edge[2])
                  & (grid['z'] + dzp > self.left_edge[2]) )
         return cm
+
+    def volume(self, unit = "unitary"):
+        """
+        Return the volume of the region in units *unit*.
+        """
+        diff = na.array(self.right_edge) - na.array(self.left_edge)
+        # Find the full volume
+        vol = na.prod(diff * self.pf[unit])
+        return vol
 
 class AMRRegionStrictBase(AMRRegionBase):
     """
@@ -2092,6 +2140,20 @@ class AMRPeriodicRegionBase(AMR3DData):
                           & (grid['z'] + dzp + off_z > self.left_edge[2]) )
             return cm
 
+    def volume(self, unit = "unitary"):
+        """
+        Return the volume of the region in units *unit*.
+        """
+        period = self.pf["DomainRightEdge"] - self.pf["DomainLeftEdge"]
+        diff = na.array(self.right_edge) - na.array(self.left_edge)
+        # Correct for wrap-arounds.
+        tofix = (diff < 0)
+        toadd = period[tofix]
+        diff += toadd
+        # Find the full volume
+        vol = na.prod(diff * self.pf[unit])
+        return vol
+        
 
 class AMRPeriodicRegionStrictBase(AMRPeriodicRegionBase):
     """
@@ -2177,6 +2239,12 @@ class AMRSphereBase(AMR3DData):
         if not isinstance(grid, (FakeGridForParticles, GridChildMaskWrapper)):
             self._cut_masks[grid.id] = cm
         return cm
+
+    def volume(self, unit = "unitary"):
+        """
+        Return the volume of the sphere in units *unit*.
+        """
+        return 4./3. * math.pi * (self.radius * self.pf[unit])**3.0
 
 class AMRFloatCoveringGridBase(AMR3DData):
     """
