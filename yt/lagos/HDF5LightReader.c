@@ -34,7 +34,6 @@
 
 #include "numpy/ndarrayobject.h"
 
-
 static PyObject *_hdf5ReadError;
 herr_t iterate_dataset(hid_t loc_id, const char *name, void *nodelist);
 
