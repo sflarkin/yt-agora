@@ -150,6 +150,8 @@ class EnzoSimulation(object):
         # Calculate times for redshift dumps.
         if self.enzoParameters['ComovingCoordinates'] and self.get_redshift_outputs:
             self._CalculateRedshiftDumpTimes()
+        else:
+            self.redshiftOutputs = []
 
         self.allOutputs = self.redshiftOutputs + self.timeOutputs
         self.allOutputs.sort(key=lambda obj:obj['time'])
@@ -175,13 +177,14 @@ class EnzoSimulation(object):
                 if q == len(self.allOutputs) - 1:
                     end_index = q
 
+        for q in range(len(self.allOutputs)):
             if self.links and start_index is not None:
-                if q == start_index:
+                if q <= start_index:
                     self.allOutputs[q]['previous'] = None
                 else:
                     self.allOutputs[q]['previous'] = self.allOutputs[q-1]
 
-                if q == end_index:
+                if q >= end_index:
                     self.allOutputs[q]['next'] = None
                 else:
                     self.allOutputs[q]['next'] = self.allOutputs[q+1]
@@ -261,6 +264,7 @@ class EnzoSimulation(object):
             if rounded - z < 0:
                 rounded += na.power(10.0,(-1.0*decimals))
             z = rounded
+
             deltaz_max = deltaz_forward(self.cosmology, z, self.enzoParameters['CosmologyComovingBoxSize'])
             outputs.append({'redshift': z, 'deltazMax': deltaz_max})
             z -= deltaz_max
