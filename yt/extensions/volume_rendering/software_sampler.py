@@ -86,6 +86,7 @@ def direct_ray_cast(pf, L, center, W, Nvec, tf,
     
     tfp = TransferFunctionProxy(tf)
 
+
     pbar = get_pbar("Ray casting ", len(partitioned_grids))
     for i,g in enumerate(partitioned_grids[ind]):
         if (i % every) == 0: 
