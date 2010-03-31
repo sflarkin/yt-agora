@@ -593,7 +593,8 @@ class AMR2DData(AMRData, GridPropertiesMixin, ParallelAnalysisInterface):
             # Now the next field can use this field
             self[field] = temp_data[field] 
         # We finalize
-        temp_data = self._mpi_catdict(temp_data)
+        if temp_data != {}:
+            temp_data = self._mpi_catdict(temp_data)
         # And set, for the next group
         for field in temp_data.keys():
             self[field] = temp_data[field]
@@ -1047,7 +1048,6 @@ class AMRFixedResCuttingPlaneBase(AMR2DData):
         self._grids = self.hierarchy.grids[valid_grids[
             na.where(leftOverlap & rightOverlap)]]
         self._grids = self._grids[::-1]
-
 
     def _generate_coords(self):
         self['px'] = self._coord[:,0].ravel()
