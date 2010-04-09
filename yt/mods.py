@@ -43,9 +43,10 @@ from yt.lagos import EnzoStaticOutput, \
     BinnedProfile1D, BinnedProfile2D, BinnedProfile3D, \
     derived_field, \
     add_field, FieldInfo, EnzoFieldInfo, Enzo2DFieldInfo, OrionFieldInfo, \
+    GadgetFieldInfo, \
     Clump, write_clump_hierarchy, find_clumps, write_clumps, \
     OrionStaticOutput, HaloFinder, HOPHaloFinder, FOFHaloFinder, parallelHF, \
-    axis_names, x_dict, y_dict
+    axis_names, x_dict, y_dict, StructFcnGen, StructSet
 
 # This is a temporary solution -- in the future, we will allow the user to
 # select this via ytcfg.
@@ -72,7 +73,7 @@ from yt.fido import GrabCollections, OutputCollection
 
 import yt.funcs
 
-from yt.convenience import all_pfs, max_spheres, load
+from yt.convenience import all_pfs, max_spheres, load, projload
 
 # Some convenience functions to ease our time running scripts
 # from the command line
