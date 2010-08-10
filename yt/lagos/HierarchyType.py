@@ -27,6 +27,18 @@ from yt.lagos import *
 from yt.funcs import *
 import string, re, gc, time, cPickle, pdb
 from itertools import chain, izip
+try:
+    import yt.ramses_reader as ramses_reader
+except ImportError:
+    mylog.warning("Ramses Reader not imported")
+
+def num_deep_inc(f):
+    def wrap(self, *args, **kwargs):
+        self.num_deep += 1
+        rv = f(self, *args, **kwargs)
+        self.num_deep -= 1
+        return rv
+    return wrap
 
 class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
     float_type = 'float64'
@@ -1611,3 +1623,170 @@ class FLASHHierarchy(AMRHierarchy):
 
     def _setup_derived_fields(self):
         self.derived_field_list = []
+
+class RAMSESHierarchy(AMRHierarchy):
+
+    grid = RAMSESGrid
+    _handle = None
+    
+    def __init__(self,pf,data_style='ramses'):
+        self.data_style = data_style
+        self.field_info = RAMSESFieldContainer()
+        self.parameter_file = weakref.proxy(pf)
+        # for now, the hierarchy file is the parameter file!
+        self.hierarchy_filename = self.parameter_file.parameter_filename
+        self.directory = os.path.dirname(self.hierarchy_filename)
+        self.tree_proxy = pf.ramses_tree
+
+        self.float_type = na.float64
+        AMRHierarchy.__init__(self,pf,data_style)
+
+    def _initialize_data_storage(self):
+        pass
+
+    def _detect_fields(self):
+        self.field_list = self.tree_proxy.field_names[:]
+    
+    def _setup_classes(self):
+        dd = self._get_data_reader_dict()
+        AMRHierarchy._setup_classes(self, dd)
+        self.object_types.sort()
+
+    def _count_grids(self):
+        # We have to do all the patch-coalescing here.
+        level_info = self.tree_proxy.count_zones()
+        num_ogrids = sum(level_info)
+        ogrid_left_edge = na.zeros((num_ogrids,3), dtype='float64')
+        ogrid_right_edge = na.zeros((num_ogrids,3), dtype='float64')
+        ogrid_levels = na.zeros((num_ogrids,1), dtype='int32')
+        ogrid_file_locations = na.zeros((num_ogrids,3), dtype='int64')
+        ochild_masks = na.zeros((num_ogrids, 8), dtype='int32')
+        self.tree_proxy.fill_hierarchy_arrays(
+            ogrid_left_edge, ogrid_right_edge,
+            ogrid_levels, ogrid_file_locations, ochild_masks)
+        # We now have enough information to run the patch coalescing 
+        self.proto_grids = []
+        for level in xrange(len(level_info)):
+            if level_info[level] == 0: continue
+            ggi = (ogrid_levels == level).ravel()
+            left_index = na.rint((ogrid_left_edge[ggi,:]) * (2.0**(level+1))).astype('int64')
+            right_index = left_index + 2
+            dims = na.ones((ggi.sum(), 3), dtype='int64') * 2
+            fl = ogrid_file_locations[ggi,:]
+            # Now our initial protosubgrid
+            initial_left = na.zeros(3, dtype='int64')
+            idims = na.ones(3, dtype='int64') * (2**(level+1))
+            #if level == 6: raise RuntimeError
+            psg = ramses_reader.ProtoSubgrid(initial_left, idims,
+                            left_index, right_index, dims, fl)
+            self.proto_grids.append(self._recursive_patch_splitting(
+                    psg, idims, initial_left, 
+                    left_index, right_index, dims, fl))
+            sums = na.zeros(3, dtype='int64')
+            if len(self.proto_grids[level]) == 1: continue
+            for g in self.proto_grids[level]:
+                sums += [s.sum() for s in g.sigs]
+            assert(na.all(sums == dims.prod(axis=1).sum()))
+        self.num_grids = sum(len(l) for l in self.proto_grids)
+
+    #num_deep = 0
+
+    #@num_deep_inc
+    def _recursive_patch_splitting(self, psg, dims, ind,
+            left_index, right_index, gdims, fl):
+        min_eff = 0.2 # This isn't always respected.
+        if psg.efficiency > min_eff or psg.efficiency < 0.0:
+            return [psg]
+        tt, ax, fp = psg.find_split()
+        if (fp % 2) != 0:
+            if dims[ax] != fp + 1:
+                fp += 1
+            else:
+                fp -= 1
+        #print " " * self.num_deep + "Got ax", ax, "fp", fp
+        dims_l = dims.copy()
+        dims_l[ax] = fp
+        li_l = ind.copy()
+        if na.any(dims_l <= 0): return [psg]
+        L = ramses_reader.ProtoSubgrid(
+                li_l, dims_l, left_index, right_index, gdims, fl)
+        #print " " * self.num_deep + "L", tt, L.efficiency
+        if L.efficiency > 1.0: raise RuntimeError
+        if L.efficiency <= 0.0: L = []
+        elif L.efficiency < min_eff:
+            L = self._recursive_patch_splitting(L, dims_l, li_l,
+                    left_index, right_index, gdims, fl)
+        else:
+            L = [L]
+        dims_r = dims.copy()
+        dims_r[ax] -= fp
+        li_r = ind.copy()
+        li_r[ax] += fp
+        if na.any(dims_r <= 0): return [psg]
+        R = ramses_reader.ProtoSubgrid(
+                li_r, dims_r, left_index, right_index, gdims, fl)
+        #print " " * self.num_deep + "R", tt, R.efficiency
+        if R.efficiency > 1.0: raise RuntimeError
+        if R.efficiency <= 0.0: R = []
+        elif R.efficiency < min_eff:
+            R = self._recursive_patch_splitting(R, dims_r, li_r,
+                    left_index, right_index, gdims, fl)
+        else:
+            R = [R]
+        return L + R
+        
+    def _parse_hierarchy(self):
+        # We have important work to do
+        grids = []
+        gi = 0
+        for level, grid_list in enumerate(self.proto_grids):
+            for g in grid_list:
+                fl = g.grid_file_locations
+                props = g.get_properties()
+                self.grid_left_edge[gi,:] = props[0,:] / (2.0**(level+1))
+                self.grid_right_edge[gi,:] = props[1,:] / (2.0**(level+1))
+                self.grid_dimensions[gi,:] = props[2,:]
+                self.grid_levels[gi,:] = level
+                grids.append(self.grid(gi, self, level, fl, props[0,:]))
+                gi += 1
+        self.grids = na.array(grids, dtype='object')
+
+    def _get_grid_parents(self, grid, LE, RE):
+        mask = na.zeros(self.num_grids, dtype='bool')
+        grids, grid_ind = self.get_box_grids(LE, RE)
+        mask[grid_ind] = True
+        mask = na.logical_and(mask, (self.grid_levels == (grid.Level-1)).flat)
+        return self.grids[mask]
+
+    def _populate_grid_objects(self):
+        for gi,g in enumerate(self.grids):
+            parents = self._get_grid_parents(g,
+                            self.grid_left_edge[gi,:],
+                            self.grid_right_edge[gi,:])
+            if len(parents) > 0:
+                g.Parent.extend(parents.tolist())
+                for p in parents: p.Children.append(g)
+            g._prepare_grid()
+            g._setup_dx()
+        self.max_level = self.grid_levels.max()
+
+    def _setup_unknown_fields(self):
+        for field in self.field_list:
+            if field in self.parameter_file.field_info: continue
+            mylog.info("Adding %s to list of fields", field)
+            cf = None
+            if self.parameter_file.has_key(field):
+                def external_wrapper(f):
+                    def _convert_function(data):
+                        return data.convert(f)
+                    return _convert_function
+                cf = external_wrapper(field)
+            add_field(field, lambda a, b: None,
+                      convert_function=cf, take_log=False)
+
+    def _setup_derived_fields(self):
+        self.derived_field_list = []
+
+    def _setup_data_io(self):
+        self.io = io_registry[self.data_style](self.tree_proxy)
+
