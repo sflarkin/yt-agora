@@ -851,8 +851,6 @@ class FLASHStaticOutput(StaticOutput):
         self.storage_filename = storage_filename
 
         self.field_info = self._fieldinfo_class()
-        # hardcoded for now
-        self.parameters["InitialTime"] = 0.0
         # These should be explicitly obtained from the file, but for now that
         # will wait until a reorganization of the source tree and better
         # generalization.
@@ -860,6 +858,7 @@ class FLASHStaticOutput(StaticOutput):
         self.parameters["RefineBy"] = 2
         self.parameters["HydroMethod"] = 'flash' # always PPM DE
         self.parameters["Time"] = 1. # default unit is 1...
+        self._set_units()
         
     def _set_units(self):
         """
