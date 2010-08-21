@@ -172,6 +172,7 @@ _common_options = dict(
     make_projections = dict(short="", long="--make_projections",
                             action="store_true", default=False,
                             help="Make projections with halo profiler.")
+
     )
 
 def _add_options(parser, *options):
