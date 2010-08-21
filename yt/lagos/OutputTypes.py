@@ -439,6 +439,9 @@ class EnzoStaticOutputInMemory(EnzoStaticOutput):
         for i in self.parameters:
             if isinstance(self.parameters[i], types.TupleType):
                 self.parameters[i] = na.array(self.parameters[i])
+            if i.endswith("Units") and not i.startswith("Temperature"):
+                dataType = i[:-5]
+                self.conversion_factors[dataType] = self.parameters[i]
         for i in self.conversion_factors:
             if isinstance(self.conversion_factors[i], types.TupleType):
                 self.conversion_factors[i] = na.array(self.conversion_factors[i])
@@ -637,6 +640,8 @@ class GadgetStaticOutput(StaticOutput):
         # generalization.
         self.parameters["TopGridRank"] = 3
         self.parameters["RefineBy"] = 2
+        self.parameters["DomainLeftEdge"] = self.leftedge
+        self.parameters["DomainRightEdge"] = self.rightedge
         
         
     def _parse_parameter_file(self):
@@ -654,7 +659,7 @@ class GadgetStaticOutput(StaticOutput):
                 continue
             val = fh['root'].attrs[kw]
             if type(val)==type(''):
-                try:    val = cPickle.load(val)
+                try:    val = cPickle.loads(val)
                 except: pass
             #also, includes unit info
             setattr(self,kw,val)
@@ -662,9 +667,8 @@ class GadgetStaticOutput(StaticOutput):
     def _get_param(self,kw,location='/root'):
         fh = h5py.File(self.parameter_filename)
         val = fh[location].attrs[kw]
-        if type(val)==type(''):
-            try:    val = cPickle.load(val)
-            except: pass
+        try:    val = cPickle.loads(val)
+        except: pass
         return val
             
     def _set_units(self):
@@ -676,6 +680,7 @@ class GadgetStaticOutput(StaticOutput):
         self.time_units['1'] = 1
         self.units['1'] = 1.0
         self.units['unitary'] = 1.0
+        self.units['cm'] = 1.0
         seconds = 1 #self["Time"]
         self.time_units['years'] = seconds / (365*3600*24.0)
         self.time_units['days']  = seconds / (3600*24.0)
@@ -846,8 +851,6 @@ class FLASHStaticOutput(StaticOutput):
         self.storage_filename = storage_filename
 
         self.field_info = self._fieldinfo_class()
-        # hardcoded for now
-        self.parameters["InitialTime"] = 0.0
         # These should be explicitly obtained from the file, but for now that
         # will wait until a reorganization of the source tree and better
         # generalization.
@@ -855,6 +858,7 @@ class FLASHStaticOutput(StaticOutput):
         self.parameters["RefineBy"] = 2
         self.parameters["HydroMethod"] = 'flash' # always PPM DE
         self.parameters["Time"] = 1. # default unit is 1...
+        self._set_units()
         
     def _set_units(self):
         """
@@ -904,6 +908,8 @@ class FLASHStaticOutput(StaticOutput):
             [self._find_parameter("real", "%smin" % ax) for ax in 'xyz'])
         self.parameters["DomainRightEdge"] = na.array(
             [self._find_parameter("real", "%smax" % ax) for ax in 'xyz'])
+        self.parameters["InitialTime"] = \
+            float(self._find_parameter("real", "time", scalar=True))
         self._handle.close()
 
     @classmethod
@@ -978,7 +984,7 @@ class RAMSESStaticOutput(StaticOutput):
         self.parameters["DomainRightEdge"] = na.ones(3, dtype='float64') \
                                            * rheader['boxlen']
         self.parameters["DomainLeftEdge"] = na.zeros(3, dtype='float64')
-        self.parameters["TopGridDimensions"] = rheader["nx"]
+        self.parameters["TopGridDimensions"] = na.ones(3, dtype='int32') * 2
 
     @classmethod
     def _is_valid(self, *args, **kwargs):
