@@ -1,5 +1,5 @@
 """
-Fields applicable only to Enzo
+Miscellaneous functions that are Enzo-specific
 
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
@@ -22,9 +22,4 @@ License:
   You should have received a copy of the GNU General Public License
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
-
-from UniversalFields import *
-from yt.amr_utils import CICDeposit_3
-
-rho_crit_now = 1.8788e-29 # times h^2
 
