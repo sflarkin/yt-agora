@@ -108,7 +108,7 @@ from .spectral_integrator.api import \
     SpectralFrequencyIntegrator, \
     create_table_from_textfiles
 
-from .sfr_spectrum.api import \
+from .star_analysis.api import \
     StarFormationRate, \
     SpectrumBuilder
 
