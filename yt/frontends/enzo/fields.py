@@ -199,10 +199,25 @@ def _ComovingDensity(field,data):
     return data["Density"]/ef
 add_field("ComovingDensity", function=_ComovingDensity, units=r"\rm{g}/\rm{cm}^3")
 
+# This is rho_total / rho_cr(z).
 def Overdensity(field,data):
     return (data['Density'] + data['Dark_Matter_Density']) / \
         (rho_crit_now * (data.pf.hubble_constant**2) * ((1+data.pf.current_redshift)**3))
 add_field("Overdensity",function=Overdensity,units=r"")
+
+# This is rho_b / <rho_b>.
+def _Baryon_Overdensity(field, data):
+    return data['Density']
+def _Convert_Baryon_Overdensity(data):
+    if data.pf.parameters.has_key('omega_baryon_now'):
+        omega_baryon_now = data.pf.parameters['omega_baryon_now']
+    else:
+        omega_baryon_now = 0.0441
+    return 1 / (omega_baryon_now * rho_crit_now * 
+                (data.pf['CosmologyHubbleConstantNow']**2) * 
+                ((1+data.pf['CosmologyCurrentRedshift'])**3))
+add_field("Baryon_Overdensity", function=_Baryon_Overdensity, 
+          convert_function=_Convert_Baryon_Overdensity, units=r"")
 
 # Now we add all the fields that we want to control, but we give a null function
 # This is every Enzo field we can think of.  This will be installation-dependent,
@@ -252,21 +267,6 @@ for ax in ['x','y','z']:
     f._units = r"\rm{cm}/\rm{s}"
     f._convert_function = _convertVelocity
     f.take_log = False
-
-def _pdensity(field, data):
-    blank = na.zeros(data.ActiveDimensions, dtype='float32')
-    if data.NumberOfParticles == 0: return blank
-    amr_utils.CICDeposit_3(data["particle_position_x"].astype(na.float64),
-                           data["particle_position_y"].astype(na.float64),
-                           data["particle_position_z"].astype(na.float64),
-                           data["particle_mass"].astype(na.float32),
-                           data["particle_mass"].size,
-                           blank, na.array(data.LeftEdge).astype(na.float64),
-                           na.array(data.ActiveDimensions).astype(na.int32), 
-                           na.float64(data['dx']))
-    return blank
-add_field("particle_density", function=_pdensity,
-          validators=[ValidateSpatial(0)], convert_function=_convertDensity)
 
 def _spdensity(field, data):
     blank = na.zeros(data.ActiveDimensions, dtype='float32')
