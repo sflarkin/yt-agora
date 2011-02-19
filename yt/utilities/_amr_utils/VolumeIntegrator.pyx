@@ -528,7 +528,8 @@ cdef class PartitionedGrid:
     cdef int integrate_ray(self, np.float64_t v_pos[3],
                                  np.float64_t v_dir[3],
                                  np.float64_t rgba[4],
-                                 TransferFunctionProxy tf):
+                                 TransferFunctionProxy tf,
+                                 np.float64_t *return_t = NULL):
         cdef int cur_ind[3], step[3], x, y, i, n, flat_ind, hit, direction
         cdef np.float64_t intersect_t = 1.0
         cdef np.float64_t iv_dir[3]
@@ -632,6 +633,7 @@ cdef class PartitionedGrid:
                     enter_t = tmax[2]
                     tmax[2] += tdelta[2]
             if enter_t > 1.0: break
+        if return_t != NULL: return_t[0] = exit_t
         return hit
 
     @cython.boundscheck(False)
@@ -817,3 +819,124 @@ cdef class ProtoPrism:
         #                     self.LeftEdge, self.RightEdge, dims)
         return ((li[0], ri[0]), (li[1], ri[1]), (li[2], ri[2]), dims)
 
+cdef struct AdaptiveRayPacket:
+    long nside
+    long ipix
+    np.float64_t t
+    np.float64_t v_dir[3]
+    np.float64_t value[4]
+    AdaptiveRayPacket *next
+    AdaptiveRayPacket *prev
+
+cdef AdaptiveRayPacket *new_rays[4]
+
+cdef class AdaptiveRaySource:
+    cdef np.float64_t center[3]
+    cdef public int rays_per_cell
+    cdef AdaptiveRayPacket *first
+
+    def __cinit__(self, center, rays_per_cell, initial_nside):
+        cdef int i
+        self.center[0] = center[0]
+        self.center[1] = center[1]
+        self.center[2] = center[2]
+        self.rays_per_cell = rays_per_cell
+        cdef AdaptiveRayPacket *ray = self.first
+        cdef AdaptiveRayPacket *last = NULL
+        cdef double v_dir[3]
+        for i in range(12*initial_nside*initial_nside):
+            # Initialize rays here
+            ray = <AdaptiveRayPacket *> malloc(sizeof(AdaptiveRayPacket))
+            ray.prev = last
+            ray.ipix = i
+            healpix_interface.pix2vec_nest(initial_nside, i, v_dir)
+            ray.v_dir[0] = v_dir[0]
+            ray.v_dir[1] = v_dir[1]
+            ray.v_dir[2] = v_dir[2]
+            ray.value[0] = ray.value[1] = ray.value[2] = ray.value[3] = 0.0
+            ray.next = NULL
+            if last != NULL: last.next = ray
+            last = ray
+
+    def __dealloc__(self):
+        cdef AdaptiveRayPacket *next, *ray = self.first
+        while ray != NULL:
+            next = ray.next
+            free(ray)
+            ray = next
+
+    cdef integrate_brick(self, PartitionedGrid pg, TransferFunctionProxy tf):
+        cdef AdaptiveRayPacket *ray = self.first
+        cdef np.float64_t domega
+        domega = self.get_domega(pg.left_edge, pg.right_edge)
+        while ray != NULL:
+            # Note that we may end up splitting a ray such that it ends up
+            # outside the brick!
+            if self.intersects(ray, pg):
+                ray = self.refine_ray(ray, domega, pg.dds[0],
+                                      pg.left_edge, pg.right_edge)
+                pg.integrate_ray(self.center, ray.v_dir, ray.value,
+                                 tf, &ray.t)
+            ray = ray.next
+
+    cdef int intersects(self, AdaptiveRayPacket *ray, PartitionedGrid pg):
+        cdef np.float64_t pos[3]
+        cdef int i
+        for i in range(3):
+            # Is this correct, for the normalized v_dir?
+            pos[i] = ray.v_dir[i] * (ray.t + 1e-8)
+            if pos[i] < pg.left_edge[i] or pos[i] > pg.right_edge[i]: return 0
+        return 1
+
+    cdef np.float64_t get_domega(self, np.float64_t left_edge[3],
+                                       np.float64_t right_edge[3]):
+        # We should calculate the subtending angle at the maximum radius of the
+        # brick
+        cdef int i, j, k
+        cdef np.float64_t r2, max_r2, domega, *edge[2]
+        # We now figure out when the ray will leave the box, at worst.
+        edge[0] = left_edge
+        edge[1] = right_edge
+        max_r2 = -1.0
+        for i in range(2):
+            r2 = (edge[i][0] - self.center[0])**2.0
+            for j in range(2):
+                r2 += (edge[j][1] - self.center[1])**2.0
+                for k in range(3):
+                    r2 += (edge[k][2] - self.center[2])**2.0
+                    max_r2 = fmax(max_r2, r2)
+        domega = 4.0 * 3.1415926 * max_r2 # Used to be / Nrays
+        return domega
+
+    cdef AdaptiveRayPacket *refine_ray(self, AdaptiveRayPacket *ray,
+                                       np.float64_t domega,
+                                       np.float64_t dx,
+                                       np.float64_t left_edge[3],
+                                       np.float64_t right_edge[3]):
+        cdef long Nrays = 12 * ray.nside * ray.nside
+        if domega/Nrays < self.rays_per_cell * dx*dx: return ray
+        # Now we make four new ones
+        cdef double v_dir[3]
+        for i in range(4):
+            new_rays[i] = <AdaptiveRayPacket *> malloc(
+                            sizeof(AdaptiveRayPacket))
+            new_rays[i].nside = ray.nside * 2
+            new_rays[i].ipix = ray.ipix * 4 + i
+            new_rays[i].t = ray.t
+            healpix_interface.pix2vec_nest(
+                    new_rays[i].nside, new_rays[i].ipix, v_dir)
+            for j in range(3):
+                new_rays[i].v_dir[j] = v_dir[j]
+                new_rays[i].value[j] = ray.value[j]
+            new_rays[i].value[3] = ray.value[3]
+        new_rays[0].prev = ray.prev
+        new_rays[3].next = ray.next
+        free(ray)
+        for i in range(3):
+            new_rays[i].next = new_rays[i+1]
+            new_rays[i+1].prev = new_rays[i]
+        return new_rays[0]
+
+# From Enzo:
+#   dOmega = 4 pi r^2/Nrays
+#   if (dOmega > RaysPerCell * dx^2) then split
