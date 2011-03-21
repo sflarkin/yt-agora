@@ -42,12 +42,15 @@ class Streamlines(ParallelAnalysisInterface):
         This is the parameter file to streamline
     pos : array_like
         An array of initial starting positions of the streamlines.
-    xfield: field
+    xfield: field, optional
         The x component of the vector field to be streamlined.
-    yfield: field
+        Default:'x-velocity'
+    yfield: field, optional
         The y component of the vector field to be streamlined.
-    zfield: field
+        Default:'y-velocity'
+    zfield: field, optional
         The z component of the vector field to be streamlined.
+        Default:'z-velocity'
     volume : `yt.extensions.volume_rendering.HomogenizedVolume`, optional
         The volume to be streamlined.  Can be specified for
         finer-grained control, but otherwise will be automatically
@@ -87,7 +90,8 @@ class Streamlines(ParallelAnalysisInterface):
     >>>     ax.plot3D(stream[:,0], stream[:,1], stream[:,2], alpha=0.1)
     >>> pl.savefig('streamlines.png')
     """
-    def __init__(self, pf, positions, xfield, yfield, zfield, volume=None,
+    def __init__(self, pf, positions, xfield='x-velocity', yfield='x-velocity',
+                 zfield='x-velocity', volume=None,
                  dx=None, length=None, direction=1):
         self.pf = pf
         self.start_positions = na.array(positions)
@@ -153,9 +157,28 @@ class Streamlines(ParallelAnalysisInterface):
         self.streamlines = temp
 
     def path(self, streamline_id):
-        return AMRStreamlineBase(self.streamlines[streamline_id])
-    
-        
-                
+        """
+        Returns an AMR1DData object defined by a streamline.
 
+        Parameters
+        ----------
+        streamline_id : int
+            This defines which streamline from the Streamlines object
+            that will define the AMR1DData object.
+
+        Returns
+        -------
+        An AMRStreamlineBase AMR1DData object
+
+        Examples
+        --------
+
+        >>> from yt.visualization.api import Streamlines
+        >>> streamlines = Streamlines(pf, [0.5]*3) 
+        >>> streamlines.integrate_through_volume()
+        >>> stream = streamlines.path(0)
+        >>> matplotlib.pylab.semilogy(stream['t'], stream['Density'], '-x')
+        
+        """
+        return AMRStreamlineBase(self.streamlines[streamline_id], pf=self.pf)
         
