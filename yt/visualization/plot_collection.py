@@ -28,6 +28,7 @@ import numpy as na
 
 from yt.funcs import *
 
+from yt.config import ytcfg
 from yt.data_objects.profiles import \
     BinnedProfile1D, \
     BinnedProfile2D
@@ -155,6 +156,11 @@ class PlotCollection(object):
             fn.append(plot.save_image(basename, format=format, 
                       override=override, force_save=force_save))
             mylog.info("Saved %s", fn[-1])
+        if ytcfg.getboolean("yt", "__withinreason"):
+            from yt.gui.reason.bottle_mods import PayloadHandler
+            ph = PayloadHandler()
+            for f in fn:
+                ph.add_payload(open(f,'rb').read())
         return fn
 
     def set_xlim(self, xmin, xmax):
