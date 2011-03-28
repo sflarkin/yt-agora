@@ -2,6 +2,7 @@
 <head>
   <title>Complex Layout</title>
     <link rel="stylesheet" type="text/css" href="resources/resources/css/ext-all.css" />
+    <link rel="stylesheet" type="text/css" href="highlighter.css" />
     
     <style type="text/css">
     html, body {
@@ -31,6 +32,10 @@
         font-family: monospace;
     }
     #cell_output {
+        font-family: monospace;
+    }
+    td.code {
+        padding-left: 20px;
         font-family: monospace;
     }
     </style>
@@ -69,16 +74,25 @@
         yt_rpc.ExtDirectParameterFileList.get_list_of_pfs({}, fill_tree);
     }
 
+    var res;
+    var cell_count = 0;
+
     var handle_result = function(f, a) {
         var input_line = repl_input.get("input_line")
+        cell_count += 1;
         if (a.result == null) {
             text = "ERROR";
+            formatted_input = input_line.getValue();
         } else {
-            text = a.result['output'].replace(/\n/g,"<br/>");
+            //text = a.result['output'].replace(/\n/g,"<br/>");
+            text = "<pre>"+a.result['output']+"</pre>";
+            formatted_input = a.result['input']
         }
-        Ext.get("cell_output").dom.innerHTML +=
-        '>>> ' + input_line.getValue() + '<br/>' + text + '<br/>';
+        var cell = NewCell("cell_"+cell_count, formatted_input, text);
+        notebook.get("output_container").add(cell);
+        notebook.doLayout();
         input_line.setValue("");
+        res = a.result;
         cell_finished(a.result);
     }
 
@@ -126,34 +140,38 @@
         {text:'West'}
     );
 
+    function NewCell(name, input, result) {
+        var CellPanel = new Ext.Panel(
+            {id: name,
+             items: [new Ext.Panel({
+                        id:name+"_input",
+                        items:[{html:input}]
+                        }),
+                     new Ext.Panel({
+                        id:name+"_result",
+                        items:[{html:result}]
+                        })]
+            }
+        );
+        return CellPanel;
+    }
+
+    var OutputContainer = new Ext.Panel({
+          title: 'YT Output',
+          id: 'output_container',
+          autoScroll: true,
+          items: []
+        });
+
     var PlotPanel = new Ext.Panel(
         {
-//layout: 'anchor',
-        layout:'vbox',
         title: 'Plot Window 1',
-//        width:1400,
-        height:400,
-        layoutConfig: {
-            align : 'stretch',
-            pack  : 'start',
-        },
-        items: [
-            {html:'panel 1<br><br><br>test<br>'},
-            {html:'panel 1<br><br><br>test<br>'},
-            {html:'panel 1 test<br>'},
-            {html:'panel 1<br><br><br>test<br>'},
-            {html:'panel 1<br>test<br>'},
-            {html:'panel 1<br><br><br>test<br>'},
-            {html:'panel 1<br><br><br>test<br>'},
-            {html:'panel 1 test<br>'},
-            {html:'panel 1<br><br><br>test<br>'},
-            {html:'panel 1<br>test<br>'}
-        ]
-            //NorthButton, 
-            //EastButton]
+        autoScroll: true,
+        items: [ ]
         }
     );
     var examine;
+    var notebook;
     var treePanel = new Ext.tree.TreePanel({
        iconCls: 'nav',
     	id: 'tree-panel',
@@ -274,6 +292,7 @@ Ext.BLANK_IMAGE_URL = 'resources/resources/images/default/s.gif';
                 activeTab: 0,     // first tab initially active
                 items: [{
                     title: 'YT',
+                    id: 'notebook',
                     iconCls: 'console',
                     closable: false,
                     autoScroll: true,
@@ -282,7 +301,7 @@ Ext.BLANK_IMAGE_URL = 'resources/resources/images/default/s.gif';
                         title: 'Output',
                         html: "",
                         id: "cell_output",
-                    }, repl_input, ]
+                    }, repl_input, OutputContainer]
                 }, {
                     title: 'Plot Window 1',
                     iconCls: 'graph',
@@ -300,6 +319,8 @@ Ext.BLANK_IMAGE_URL = 'resources/resources/images/default/s.gif';
             // expand or collapse that Panel based on its collapsed property state
             w.collapsed ? w.expand() : w.collapse();
         });
+        
+        notebook = viewport.get("center-panel").get("notebook")
     });
     </script>
 </head>
