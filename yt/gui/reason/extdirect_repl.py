@@ -32,7 +32,7 @@ from yt.utilities.logger import ytLogger, ufstring
 
 from .bottle_mods import preroute, BottleDirectRouter, notify_route, \
                          PayloadHandler
-from .bottle import response, request
+from .bottle import response, request, route
 from .basic_repl import ProgrammaticREPL
 
 try:
@@ -55,12 +55,13 @@ except ImportError:
 local_dir = os.path.dirname(__file__)
 
 class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
-    _skip_expose = ('index', 'resources')
+    _skip_expose = ('index')
     my_name = "ExtDirectREPL"
 
-    def __init__(self, extjs_path, locals=None):
+    def __init__(self, base_extjs_path, locals=None):
         # First we do the standard initialization
-        self.extjs_path = extjs_path
+        self.extjs_path = os.path.join(base_extjs_path, "ext-resources")
+        self.extjs_theme_path = os.path.join(base_extjs_path, "ext-theme")
         ProgrammaticREPL.__init__(self, locals)
         # Now, since we want to only preroute functions we know about, and
         # since they have different arguments, and most of all because we only
@@ -69,13 +70,16 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
         # than through metaclasses or other fancy decorating.
         preroute_table = dict(index = ("/", "GET"),
                               _myapi = ("/resources/ext-repl-api.js", "GET"),
-                              resources = ("/resources/:path#.+#", "GET"),
+                              _resources = ("/resources/:path#.+#", "GET"),
+                              _js = ("/js/:path#.+#", "GET"),
+                              _images = ("/images/:path#.+#", "GET"),
+                              _theme = ("/theme/:path#.+#", "GET"),
                               _session_py = ("/session.py", "GET"),
-                              _ace = ("/ace/:path#.+#", "GET"),
                               _highlighter_css = ("/highlighter.css", "GET"),
                               )
         for v, args in preroute_table.items():
             preroute(args[0], method=args[1])(getattr(self, v))
+        # This has to be routed to the root directory
         self.api_url = "repl"
         BottleDirectRouter.__init__(self)
         self.pflist = ExtDirectParameterFileList()
@@ -100,17 +104,29 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
         vals = open(os.path.join(local_dir, "html/index.html")).read()
         return vals
 
-    def resources(self, path):
-        # This will need to be changed.
+    def _resources(self, path):
         pp = os.path.join(self.extjs_path, path)
         if not os.path.exists(pp):
             response.status = 404
             return
         return open(pp).read()
 
-    def _ace(self, path):
-        # This will need to be changed.
-        pp = os.path.join(local_dir, "ace", path)
+    def _theme(self, path):
+        pp = os.path.join(self.extjs_theme_path, path)
+        if not os.path.exists(pp):
+            response.status = 404
+            return
+        return open(pp).read()
+
+    def _js(self, path):
+        pp = os.path.join(local_dir, "html", "js", path)
+        if not os.path.exists(pp):
+            response.status = 404
+            return
+        return open(pp).read()
+
+    def _images(self, path):
+        pp = os.path.join(local_dir, "html", "images", path)
         if not os.path.exists(pp):
             response.status = 404
             return
@@ -175,4 +191,14 @@ class PayloadLoggingHandler(logging.StreamHandler):
         self.payload_handler.add_payload(
             {'type':'log_entry',
              'log_entry':msg})
+
+if os.path.exists(os.path.expanduser("~/.yt/favicon.ico")):
+    ico = os.path.expanduser("~/.yt/favicon.ico")
+else:
+    ico = os.path.join(local_dir, "html", "images", "favicon.ico")
+@route("/favicon.ico", method="GET")
+def _favicon_ico():
+    response.headers['Content-Type'] = "image/x-icon"
+    return open(ico).read()
+
 
