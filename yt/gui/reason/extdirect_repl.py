@@ -26,10 +26,29 @@ License:
 
 import json
 import os
+import cStringIO
 
 from .bottle_mods import preroute, BottleDirectRouter, notify_route, \
                          PayloadHandler
+from .bottle import response, request
 from .basic_repl import ProgrammaticREPL
+
+try:
+    import pygments
+    import pygments.lexers
+    import pygments.formatters
+    def _highlighter():
+        pl = pygments.lexers.PythonLexer()
+        hf = pygments.formatters.HtmlFormatter(
+                linenos='table', linenospecial=2)
+        def __highlighter(a):
+            return pygments.highlight(a, pl, hf)
+        return __highlighter, hf.get_style_defs()
+    # We could add an additional '.highlight_pyg' in the call
+    highlighter, highlighter_css = _highlighter()
+except ImportError:
+    highlighter = lambda a: a
+    highlight_css = ''
 
 local_dir = os.path.dirname(__file__)
 
@@ -48,6 +67,9 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
         preroute_table = dict(index = ("/", "GET"),
                               _myapi = ("/resources/ext-repl-api.js", "GET"),
                               resources = ("/resources/:path#.+#", "GET"),
+                              _session_py = ("/session.py", "GET"),
+                              _ace = ("/ace/:path#.+#", "GET"),
+                              _highlighter_css = ("/highlighter.css", "GET"),
                               )
         for v, args in preroute_table.items():
             preroute(args[0], method=args[1])(getattr(self, v))
@@ -76,16 +98,35 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
             return
         return open(pp).read()
 
+    def _ace(self, path):
+        # This will need to be changed.
+        pp = os.path.join(local_dir, "ace", path)
+        if not os.path.exists(pp):
+            response.status = 404
+            return
+        return open(pp).read()
+
+    def _highlighter_css(self):
+        return highlighter_css
+
     def execute(self, code):
         self.executed_cell_texts.append(code)
         result = ProgrammaticREPL.execute(self, code)
         payloads = self.payload_handler.deliver_payloads()
         return_value = {'output': result,
+                        'input': highlighter(code),
                         'payloads': payloads}
         return return_value
 
     def get_history(self):
         return self.executed_cell_texts[:]
+
+    def _session_py(self):
+        cs = cStringIO.StringIO()
+        cs.write("\n######\n".join(self.executed_cell_texts))
+        cs.seek(0)
+        response.headers["content-disposition"] = "attachment; filename=session.py"
+        return cs
 
 class ExtDirectParameterFileList(BottleDirectRouter):
     my_name = "ExtDirectParameterFileList"
