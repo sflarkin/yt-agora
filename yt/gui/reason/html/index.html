@@ -1,0 +1,322 @@
+<html>
+<head>
+  <title>Complex Layout</title>
+    <link rel="stylesheet" type="text/css" href="resources/resources/css/ext-all.css" />
+    
+    <style type="text/css">
+    html, body {
+        font:normal 12px verdana;
+        margin:0;
+        padding:0;
+        border:0 none;
+        overflow:hidden;
+        height:100%;
+    }
+    p {
+        margin:5px;
+    }
+    .settings {
+        background-image:url(resources/examples/shared/icons/fam/folder_wrench.png);
+    }
+    .nav {
+        background-image:url(resources/examples/shared/icons/fam/folder_go.png);
+    }
+    graph { 
+        background-image:url(images/graph.png) !important; //add images to tabs
+    }
+    console { 
+        background-image:url(images/console.png) !important;
+    }
+    #input_line {
+        font-family: monospace;
+    }
+    #cell_output {
+        font-family: monospace;
+    }
+    </style>
+
+    <!-- GC -->
+    <!-- LIBS -->
+    <script type="text/javascript" src="resources/adapter/ext/ext-base.js"></script>
+    <!-- ENDLIBS -->
+
+    <script type="text/javascript" src="resources/ext-all.js"></script>
+
+    <!-- EXAMPLES -->
+    <script type="text/javascript" src="resources/examples/shared/examples.js"></script>
+    <script type="text/javascript" src="resources/ext-repl-api.js"></script>
+    <script type="text/javascript" src="resources/ext-pflist-api.js"></script>
+    <script type="text/javascript" src="pf_data.js"></script>
+ 
+    <script type="text/javascript">
+    var viewport;
+    function cell_sent() {
+        repl_input.get('input_line').setReadOnly(true);
+    }
+
+    function cell_finished(result) {
+        Ext.each(result['payloads'], function(payload, index) {
+            if (payload['type'] == 'png_string') {
+                Ext.get("cell_output").dom.innerHTML +=
+                    '<br/><img src="data:image/png;base64,' +
+                        payload['image_data'] + '"/>';
+            } else if (payload['type'] == 'cell_contents') {
+                var input_line = repl_input.get("input_line")
+                input_line.setValue(payload['value']);
+            }
+        });
+        repl_input.get('input_line').setReadOnly(false);
+        yt_rpc.ExtDirectParameterFileList.get_list_of_pfs({}, fill_tree);
+    }
+
+    var handle_result = function(f, a) {
+        var input_line = repl_input.get("input_line")
+        if (a.result == null) {
+            text = "ERROR";
+        } else {
+            text = a.result['output'].replace(/\n/g,"<br/>");
+        }
+        Ext.get("cell_output").dom.innerHTML +=
+        '>>> ' + input_line.getValue() + '<br/>' + text + '<br/>';
+        input_line.setValue("");
+        cell_finished(a.result);
+    }
+
+    var repl_input = new Ext.FormPanel({
+        url: 'push',
+        items: [{
+            id: 'input_line',
+            xtype: 'textarea',
+            width: '100%',
+            fieldLabel: '>>>',
+            name: 'line',
+            allowBlank: 'True',
+            bodyStyle: 'font-family: "monospace";',
+            listeners: {
+                specialkey: function(f, e){
+                    if (e.getKey() == e.ENTER) {
+                        cell_sent();
+                        yt_rpc.ExtDirectREPL.execute({
+                            code:repl_input.get('input_line').getValue()},
+                            handle_result);
+                    }
+                }
+            },
+        },],
+    });
+
+    var NorthButton = new Ext.Button(
+        {text : 'North',
+ //       pageX : 10,
+//        pageY : 50
+        anchor:'10% 5%'
+        }
+    );
+
+    var EastButton = new Ext.Button(
+        {text:'East',
+//        pageX : '100%',
+ //       pageY : '50%'
+        }
+    );
+    var SouthButton = new Ext.Button(
+        {text:'South'}
+    );
+    var WestButton = new Ext.Button(
+        {text:'West'}
+    );
+
+    var PlotPanel = new Ext.Panel(
+        {
+//layout: 'anchor',
+        layout:'vbox',
+        title: 'Plot Window 1',
+//        width:1400,
+        height:400,
+        layoutConfig: {
+            align : 'stretch',
+            pack  : 'start',
+        },
+        items: [
+            {html:'panel 1<br><br><br>test<br>'},
+            {html:'panel 1<br><br><br>test<br>'},
+            {html:'panel 1 test<br>'},
+            {html:'panel 1<br><br><br>test<br>'},
+            {html:'panel 1<br>test<br>'},
+            {html:'panel 1<br><br><br>test<br>'},
+            {html:'panel 1<br><br><br>test<br>'},
+            {html:'panel 1 test<br>'},
+            {html:'panel 1<br><br><br>test<br>'},
+            {html:'panel 1<br>test<br>'}
+        ]
+            //NorthButton, 
+            //EastButton]
+        }
+    );
+    var examine;
+    var treePanel = new Ext.tree.TreePanel({
+       iconCls: 'nav',
+    	id: 'tree-panel',
+    	title: 'Objects',
+        layout: 'absolute',
+        region:'west',
+        split: true,
+        height:480,
+        minSize: 150,
+        autoScroll: true,
+        rootVisible: false,
+        root:new Ext.tree.TreeNode({
+          expanded:true
+         ,leaf:false
+         ,text:''
+        })
+     });
+
+    var ButtonGroupPanel = new Ext.Panel({
+//        title: 'Panel with Button Group',
+        layout: 'absolute',
+        width: 210,
+        height:38,
+        pageX:0,
+        pageY:480,
+        ButtonAlign: 'center',
+        collapsible: false,
+        renderTo: document.body,
+        tbar: [{
+            xtype: 'buttongroup',
+            columns: 3,
+            items: [{
+                text: 'Download',
+                width: 65
+            },{
+//                text: 'Save', iconCls: 'add'
+                text: 'Save',
+                width: 65
+            },{
+                text: 'Pastebin',
+                width: 65
+            }]
+        }]
+    });
+    
+    var DownloadButton = new Ext.Button({
+        text:'Download this Session',
+        region:'west'
+        }
+    );
+
+    function fill_tree(my_pfs) {
+        examine = my_pfs;
+        treePanel.root.removeAll();
+      Ext.each(my_pfs, function(pf, index) {
+          treePanel.root.appendChild(new Ext.tree.TreeNode({text: pf.name,
+              leaf:false, expanded:true}));
+          this_pf = treePanel.root.lastChild
+          Ext.each(pf.objects, function(object, obj_index) {
+            this_pf.appendChild(new Ext.tree.TreeNode({text: object.name,
+                leaf: true}));
+            });
+          });
+    };
+
+    Ext.onReady(function(){
+
+Ext.BLANK_IMAGE_URL = 'resources/resources/images/default/s.gif';
+
+        // NOTE: This is an example showing simple state management. During development,
+        // it is generally best to disable state management as dynamically-generated ids
+        // can change across page loads, leading to unpredictable results.  The developer
+        // should ensure that stable state ids are set for stateful components in real apps.
+        Ext.state.Manager.setProvider(new Ext.state.CookieProvider());
+
+	// Go ahead and create the TreePanel now so that we can use it below
+        viewport = new Ext.Viewport({
+            layout: 'border',
+            items: [
+            {
+                // lazily created panel (xtype:'panel' is default)
+                region: 'south',
+                contentEl: 'south',
+                split: true,
+                height: 100,
+                minSize: 100,
+                maxSize: 200,
+                collapsible: true,
+                title: 'Status',
+                margins: '0 0 0 0'
+            }, {
+                region: 'west',
+                id: 'west-panel', // see Ext.getCmp() below
+                title: 'BETA Sequences',
+                split: true,
+                width: 200,
+                minSize: 175,
+                maxSize: 400,
+                collapsible: true,
+                margins: '0 0 0 5',
+                layout: {
+                    type: 'absolute',
+                    animate: true
+                },
+                items: [
+                    treePanel,
+                    ButtonGroupPanel
+                ]
+            },
+            // in this instance the TabPanel is not wrapped by another panel
+            // since no title is needed, this Panel is added directly
+            // as a Container
+            {
+                xtype: 'tabpanel',
+                region: 'center', // a center region is ALWAYS required for border layout
+                id: 'center-panel',
+                deferredRender: false,
+                activeTab: 0,     // first tab initially active
+                items: [{
+                    title: 'YT',
+                    iconCls: 'console',
+                    closable: false,
+                    autoScroll: true,
+                    iconCls: 'console',
+                    items: [{ 
+                        title: 'Output',
+                        html: "",
+                        id: "cell_output",
+                    }, repl_input, ]
+                }, {
+                    title: 'Plot Window 1',
+                    iconCls: 'graph',
+                    closable: true,
+                    autoScroll: true,
+                    items: [ PlotPanel ]
+                        
+                }]
+            }]
+        });
+        // get a reference to the HTML element with id "hideit" and add a click listener to it 
+        Ext.get("hideit").on('click', function(){
+            // get a reference to the Panel that was created with id = 'west-panel' 
+            var w = Ext.getCmp('west-panel');
+            // expand or collapse that Panel based on its collapsed property state
+            w.collapsed ? w.expand() : w.collapse();
+        });
+    });
+    </script>
+</head>
+<body>
+    <!-- use class="x-hide-display" to prevent a brief flicker of the content -->
+    <div id="west" class="x-hide-display">
+        <p>Hi. I'm the west panel.</p>
+    </div>
+    <div id="center2" class="x-hide-display">
+        <a id="hideit" href="#">Toggle the west region</a>
+        <hr>
+        <p>Duis hendrerit, est vel lobortis sagittis, tortor erat scelerisque tortor, sed pellentesque sem enim id metus. Maecenas at pede. Nulla velit libero, dictum at, mattis quis, sagittis vel, ante. Phasellus faucibus rutrum dui. Cras mauris elit, bibendum at, feugiat non, porta id, neque. Nulla et felis nec odio mollis vehicula. Donec elementum tincidunt mauris. Duis vel dui. Fusce iaculis enim ac nulla. In risus.</p>
+    </div>
+    <div id="props-panel" class="x-hide-display" style="width:200px;height:200px;overflow:hidden;">
+    </div>
+    <div id="south" class="x-hide-display">
+        <p>4d3d3d3 engaged.</p>
+    </div>
+</body>
+</html>
