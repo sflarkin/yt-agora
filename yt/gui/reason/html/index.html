@@ -1,0 +1,73 @@
+<html>
+<head>
+  <title>Cinco Analysis Generator</title>
+    <link rel="stylesheet" type="text/css" href="resources/resources/css/ext-all.css" />
+    <link rel="stylesheet" type="text/css" href="highlighter.css" />
+    
+    <style type="text/css">
+    html, body {
+        font:normal 12px verdana;
+        margin:0;
+        padding:0;
+        border:0 none;
+        overflow:hidden;
+        height:100%;
+    }
+    p {
+        margin:5px;
+    }
+    .pf_icon {
+        background-image:url(images/blockdevice_tab.png) !important;
+    }
+    .data_object {
+        background-image:url(images/3d_tab.png) !important;
+    }
+    .graph { 
+        background-image:url(images/graph_tab.png) !important; //add images to tabs
+    }
+    .console { 
+        background-image:url(images/console_tab.png) !important;
+    }
+    #input_line {
+        font-family: monospace;
+    }
+    #cell_output {
+        font-family: monospace;
+    }
+    td.code {
+        padding-left: 20px;
+        font-family: monospace;
+    }
+    div#status-region div.x-grid3-cell-inner {
+        font-family: monospace;
+        font-size: 120%;
+    }
+    </style>
+
+    <!-- LIBS -->
+    <script type="text/javascript" src="resources/adapter/ext/ext-base.js"></script>
+    <script type="text/javascript" src="resources/ext-all.js"></script>
+
+    <!-- INTERACTIVE -->
+    <script type="text/javascript" src="resources/ext-repl-api.js"></script>
+    <script type="text/javascript" src="resources/ext-pflist-api.js"></script>
+
+    <!-- LOCAL FUNCTIONS -->
+    <script type="text/javascript" src="js/functions.js"></script>
+
+    <!-- THE MAIN FUNCTION -->
+    <script type="text/javascript" src="js/cinco.js"></script>
+</head>
+<body>
+    <!-- use class="x-hide-display" to prevent a brief flicker of the content -->
+    <div id="west" class="x-hide-display">
+    </div>
+    <div id="center2" class="x-hide-display">
+        <a id="hideit" href="#">Toggle the west region</a>
+    </div>
+    <div id="props-panel" class="x-hide-display" style="width:200px;height:200px;overflow:hidden;">
+    </div>
+    <div id="south" class="x-hide-display">
+    </div>
+</body>
+</html>
