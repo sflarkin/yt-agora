@@ -17,7 +17,7 @@
 
 DEST_SUFFIX="yt-`uname -p`"
 DEST_DIR="`pwd`/${DEST_SUFFIX/ /}"   # Installation location
-BRANCH="yt" # This is the branch to which we will forcibly update.
+BRANCH="stable" # This is the branch to which we will forcibly update.
 
 # Here's where you put the HDF5 path if you like; otherwise it'll download it
 # and install it on its own
