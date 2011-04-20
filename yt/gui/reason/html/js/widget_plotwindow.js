@@ -42,6 +42,13 @@ var WidgetPlotWindow = function(python_varname, widget_data) {
         );
     }
 
+    this.widget_keys = new Ext.KeyMap(document, [
+        {key: 'z', fn: function(){control_panel.get("zoom10x").handler();}}
+    ]);
+    var widget_keys = this.widget_keys;
+    widget_keys.disable();
+    widget_keys.varname = python_varname;
+
     viewport.get("center-panel").add(
         {
             xtype: 'panel',
@@ -51,6 +58,13 @@ var WidgetPlotWindow = function(python_varname, widget_data) {
             autoScroll: true,
             layout:'absolute',
             closable: true,
+            listeners: {activate: function(p){
+                                widget_keys.enable();
+                            },
+                        deactivate: function(p){
+                                widget_keys.disable();
+                            }
+                        },
             items: [ 
                 {
                     xtype:'panel',
@@ -65,9 +79,25 @@ var WidgetPlotWindow = function(python_varname, widget_data) {
                     y: 10,
                     width: 400,
                     height: 400,
-                }, 
+                }, {   xtype: 'multislider',
+                    id: 'slider_' + python_varname,
+                    minValue: 0,
+                    maxValue: 100,
+                    increment: 0.1,
+                    x: 100, y: 410,
+                    width: 400,
+                    listeners: {
+                        /* Only changecomplete; don't want too many render
+                        events */
+                        changecomplete: function(slider, newValue, thumb) {
+                            yt_rpc.ExtDirectREPL.execute(
+                                {code:python_varname + ".scroll_zoom(" +
+                                      newValue + ")",
+                                 hide:true}, cell_finished);
+                        }
+                    }
+                }, {
                 /* the single buttons for 10% pan*/
-                {
                     xtype:'button',
                     iconCls: 'singleuparrow',
                     //text: 'North',
@@ -168,6 +198,7 @@ var WidgetPlotWindow = function(python_varname, widget_data) {
                 {
                     xtype: 'button',
                     text: 'Zoom In 10x',
+                    id: "zoom10x",
                     x: 10,
                     y: 160,
                     width: 80,
@@ -222,7 +253,8 @@ var WidgetPlotWindow = function(python_varname, widget_data) {
                     handler: function(b,e) {
                         img_data = image_dom.src;
                         yt_rpc.ExtDirectREPL.upload_image(
-                            {image_data:img_data},
+                            {image_data:img_data,
+                             caption:metadata_string},
                         function(rv) {
                             var alert_text;
                             if(rv['uploaded'] == false) {
@@ -254,20 +286,38 @@ var WidgetPlotWindow = function(python_varname, widget_data) {
                                 newValue + '")', hide:true},
                             cell_finished);
                     }}
+                },{
+                    xtype: 'textarea',
+                    readOnly: true,
+                    id: 'metadata_' + python_varname,
+                    width: 300,
+                    height: 200,
+                    style: {fontFamily: 'monospace'},
+                    x: 510, y: 10,
                 }
             ]
         }
     );
 
     viewport.get("center-panel").activate("pw_" + this.id);
+    viewport.get("center-panel").doLayout();
     viewport.doLayout();
     this.panel = viewport.get("center-panel").get("pw_" + python_varname);
     this.panel.doLayout();
+    this.panel.show();
     this.image_panel = this.panel.get("image_panel_"+python_varname);
+    this.metadata_panel = this.panel.get("metadata_" + python_varname);
+    this.zoom_scroll = this.panel.get("slider_" + python_varname);
     var image_dom = this.image_panel.el.dom;
+    var control_panel = this.panel;
+    examine = this.zoom_scroll;
+    var metadata_string;
 
     this.accept_results = function(payload) {
         this.image_panel.el.dom.src = "data:image/png;base64," + payload['image_data'];
+        this.zoom_scroll.setValue(0, payload['zoom'], true);
+        this.metadata_panel.setValue(payload['metadata_string']);
+        metadata_string = payload['metadata_string'];
     }
 
     yt_rpc.ExtDirectREPL.execute(
