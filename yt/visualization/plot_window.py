@@ -33,6 +33,7 @@ from yt.utilities.amr_utils import write_png_to_file
 from fixed_resolution import \
     FixedResolutionBuffer
 import matplotlib.pyplot
+from .plot_modifications import get_smallest_appropriate_unit
 
 def invalidate_data(f):
     def newfunc(*args, **kwargs):
@@ -201,10 +202,10 @@ class PlotWindow(object):
         Wx, Wy = self.width
         centerx = self.xlim[0] + Wx*0.5
         centery = self.ylim[0] + Wy*0.5
-        self.xlim[0] = centerx - new_width/2.
-        self.xlim[1] = centerx + new_width/2.
-        self.ylim[0] = centery - new_width/2.
-        self.ylim[1] = centery + new_width/2.
+        self.xlim = (centerx - new_width/2.,
+                     centerx + new_width/2.)
+        self.ylim = (centery - new_width/2.,
+                     centery + new_width/2.)
 
     @invalidate_data
     def set_center(self, new_center):
@@ -300,6 +301,13 @@ class PWViewerRaw(PWViewer):
             print "writing %s" % nm
             write_image(self._frb[field],nm)
 
+_metadata_template = """
+                    %(pf)s
+X Field of View     %(x_width)0.3f %(unit)s
+Y Field of View     %(y_width)0.3f %(unit)s
+Extrema             %(mi)0.3e - %(ma)0.3e
+"""
+
 class PWViewerExtJS(PWViewer):
     """A viewer for the web interface.
 
@@ -319,17 +327,44 @@ class PWViewerExtJS(PWViewer):
         else:
             fields = self._frb.data.keys()
             addl_keys = {}
+        min_zoom = 200*self._frb.pf.h.get_smallest_dx() * self._frb.pf['unitary']
         for field in fields:
             tf = tempfile.TemporaryFile()
-            to_plot = apply_colormap(self._frb[field],func = self._field_transform[field])
+            fval = self._frb[field]
+            to_plot = apply_colormap(fval, func = self._field_transform[field])
             write_png_to_file(to_plot, tf)
             tf.seek(0)
             img_data = base64.b64encode(tf.read())
             tf.close()
+            mi = fval.min()
+            ma = fval.max()
+            x_width = self.xlim[1] - self.xlim[0]
+            y_width = self.ylim[1] - self.ylim[0]
+            unit = get_smallest_appropriate_unit(x_width, self._frb.pf)
+            md = _metadata_template % dict(
+                    pf = self._frb.pf,
+                    x_width = x_width*self._frb.pf[unit],
+                    y_width = y_width*self._frb.pf[unit],
+                    unit = unit, mi = mi, ma = ma)
+            # We scale the width between 200*min_dx and 1.0
+            zoom_fac = na.log10(x_width*self._frb.pf['unitary'])/na.log10(min_zoom)
+            zoom_fac = 100.0*max(0.0, zoom_fac)
             payload = {'type':'png_string',
-                       'image_data':img_data}
+                       'image_data':img_data,
+                       'metadata_string': md,
+                       'zoom': zoom_fac}
             payload.update(addl_keys)
             ph.add_payload(payload)
+
+    # This calls an invalidation routine from within
+    def scroll_zoom(self, value):
+        # We accept value from 0..100, and assume it has been set from the
+        # scroll bar.  In that case, we undo the logic for calcualting
+        # 'zoom_fac' from above.
+        min_val = 200*self._frb.pf.h.get_smallest_dx()
+        unit = self._frb.pf['unitary']
+        width = (min_val**(value/100.0))/unit
+        self.set_width(width)
 
     def get_metadata(self):
         pass

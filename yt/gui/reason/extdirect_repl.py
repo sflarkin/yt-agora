@@ -38,6 +38,8 @@ import pprint
 from yt.funcs import *
 from yt.utilities.logger import ytLogger, ufstring
 from yt.utilities.definitions import inv_axis_names
+from yt.visualization.image_writer import apply_colormap
+from yt.visualization.api import Streamlines
 
 from .bottle_mods import preroute, BottleDirectRouter, notify_route, \
                          PayloadHandler
@@ -94,6 +96,7 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
     my_name = "ExtDirectREPL"
     timeout = 660 # a minute longer than the rocket server timeout
     server = None
+    stopped = False
 
     def __init__(self, base_extjs_path, locals=None):
         # First we do the standard initialization
@@ -151,7 +154,12 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
 
     def heartbeat(self):
         self.last_heartbeat = time.time()
-        return self.payload_handler.deliver_payloads()
+        for i in range(30): # The total time to wait
+            # Check for stop
+            if self.stopped: return # No race condition
+            if self.payload_handler.event.wait(1): # One second timeout
+                return self.payload_handler.deliver_payloads()
+        return []
 
     def _check_heartbeat(self):
         if self.server is not None:
@@ -172,8 +180,12 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
         if self.server is None:
             return
         self._heartbeat_timer.cancel()
+        self.stopped = True
+        self.payload_handler.event.set()
         for v in self.server.values():
             v.stop()
+        for t in threading.enumerate():
+            print "Found a living thread:", t
 
     def _help_html(self):
         vals = open(os.path.join(local_dir, "html/help.html")).read()
@@ -266,11 +278,12 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
         return {'status': 'SUCCESS', 'site': site}
 
     _api_key = 'f62d550859558f28c4c214136bc797c7'
-    def upload_image(self, image_data):
+    def upload_image(self, image_data, caption):
         if not image_data.startswith("data:"): return {'uploaded':False}
         prefix = "data:image/png;base64,"
         image_data = image_data[len(prefix):]
-        parameters = {'key':self._api_key, 'image':image_data, type:'base64'}
+        parameters = {'key':self._api_key, 'image':image_data, type:'base64',
+                      'caption': caption, 'title': "Uploaded Image from reason"}
         data = urllib.urlencode(parameters)
         req = urllib2.Request('http://api.imgur.com/2/upload.json', data)
         try:
@@ -330,7 +343,7 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
         from yt.visualization.plot_window import PWViewerExtJS
         _tpw = PWViewerExtJS(_tsl, (DLE[_txax], DRE[_txax], DLE[_tyax], DRE[_tyax]), setup = False)
         _tpw._current_field = _tfield
-        _tpw.set_log(_tfield, True)
+        _tpw._field_transform["%(field)s"] = na.log
         _tfield_list = list(set(_tpf.h.field_list + _tpf.h.derived_field_list))
         _tfield_list.sort()
         _twidget_data = {'fields': _tfield_list,
@@ -390,8 +403,15 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
         self.execute(funccall, hide = True)
         pf = self.locals['_tpf']
         corners = pf.h.grid_corners
+        levels = pf.h.grid_levels
+        colors = apply_colormap(levels*1.0,
+                                color_bounds=[0,pf.h.max_level],
+                                cmap_name="algae").repeat(24,axis=0)[:,0,:]*1.0/255.
+        colors[:,3]=0.7
+        colors = colors.ravel().tolist()
+        
         vertices = []
-
+        
         trans  = [0, 1, 2, 7, 5, 6, 3, 4]
         order  = [0, 1, 1, 2, 2, 3, 3, 0]
         order += [4, 5, 5, 6, 6, 7, 7, 4]
@@ -408,8 +428,53 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
                    'widget_type': 'grid_viewer',
                    'varname': varname, # Is just "None"
                    'data': dict(n_vertices = len(vertices)/3,
-                                vertex_positions = vertices)
-                  }
+                                vertex_positions = vertices,
+                                vertex_colors = colors)
+                   }
+        self.execute("%s = None\n" % (varname), hide=True)
+        self.payload_handler.add_payload(payload)
+
+    @lockit
+    def create_streamline_viewer(self, pfname):
+        funccall = """
+        _tpf = %(pfname)s
+        """ % dict(pfname = pfname)
+        funccall = "\n".join((line.strip() for line in funccall.splitlines()))
+        self.execute(funccall, hide = True)
+        pf = self.locals['_tpf']
+
+        c = na.array([0.5]*3)
+        N = 100
+        scale = 1.0
+        pos_dx = na.random.random((N,3))*scale-scale/2.
+        pos = c+pos_dx
+        
+        SL = Streamlines(pf,pos,'x-velocity', 'y-velocity', 'z-velocity', length=1.0, get_magnitude=True)
+        SL.integrate_through_volume()
+        streamlist=[]
+        stream_lengths = []
+        for i,stream in enumerate(SL.streamlines):
+            stream_lengths.append( stream[na.all(stream != 0.0, axis=1)].shape[0])
+        streamlist = SL.streamlines.flatten()
+        streamlist = streamlist[streamlist!=0.0].tolist()
+
+        stream_colors = SL.magnitudes.flatten()
+        stream_colors = na.log10(stream_colors[stream_colors > 0.0])
+        stream_colors = apply_colormap(stream_colors, cmap_name='algae')
+        stream_colors = stream_colors*1./255.
+        stream_colors[:,:,3] = 0.8
+        stream_colors = stream_colors.flatten().tolist()
+
+        uu = str(uuid.uuid1()).replace("-","_")
+        varname = "sl_%s" % (uu)
+        payload = {'type': 'widget',
+                   'widget_type': 'streamline_viewer',
+                   'varname': varname, # Is just "None"
+                   'data': dict(n_streamlines = SL.streamlines.shape[0],
+                                stream_positions = streamlist,
+                                stream_colors = stream_colors,
+                                stream_lengths = stream_lengths)
+                   }
         self.execute("%s = None\n" % (varname), hide=True)
         self.payload_handler.add_payload(payload)
 
@@ -471,4 +536,32 @@ def _favicon_ico():
     response.headers['Content-Type'] = "image/x-icon"
     return open(ico).read()
 
+class ExtProgressBar(object):
+    def __init__(self, title, maxval):
+        self.title = title
+        self.maxval = maxval
+        self.last = 0
+        # Now we add a payload for the progress bar
+        self.payload_handler = PayloadHandler()
+        self.payload_handler.add_payload(
+            {'type': 'widget',
+             'widget_type': 'progressbar',
+             'varname': None,
+             'data': {'title':title}
+            })
 
+    def update(self, val):
+        # An update is only meaningful if it's on the order of 1/100 or greater
+        if ceil(100*self.last / self.maxval) + 1 == \
+           floor(100*val / self.maxval) or val == self.maxval:
+            self.last = val
+            self.payload_handler.add_payload(
+                {'type': 'widget_payload',
+                 'widget_id': 'pbar_top',
+                 'value': float(val) / self.maxval})
+
+    def finish(self):
+        self.payload_handler.add_payload(
+            {'type': 'widget_payload',
+             'widget_id': 'pbar_top',
+             'value': -1})
