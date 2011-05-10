@@ -5,7 +5,7 @@ Author: J. S. Oishi <jsoishi@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
 Homepage: http://yt.enzotools.org/
 License:
-  Copyright (C) 2010 J. S. Oishi.  All Rights Reserved.
+  Copyright (C) 2010-2011 J. S. Oishi.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -22,20 +22,24 @@ License:
   You should have received a copy of the GNU General Public License
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
-
+import base64
 import tempfile
+import matplotlib.pyplot
+from functools import wraps
+
 import numpy as na
-import color_maps
-from image_writer import \
+from .image_writer import \
     write_image, apply_colormap
+from .fixed_resolution import \
+    FixedResolutionBuffer
+from .plot_modifications import get_smallest_appropriate_unit
+from .tick_locators import LogLocator, LinearLocator
+
 from yt.funcs import *
 from yt.utilities.amr_utils import write_png_to_file
-from fixed_resolution import \
-    FixedResolutionBuffer
-import matplotlib.pyplot
-from .plot_modifications import get_smallest_appropriate_unit
 
 def invalidate_data(f):
+    @wraps(f)
     def newfunc(*args, **kwargs):
         f(*args, **kwargs)
         args[0]._data_valid = False
@@ -43,10 +47,10 @@ def invalidate_data(f):
         args[0]._recreate_frb()
         if args[0]._initfinished:
             args[0]._setup_plots()
-
     return newfunc
 
 def invalidate_plot(f):
+    @wraps(f)
     def newfunc(*args, **kwargs):
         args[0]._plot_valid = False
         args[0]._setup_plots()
@@ -302,10 +306,11 @@ class PWViewerRaw(PWViewer):
             write_image(self._frb[field],nm)
 
 _metadata_template = """
-                    %(pf)s
-X Field of View     %(x_width)0.3f %(unit)s
-Y Field of View     %(y_width)0.3f %(unit)s
-Extrema             %(mi)0.3e - %(ma)0.3e
+%(pf)s<br>
+<br>
+Field of View:  %(x_width)0.3f %(unit)s<br>
+Minimum Value:  %(mi)0.3e %(units)s<br>
+Maximum Value:  %(ma)0.3e %(units)s
 """
 
 class PWViewerExtJS(PWViewer):
@@ -315,9 +320,10 @@ class PWViewerExtJS(PWViewer):
     _ext_widget_id = None
     _current_field = None
     _widget_name = "plot_window"
+    cmap = 'algae'
+
     def _setup_plots(self):
         from yt.gui.reason.bottle_mods import PayloadHandler
-        import base64
         ph = PayloadHandler()
         if self._current_field is not None \
            and self._ext_widget_id is not None:
@@ -330,31 +336,60 @@ class PWViewerExtJS(PWViewer):
         min_zoom = 200*self._frb.pf.h.get_smallest_dx() * self._frb.pf['unitary']
         for field in fields:
             tf = tempfile.TemporaryFile()
-            fval = self._frb[field]
-            to_plot = apply_colormap(fval, func = self._field_transform[field])
+            to_plot = apply_colormap(self._frb[field], func = self._field_transform[field])
             write_png_to_file(to_plot, tf)
             tf.seek(0)
             img_data = base64.b64encode(tf.read())
             tf.close()
-            mi = fval.min()
-            ma = fval.max()
-            x_width = self.xlim[1] - self.xlim[0]
-            y_width = self.ylim[1] - self.ylim[0]
-            unit = get_smallest_appropriate_unit(x_width, self._frb.pf)
-            md = _metadata_template % dict(
-                    pf = self._frb.pf,
-                    x_width = x_width*self._frb.pf[unit],
-                    y_width = y_width*self._frb.pf[unit],
-                    unit = unit, mi = mi, ma = ma)
             # We scale the width between 200*min_dx and 1.0
+            x_width = self.xlim[1] - self.xlim[0]
             zoom_fac = na.log10(x_width*self._frb.pf['unitary'])/na.log10(min_zoom)
             zoom_fac = 100.0*max(0.0, zoom_fac)
+            ticks = self.get_ticks(self._frb[field].min(),
+                                   self._frb[field].max(), 
+                                   take_log = self._frb.pf.field_info[field].take_log)
             payload = {'type':'png_string',
                        'image_data':img_data,
-                       'metadata_string': md,
-                       'zoom': zoom_fac}
+                       'metadata_string': self.get_metadata(field),
+                       'zoom': zoom_fac,
+                       'ticks': ticks}
             payload.update(addl_keys)
             ph.add_payload(payload)
+
+    def get_ticks(self, mi, ma, height = 400, take_log = False):
+        # This will eventually change to work with non-logged fields
+        ticks = []
+        if take_log:
+            ll = LogLocator() 
+            tick_locs = ll(mi, ma)
+            mi = na.log10(mi)
+            ma = na.log10(ma)
+            for v1,v2 in zip(tick_locs, na.log10(tick_locs)):
+                if v2 < mi or v2 > ma: continue
+                p = height - height * (v2 - mi)/(ma - mi)
+                ticks.append((p,v1,v2))
+                #print v1, v2, mi, ma, height, p
+        else:
+            ll = LinearLocator()
+            tick_locs = ll(mi, ma)
+            for v in tick_locs:
+                p = height - height * (v - mi)/(ma-mi)
+                ticks.append((p,v,"%0.3e" % (v)))
+
+        return ticks
+
+    def _get_cbar_image(self, height = 400, width = 40):
+        # Right now there's just the single 'cmap', but that will eventually
+        # change.  I think?
+        vals = na.mgrid[1:0:height * 1j] * na.ones(width)[:,None]
+        vals = vals.transpose()
+        to_plot = apply_colormap(vals)
+        tf = tempfile.TemporaryFile()
+        write_png_to_file(to_plot, tf)
+        tf.seek(0)
+        img_data = base64.b64encode(tf.read())
+        tf.close()
+        return img_data
 
     # This calls an invalidation routine from within
     def scroll_zoom(self, value):
@@ -366,8 +401,28 @@ class PWViewerExtJS(PWViewer):
         width = (min_val**(value/100.0))/unit
         self.set_width(width)
 
-    def get_metadata(self):
-        pass
+    def get_metadata(self, field):
+        fval = self._frb[field]
+        mi = fval.min()
+        ma = fval.max()
+        x_width = self.xlim[1] - self.xlim[0]
+        y_width = self.ylim[1] - self.ylim[0]
+        unit = get_smallest_appropriate_unit(x_width, self._frb.pf)
+        units = self.get_field_units(field)
+        md = _metadata_template % dict(
+                pf = self._frb.pf,
+                x_width = x_width*self._frb.pf[unit],
+                y_width = y_width*self._frb.pf[unit],
+                unit = unit, units = units, mi = mi, ma = ma)
+        return md
+
+    def image_recenter(self, img_x, img_y, img_size_x, img_size_y):
+        dx = (self.xlim[1] - self.xlim[0]) / img_size_x
+        dy = (self.ylim[1] - self.ylim[0]) / img_size_y
+        new_x = img_x * dx + self.xlim[0]
+        new_y = img_y * dy + self.ylim[0]
+        print img_x, img_y, dx, dy, new_x, new_y
+        self.set_center((new_x, new_y))
 
     @invalidate_data
     def set_current_field(self, field):
@@ -377,6 +432,19 @@ class PWViewerExtJS(PWViewer):
             self._field_transform[field] = na.log
         else:
             self._field_transform[field] = lambda x: x
+
+    def get_field_units(self, field, strip_mathml = True):
+        ds = self._frb.data_source
+        pf = self._frb.pf
+        if ds._type_name == "slice":
+            units = pf.field_info[field].get_units()
+        elif ds._type_name == "proj":
+            units = pf.field_info[field].get_projected_units()
+        else:
+            units = ""
+        if strip_mathml:
+            units = units.replace(r"\rm{", "").replace("}","")
+        return units
 
 
 class YtPlot(object):

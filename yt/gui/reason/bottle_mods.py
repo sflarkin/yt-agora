@@ -3,7 +3,7 @@ Modifications and extensions to Bottle, to make it slightly more useful for
 yt's purposes
 
 Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: NSF / Columbia
+Affiliation: Columbia University
 Homepage: http://yt.enzotools.org/
 License:
   Copyright (C) 2011 Matthew Turk.  All Rights Reserved.
@@ -32,10 +32,14 @@ import json
 import logging, threading
 from yt.utilities.logger import ytLogger as mylog
 from yt.funcs import *
+import sys
 
 route_functions = {}
 route_watchers = []
 payloads = []
+
+orig_stdout = sys.stdout
+orig_stderr = sys.stderr
 
 def preroute(future_route, *args, **kwargs):
     def router(func):
@@ -55,6 +59,7 @@ class PayloadHandler(object):
     record = False
     event = None
     count = 0
+    debug = False
 
 
     def __new__(cls, *p, **k):
@@ -74,6 +79,10 @@ class PayloadHandler(object):
             payloads = self.payloads
             if self.record:
                 self.recorded_payloads += self.payloads
+            if self.debug:
+                orig_stderr.write("**** Delivering %s payloads\n" % (len(payloads)))
+                for p in payloads:
+                    orig_stderr.write("****    %s\n" % p['type'])
             self.payloads = []
             self.event.clear()
         return payloads
@@ -83,6 +92,8 @@ class PayloadHandler(object):
             self.payloads.append(to_add)
             self.count += 1
             self.event.set()
+            if self.debug:
+                orig_stderr.write("**** Adding payload of type %s\n" % (to_add['type']))
 
     def replay_payloads(self):
         return self.recorded_payloads
@@ -125,10 +136,10 @@ class BottleDirectRouter(DirectRouter):
         return rv
 
 def uuid_serve_functions(pre_routed = None, open_browser=False, port=9099,
-                         repl = None):
+                         repl = None, token = None):
     if pre_routed == None: pre_routed = route_functions
     debug(mode=True)
-    token = uuid.uuid1()
+    if token is None: token = uuid.uuid1()
     for r in pre_routed:
         args, kwargs, f = pre_routed[r]
         if r[0] == "/": r = r[1:]

@@ -5,7 +5,7 @@ Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
 Homepage: http://yt.enzotools.org/
 License:
-  Copyright (C) 2008-2009 Matthew Turk.  All Rights Reserved.
+  Copyright (C) 2008-2011 Matthew Turk.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -380,15 +380,14 @@ class YTCommands(cmdln.Cmdln):
         """
         import yt.analysis_modules.halo_profiler.api as HP
         kwargs = {'halos': opts.halos,
-                  'hop_style': opts.halo_hop_style,
-                  'radius': opts.halo_radius,
+                  'halo_radius': opts.halo_radius,
                   'radius_units': opts.halo_radius_units}
 
         hp = HP.HaloProfiler(arg,opts.halo_parameter_file,**kwargs)
         if opts.make_profiles:
-            hp.makeProfiles()
+            hp.make_profiles()
         if opts.make_projections:
-            hp.makeProjections()
+            hp.make_projections()
 
     @add_cmd_options(["maxw", "minw", "proj", "axis", "field", "weight",
                       "zlim", "nframes", "output", "cmap", "uboxes", "dex",
@@ -917,6 +916,9 @@ class YTCommands(cmdln.Cmdln):
     @cmdln.option("-f", "--find", action="store_true",
                   default = False, dest="find",
                   help="At startup, find all *.hierarchy files in the CWD")
+    @cmdln.option("-d", "--debug", action="store_true",
+                  default = False, dest="debug",
+                  help="Add a debugging mode for cell execution")
     def do_serve(self, subcmd, opts):
         """
         Run the Web GUI
@@ -937,6 +939,13 @@ class YTCommands(cmdln.Cmdln):
             sock.bind(('', 0))
             opts.port = sock.getsockname()[-1]
             del sock
+        elif opts.port == '-1':
+            port = raw_input("Desired yt port? ")
+            try:
+                opts.port = int(port)
+            except ValueError:
+                print "Please try a number next time."
+                return 1
         base_extjs_path = os.path.join(os.environ["YT_DEST"], "src")
         if not os.path.isfile(os.path.join(base_extjs_path, "ext-resources", "ext-all.js")):
             print
@@ -949,8 +958,9 @@ class YTCommands(cmdln.Cmdln):
         from yt.config import ytcfg;ytcfg["yt","__withinreason"]="True"
         import yt.gui.reason.bottle as bottle
         from yt.gui.reason.extdirect_repl import ExtDirectREPL
-        from yt.gui.reason.bottle_mods import uuid_serve_functions
+        from yt.gui.reason.bottle_mods import uuid_serve_functions, PayloadHandler
         hr = ExtDirectREPL(base_extjs_path)
+        hr.debug = PayloadHandler.debug = opts.debug
         if opts.find:
             # We just have to find them and store references to them.
             command_line = ["pfs = []"]

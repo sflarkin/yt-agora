@@ -8,7 +8,7 @@ Affiliation: KIPAC/SLAC/Stanford
 Author: Britton Smith <brittonsmith@gmail.com>
 Affiliation: MSU
 Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: NSF / Columbia
+Affiliation: Columbia University
 Homepage: http://yt.enzotools.org/
 License:
   Copyright (C) 2011 Matthew Turk.  All Rights Reserved.
@@ -53,7 +53,7 @@ var WidgetPlotWindow = function(python_varname, widget_data) {
         {
             xtype: 'panel',
             id: "pw_" + this.id,
-            title: "Plot Window",
+            title: widget_data['title'],
             iconCls: 'graph',
             autoScroll: true,
             layout:'absolute',
@@ -79,6 +79,47 @@ var WidgetPlotWindow = function(python_varname, widget_data) {
                     y: 10,
                     width: 400,
                     height: 400,
+                    listeners: {
+                        afterrender: function(c){
+                            c.el.on('click', function(e){
+                                if (e.ctrlKey == false) return;
+                                xy = e.getXY();
+                                cc = python_varname + ".image_recenter(" 
+                                    + (xy[0] - c.el.dom.x) + ", "
+                                    + (xy[1] - c.el.dom.y) + ", "
+                                    + c.el.dom.width + ", "
+                                    + c.el.dom.height + ")";
+                                yt_rpc.ExtDirectREPL.execute(
+                                {code:cc, hide:true}, cell_finished); 
+                            });
+                        }
+                    }
+                }, {
+                    xtype:'panel',
+                    id: 'colorbar_' + python_varname,
+                    autoEl: {
+                        tag: 'img',
+                        id: "cb_" + python_varname,
+                        src: "data:image/png;base64," +
+                             widget_data['colorbar'],
+                        width: 28,
+                        height: 398,
+                        style: 'border: 1px solid #000000;',
+                    },
+                    x: 510,
+                    y: 10,
+                    width: 30,
+                    height: 400,
+                }, {
+                    xtype: 'panel',
+                    id: 'ticks_' + python_varname,
+                    layout: 'absolute',
+                    y: 0,
+                    x: 540,
+                    width: 100,
+                    height: 420,
+                    items : [],
+                    border: false,
                 }, {   xtype: 'multislider',
                     id: 'slider_' + python_varname,
                     minValue: 0,
@@ -96,6 +137,24 @@ var WidgetPlotWindow = function(python_varname, widget_data) {
                                  hide:true}, cell_finished);
                         }
                     }
+                },{
+                    xtype: 'combo',
+                    text: 'Field',
+                    x: 100,
+                    y: 435,
+                    width: 400,
+                    store:widget_data['fields'],
+                    value:widget_data['initial_field'],
+                    editable: false,
+                    triggerAction: 'all',
+                    validateOnBlur: false,
+                    listeners: {select: function(combo, record, index) {
+                        var newValue = record.data['field1'];
+                        yt_rpc.ExtDirectREPL.execute(
+                            {code:python_varname + '.set_current_field("' +
+                                newValue + '")', hide:false},
+                            cell_finished);
+                    }}
                 }, {
                 /* the single buttons for 10% pan*/
                     xtype:'button',
@@ -250,6 +309,8 @@ var WidgetPlotWindow = function(python_varname, widget_data) {
                     x: 10,
                     y: 285,
                     width: 80,
+                    tooltip: "Upload the current image to " +
+                             "<a href='http://imgur.com'>imgur.com</a>",
                     handler: function(b,e) {
                         img_data = image_dom.src;
                         yt_rpc.ExtDirectREPL.upload_image(
@@ -270,30 +331,30 @@ var WidgetPlotWindow = function(python_varname, widget_data) {
                         }); 
                     }
                 },{
-                    xtype: 'combo',
-                    text: 'Field',
-                    x: 10,
-                    y: 315,
-                    width: 80,
-                    store:widget_data['fields'],
-                    value:widget_data['initial_field'],
-                    editable: false,
-                    triggerAction: 'all',
-                    listeners: {change: function(form, newValue, oldValue) {
-                        alert(newValue);
-                        yt_rpc.ExtDirectREPL.execute(
-                            {code:python_varname + '.set_current_field("' +
-                                newValue + '")', hide:true},
-                            cell_finished);
-                    }}
-                },{
-                    xtype: 'textarea',
-                    readOnly: true,
-                    id: 'metadata_' + python_varname,
-                    width: 300,
-                    height: 200,
-                    style: {fontFamily: 'monospace'},
-                    x: 510, y: 10,
+                    xtype: 'panel',
+                    layout: 'vbox',
+                    id: 'rhs_panel_' + python_varname,
+                    width: 250,
+                    height: 460,
+                    x: 690, y: 10,
+                    layoutConfig: {
+                        align: 'stretch',
+                        pack: 'start',
+                    },
+                    items: [
+                        {
+                          xtype: 'panel',
+                          title: 'Plot MetaData',
+                          id: 'metadata_' + python_varname,
+                          style: {fontFamily: '"Inconsolata", monospace'},
+                          html: 'Welcome to the Plot Window.',
+                          height: 200,
+                        }, {
+                          xtype: 'panel',
+                          title: 'Plot Editor',
+                          id: 'plot_edit',
+                          flex: 1,
+                        }]
                 }
             ]
         }
@@ -306,18 +367,39 @@ var WidgetPlotWindow = function(python_varname, widget_data) {
     this.panel.doLayout();
     this.panel.show();
     this.image_panel = this.panel.get("image_panel_"+python_varname);
-    this.metadata_panel = this.panel.get("metadata_" + python_varname);
+    this.ticks = this.panel.get("ticks_"+python_varname);
+    var ticks = this.ticks;
+    this.metadata_panel = this.panel.get("rhs_panel_" + python_varname).get("metadata_" + python_varname);
     this.zoom_scroll = this.panel.get("slider_" + python_varname);
     var image_dom = this.image_panel.el.dom;
     var control_panel = this.panel;
-    examine = this.zoom_scroll;
     var metadata_string;
 
     this.accept_results = function(payload) {
         this.image_panel.el.dom.src = "data:image/png;base64," + payload['image_data'];
         this.zoom_scroll.setValue(0, payload['zoom'], true);
-        this.metadata_panel.setValue(payload['metadata_string']);
+        examine = this.metadata_panel;
+        this.metadata_panel.update(payload['metadata_string']);
         metadata_string = payload['metadata_string'];
+        ticks.removeAll();
+        Ext.each(payload['ticks'], function(tick, index) {
+            console.log(tick);
+            ticks.add({xtype:'panel',
+                       width: 10, height:1,
+                       style: 'background-color: #000000;',
+                       html:'&nbsp;',
+                       x:0, y: 10 + tick[0]});
+            ticks.add({xtype:'panel',
+                       width: 90, height:15,
+                       border: false,
+                       style: 'font-family: "Inconsolata", monospace;' +
+                              'font-size: 12px;',
+                       html: '' + tick[2] + '',
+                       x:12, y: 4 + tick[0]});
+            examine = tick;
+        });
+        examine = payload['ticks'];
+        ticks.doLayout();
     }
 
     yt_rpc.ExtDirectREPL.execute(
