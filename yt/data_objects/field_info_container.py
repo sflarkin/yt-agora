@@ -26,47 +26,31 @@ License:
 """
 
 import types
-import numpy as na
 import inspect
 import copy
 import itertools
 
+import numpy as na
+
 from yt.funcs import *
 
-class FieldInfoContainer(object): # We are all Borg.
+class FieldInfoContainer(dict): # Resistance has utility
     """
     This is a generic field container.  It contains a list of potential derived
-    fields, all of which know how to act on a data object and return a value.  This
-    object handles converting units as well as validating the availability of a
-    given field.
+    fields, all of which know how to act on a data object and return a value.
+    This object handles converting units as well as validating the availability
+    of a given field.
+
     """
-    _shared_state = {}
-    _universal_field_list = {}
-    def __new__(cls, *args, **kwargs):
-        self = object.__new__(cls, *args, **kwargs)
-        self.__dict__ = cls._shared_state
-        return self
-    def __getitem__(self, key):
-        if key in self._universal_field_list:
-            return self._universal_field_list[key]
-        raise KeyError
-    def keys(self):
-        """
-        Return all the field names this object knows about.
-        """
-        return self._universal_field_list.keys()
-    def __iter__(self):
-        return self._universal_field_list.iterkeys()
-    def __setitem__(self, key, val):
-        self._universal_field_list[key] = val
-    def has_key(self, key):
-        return key in self._universal_field_list
-    def add_field(self, name, function = None, **kwargs):
+    fallback = None
+
+    def add_field(self, name, function=None, **kwargs):
         """
         Add a new field, along with supplemental metadata, to the list of
         available fields.  This respects a number of arguments, all of which
         are passed on to the constructor for
         :class:`~yt.data_objects.api.DerivedField`.
+
         """
         if function == None:
             def create_function(function):
@@ -74,6 +58,32 @@ class FieldInfoContainer(object): # We are all Borg.
                 return function
             return create_function
         self[name] = DerivedField(name, function, **kwargs)
+
+    def has_key(self, key):
+        # This gets used a lot
+        if key in self: return True
+        if self.fallback is None: return False
+        return self.fallback.has_key(key)
+
+    def __missing__(self, key):
+        if self.fallback is None:
+            raise KeyError("No field named %s" % key)
+        return self.fallback[key]
+
+    @classmethod
+    def create_with_fallback(cls, fallback):
+        obj = cls()
+        obj.fallback = fallback
+        return obj
+
+def TranslationFunc(field_name):
+    def _TranslationFunc(field, data):
+        return data[field]
+    return _TranslationFunc
+
+def NullFunc(field, data):
+    return
+
 FieldInfo = FieldInfoContainer()
 add_field = FieldInfo.add_field
 
@@ -85,24 +95,6 @@ def derived_field(**kwargs):
         add_field(**kwargs)
         return function
     return inner_decorator
-
-class CodeFieldInfoContainer(FieldInfoContainer):
-    def __setitem__(self, key, val):
-        self._field_list[key] = val
-    def __iter__(self):
-        return itertools.chain(self._field_list.iterkeys(),
-                        self._universal_field_list.iterkeys())
-    def keys(self):
-        return set(self._field_list.keys() + self._universal_field_list.keys())
-    def has_key(self, key):
-        return key in self._universal_field_list \
-            or key in self._field_list
-    def __getitem__(self, key):
-        if key in self._field_list:
-            return self._field_list[key]
-        if key in self._universal_field_list:
-            return self._universal_field_list[key]
-        raise KeyError(key)
 
 class ValidationException(Exception):
     pass
@@ -141,18 +133,21 @@ class FieldDetector(defaultdict):
     NumberOfParticles = 1
     _read_exception = None
     _id_offset = 0
+
     def __init__(self, nd = 16, pf = None, flat = False):
         self.nd = nd
         self.flat = flat
         self._spatial = not flat
         self.ActiveDimensions = [nd,nd,nd]
-        self.LeftEdge = [0.0,0.0,0.0]
-        self.RightEdge = [1.0,1.0,1.0]
+        self.LeftEdge = [0.0, 0.0, 0.0]
+        self.RightEdge = [1.0, 1.0, 1.0]
         self.dds = na.ones(3, "float64")
         self['dx'] = self['dy'] = self['dz'] = na.array([1.0])
         class fake_parameter_file(defaultdict):
             pass
+
         if pf is None:
+            # required attrs
             pf = fake_parameter_file(lambda: 1)
             pf.current_redshift = pf.omega_lambda = pf.omega_matter = \
                 pf.hubble_constant = pf.cosmological_simulation = 0.0
@@ -160,6 +155,7 @@ class FieldDetector(defaultdict):
             pf.domain_right_edge = na.ones(3, 'float64')
             pf.dimensionality = 3
         self.pf = pf
+
         class fake_hierarchy(object):
             class fake_io(object):
                 def _read_data_set(io_self, data, field):
@@ -168,33 +164,35 @@ class FieldDetector(defaultdict):
             io = fake_io()
             def get_smallest_dx(self):
                 return 1.0
+
         self.hierarchy = fake_hierarchy()
         self.requested = []
         self.requested_parameters = []
         if not self.flat:
             defaultdict.__init__(self,
-                lambda: na.ones((nd,nd,nd), dtype='float64')
-                + 1e-4*na.random.random((nd,nd,nd)))
+                lambda: na.ones((nd, nd, nd), dtype='float64')
+                + 1e-4*na.random.random((nd, nd, nd)))
         else:
             defaultdict.__init__(self, 
-                lambda: na.ones((nd*nd*nd), dtype='float64')
-                + 1e-4*na.random.random((nd*nd*nd)))
+                lambda: na.ones((nd * nd * nd), dtype='float64')
+                + 1e-4*na.random.random((nd * nd * nd)))
+
     def __missing__(self, item):
         FI = getattr(self.pf, "field_info", FieldInfo)
-        if FI.has_key(item) and \
-            FI[item]._function.func_name != '<lambda>':
+        if FI.has_key(item) and FI[item]._function.func_name != '<lambda>':
             try:
                 vv = FI[item](self)
             except NeedsGridType as exc:
                 ngz = exc.ghost_zones
-                nfd = FieldDetector(self.nd+ngz*2)
+                nfd = FieldDetector(self.nd + ngz * 2)
                 nfd._num_ghost_zones = ngz
                 vv = FI[item](nfd)
-                if ngz > 0: vv = vv[ngz:-ngz,ngz:-ngz,ngz:-ngz]
+                if ngz > 0: vv = vv[ngz:-ngz, ngz:-ngz, ngz:-ngz]
                 for i in nfd.requested:
                     if i not in self.requested: self.requested.append(i)
                 for i in nfd.requested_parameters:
-                    if i not in self.requested_parameters: self.requested_parameters.append(i)
+                    if i not in self.requested_parameters:
+                        self.requested_parameters.append(i)
             if vv is not None:
                 if not self.flat: self[item] = vv
                 else: self[item] = vv.ravel()
@@ -205,16 +203,15 @@ class FieldDetector(defaultdict):
     def _read_data(self, field_name):
         self.requested.append(field_name)
         FI = getattr(self.pf, "field_info", FieldInfo)
-        if FI.has_key(field_name) and \
-           FI[field_name].particle_type:
+        if FI.has_key(field_name) and FI[field_name].particle_type:
             self.requested.append(field_name)
             return na.ones(self.NumberOfParticles)
         return defaultdict.__missing__(self, field_name)
 
     def get_field_parameter(self, param):
         self.requested_parameters.append(param)
-        if param in ['bulk_velocity','center','height_vector']:
-            return na.random.random(3)*1e-2
+        if param in ['bulk_velocity', 'center', 'height_vector']:
+            return na.random.random(3) * 1e-2
         else:
             return 0.0
     _num_ghost_zones = 0
@@ -238,14 +235,15 @@ class DerivedField(object):
         :param function: is a function handle that defines the field
         :param convert_function: must convert to CGS, if it needs to be done
         :param units: is a mathtext-formatted string that describes the field
-        :param projected_units: if we display a projection, what should the units be?
+        :param projected_units: if we display a projection, what should the
+                                units be?
         :param take_log: describes whether the field should be logged
         :param validators: is a list of :class:`FieldValidator` objects
         :param particle_type: is this field based on particles?
         :param vector_field: describes the dimensionality of the field
         :param display_field: governs its appearance in the dropdowns in reason
-        :param not_in_all: is used for baryon fields from the data that are not in
-                           all the grids
+        :param not_in_all: is used for baryon fields from the data that are not
+                           in all the grids
         :param display_name: a name used in the plots
         :param projection_conversion: which unit should we multiply by in a
                                       projection?
@@ -292,9 +290,7 @@ class DerivedField(object):
         return e
 
     def get_units(self):
-        """
-        Return a string describing the units.
-        """
+        """ Return a string describing the units. """
         return self._units
 
     def get_projected_units(self):
@@ -304,9 +300,7 @@ class DerivedField(object):
         return self._projected_units
 
     def __call__(self, data):
-        """
-        Return the value of the field in a given *data* object.
-        """
+        """ Return the value of the field in a given *data* object. """
         ii = self.check_available(data)
         original_fields = data.keys() # Copy
         dd = self._function(self, data)
