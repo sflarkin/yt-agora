@@ -1616,8 +1616,7 @@ class AMRQuadTreeProjBase(AMR2DData):
         field_data = na.concatenate(field_data, axis=0).transpose()
         if self._weight is None:
             dls, convs = self._get_dls(self._grids[0], fields)
-            # We always get one extra for the weighting field
-            field_data *= convs[:-1]
+            field_data *= convs
         weight_data = na.concatenate(weight_data, axis=0).transpose()
         dxs = na.concatenate(dxs, axis=0).transpose()
         # We now convert to half-widths and center-points
