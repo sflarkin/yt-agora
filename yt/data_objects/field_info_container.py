@@ -5,9 +5,9 @@ native.
 
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt.enzotools.org/
+Homepage: http://yt-project.org/
 License:
-  Copyright (C) 2008-2009 Matthew Turk.  All Rights Reserved.
+  Copyright (C) 2008-2011 Matthew Turk.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -23,7 +23,6 @@ License:
 
   You should have received a copy of the GNU General Public License
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 """
 
 import types
@@ -41,21 +40,17 @@ class FieldInfoContainer(object): # We are all Borg.
     fields, all of which know how to act on a data object and return a value.
     This object handles converting units as well as validating the availability
     of a given field.
-
     """
     _shared_state = {}
     _universal_field_list = {}
-
     def __new__(cls, *args, **kwargs):
         self = object.__new__(cls, *args, **kwargs)
         self.__dict__ = cls._shared_state
         return self
-
     def __getitem__(self, key):
         if key in self._universal_field_list:
             return self._universal_field_list[key]
         raise KeyError
-
     def keys(self):
         """ Return all the field names this object knows about. """
         return self._universal_field_list.keys()
@@ -169,15 +164,15 @@ class FieldDetector(defaultdict):
         self.RightEdge = [1.0, 1.0, 1.0]
         self.dds = na.ones(3, "float64")
         self['dx'] = self['dy'] = self['dz'] = na.array([1.0])
-
         class fake_parameter_file(defaultdict):
             pass
-
         if pf is None:  # setup defaults
             pf = fake_parameter_file(lambda: 1)
             pf.current_redshift = pf.omega_lambda = pf.omega_matter = \
                 pf.hubble_constant = pf.cosmological_simulation = 0.0
-
+            pf.domain_left_edge = na.zeros(3, 'float64')
+            pf.domain_right_edge = na.ones(3, 'float64')
+            pf.dimensionality = 3
         self.pf = pf
         class fake_hierarchy(object):
             class fake_io(object):
@@ -199,19 +194,17 @@ class FieldDetector(defaultdict):
             defaultdict.__init__(self, 
                 lambda: na.ones((nd * nd * nd), dtype='float64')
                 + 1e-4*na.random.random((nd * nd * nd)))
-
     def __missing__(self, item):
-        if FieldInfo.has_key(item) and \
-            FieldInfo[item]._function.func_name != '<lambda>':
-
+        FI = getattr(self.pf, "field_info", FieldInfo)
+        if FI.has_key(item) and \
+            FI[item]._function.func_name != '<lambda>':
             try:
-                vv = FieldInfo[item](self)
+                vv = FI[item](self)
             except NeedsGridType as exc:
                 ngz = exc.ghost_zones
-                nfd = FieldDetector(self.nd + ngz * 2)
+                nfd = FieldDetector(self.nd+ngz*2)
                 nfd._num_ghost_zones = ngz
-                vv = FieldInfo[item](nfd)
-
+                vv = FI[item](nfd)
                 if ngz > 0: vv = vv[ngz:-ngz, ngz:-ngz, ngz:-ngz]
 
                 for i in nfd.requested:
@@ -231,23 +224,21 @@ class FieldDetector(defaultdict):
 
     def _read_data(self, field_name):
         self.requested.append(field_name)
-        if FieldInfo.has_key(field_name) and \
-           FieldInfo[field_name].particle_type:
+        FI = getattr(self.pf, "field_info", FieldInfo)
+        if FI.has_key(field_name) and \
+           FI[field_name].particle_type:
             self.requested.append(field_name)
             return na.ones(self.NumberOfParticles)
         return defaultdict.__missing__(self, field_name)
 
     def get_field_parameter(self, param):
         self.requested_parameters.append(param)
-
-        if param in ['bulk_velocity', 'center', 'height_vector']:
+        if param in ['bulk_velocity','center','height_vector']:
             return na.random.random(3)*1e-2
         else:
             return 0.0
-
     _num_ghost_zones = 0
     id = 1
-
     def has_field_parameter(self, param): return True
     def convert(self, item): return 1
 
@@ -329,7 +320,7 @@ class DerivedField(object):
         return e
 
     def get_units(self):
-        """ Return a string describing the units. """
+        """ Return a string describing the units.  """
         return self._units
 
     def get_projected_units(self):
@@ -340,7 +331,7 @@ class DerivedField(object):
         return self._projected_units
 
     def __call__(self, data):
-        """ Return the value of the field in a given *data* object. """
+        """ Return the value of the field in a given *data* object.  """
         ii = self.check_available(data)
         original_fields = data.keys() # Copy
         dd = self._function(self, data)
