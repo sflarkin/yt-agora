@@ -5,9 +5,9 @@ points -- are excluded here, and left to the EnzoDerivedFields.)
 
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt.enzotools.org/
+Homepage: http://yt-project.org/
 License:
-  Copyright (C) 2007-2009 Matthew Turk.  All Rights Reserved.
+  Copyright (C) 2007-2011 Matthew Turk.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -155,18 +155,38 @@ def _combTotalMass(data, baryon_mass, particle_mass):
 add_quantity("TotalMass", function=_TotalMass,
              combine_function=_combTotalMass, n_ret = 2)
 
-def _CenterOfMass(data,use_particles=False):
+def _MatterMass(data):
+    """
+    This function takes no arguments and returns the array sum of cell masses
+    and particle masses.
+    """
+    cellvol = data["CellVolume"]
+    matter_rho = data["Matter_Density"]
+    return cellvol, matter_rho 
+def _combMatterMass(data, cellvol, matter_rho):
+    return cellvol*matter_rho
+add_quantity("MatterMass", function=_MatterMass,
+	     combine_function=_combMatterMass, n_ret=2)
+
+def _CenterOfMass(data, use_cells=True, use_particles=False):
     """
     This function returns the location of the center
     of mass. By default, it computes of the *non-particle* data in the object. 
 
-    :param use_particles: if True, will compute center of mass for
-    *all data* in the object (default: False)
+    Parameters
+    ----------
+
+    use_cells : bool
+        If True, will include the cell mass (default: True)
+    use_particles : bool
+        if True, will include the particles in the object (default: False)
     """
-    x = (data["x"] * data["CellMassMsun"]).sum()
-    y = (data["y"] * data["CellMassMsun"]).sum()
-    z = (data["z"] * data["CellMassMsun"]).sum()
-    den = data["CellMassMsun"].sum()
+    x = y = z = den = 0
+    if use_cells: 
+        x += (data["x"] * data["CellMassMsun"]).sum()
+        y += (data["y"] * data["CellMassMsun"]).sum()
+        z += (data["z"] * data["CellMassMsun"]).sum()
+        den += data["CellMassMsun"].sum()
     if use_particles:
         x += (data["particle_position_x"] * data["ParticleMassMsun"]).sum()
         y += (data["particle_position_y"] * data["ParticleMassMsun"]).sum()
@@ -221,12 +241,32 @@ def _AngularMomentumVector(data):
     amz = data["SpecificAngularMomentumZ"]*data["CellMassMsun"]
     j_mag = [amx.sum(), amy.sum(), amz.sum()]
     return [j_mag]
+
+def _StarAngularMomentumVector(data):
+    """
+    This function returns the mass-weighted average angular momentum vector 
+    for stars.
+    """
+    is_star = data["creation_time"] > 0
+    star_mass = data["ParticleMassMsun"][is_star]
+    sLx = data["ParticleSpecificAngularMomentumX"][is_star]
+    sLy = data["ParticleSpecificAngularMomentumY"][is_star]
+    sLz = data["ParticleSpecificAngularMomentumZ"][is_star]
+    amx = sLx * star_mass
+    amy = sLy * star_mass
+    amz = sLz * star_mass
+    j_mag = [amx.sum(), amy.sum(), amz.sum()]
+    return [j_mag]
+
 def _combAngularMomentumVector(data, j_mag):
     if len(j_mag.shape) < 2: j_mag = na.expand_dims(j_mag, 0)
     L_vec = j_mag.sum(axis=0)
     L_vec_norm = L_vec / na.sqrt((L_vec**2.0).sum())
     return L_vec_norm
 add_quantity("AngularMomentumVector", function=_AngularMomentumVector,
+             combine_function=_combAngularMomentumVector, n_ret=1)
+
+add_quantity("StarAngularMomentumVector", function=_StarAngularMomentumVector,
              combine_function=_combAngularMomentumVector, n_ret=1)
 
 def _BaryonSpinParameter(data):
@@ -274,7 +314,7 @@ add_quantity("ParticleSpinParameter", function=_ParticleSpinParameter,
              combine_function=_combBaryonSpinParameter, n_ret=4)
     
 def _IsBound(data, truncate = True, include_thermal_energy = False,
-    treecode = True, opening_angle = 1.0, periodic_test = False):
+    treecode = True, opening_angle = 1.0, periodic_test = False, include_particles = True):
     r"""
     This returns whether or not the object is gravitationally bound. If this
     returns a value greater than one, it is bound, and otherwise not.
@@ -296,7 +336,10 @@ def _IsBound(data, truncate = True, include_thermal_energy = False,
         used to calculate the potential between masses.
     periodic_test : Bool 
         Used for testing the periodic adjustment machinery
-        of this derived quantity. 
+        of this derived quantity.
+    include_particles : Bool
+	Should we add the mass contribution of particles
+	to calculate binding energy?
 
     Examples
     --------
@@ -308,13 +351,21 @@ def _IsBound(data, truncate = True, include_thermal_energy = False,
     bv_x,bv_y,bv_z = data.quantities["BulkVelocity"]()
     # One-cell objects are NOT BOUND.
     if data["CellMass"].size == 1: return [0.0]
-    kinetic = 0.5 * (data["CellMass"] * (
+    """
+    Changing data["CellMass"] to mass_to_use
+    Add the mass contribution of particles if include_particles = True
+    """
+    if (include_particles):
+	mass_to_use = data.quantities["MatterMass"]()[0] 
+    else:
+	mass_to_use = data["CellMass"]
+    kinetic = 0.5 * (mass_to_use * (
                        (data["x-velocity"] - bv_x)**2
                      + (data["y-velocity"] - bv_y)**2
                      + (data["z-velocity"] - bv_z)**2 )).sum()
     # Add thermal energy to kinetic energy
     if (include_thermal_energy):
-        thermal = (data["ThermalEnergy"] * data["CellMass"]).sum()
+        thermal = (data["ThermalEnergy"] * mass_to_use).sum()
         kinetic += thermal
     if periodic_test:
         kinetic = na.ones_like(kinetic)
@@ -345,8 +396,11 @@ def _IsBound(data, truncate = True, include_thermal_energy = False,
     # This dict won't make a copy of the data, but it will make a copy to 
     # change if needed in the periodic section immediately below.
     local_data = {}
-    for label in ["x", "y", "z", "CellMass"]:
+    for label in ["x", "y", "z"]: # Separating CellMass from the for loop
         local_data[label] = data[label]
+    local_data["CellMass"] = mass_to_use # Adding CellMass separately
+					 # NOTE: if include_particles = True, local_data["CellMass"]
+					 #       is not the same as data["CellMass"]!!!
     if periodic.any():
         # Adjust local_data to re-center the clump to remove the periodicity
         # by the gap calculated above.
@@ -385,7 +439,7 @@ def _IsBound(data, truncate = True, include_thermal_energy = False,
         # symmetry.
         dxes = na.unique(data['dx']) # unique returns a sorted array,
         dyes = na.unique(data['dy']) # so these will all have the same
-        dzes = na.unique(data['dx']) # order.
+        dzes = na.unique(data['dz']) # order.
         # We only need one dim to figure out levels, we'll use x.
         dx = 1./data.pf.domain_dimensions[0]
         levels = (na.log(dx / dxes) / na.log(data.pf.refine_by)).astype('int')
@@ -401,7 +455,7 @@ def _IsBound(data, truncate = True, include_thermal_energy = False,
             thisx = (local_data["x"][sel] / dx).astype('int64') - cover_imin[0] * 2**L
             thisy = (local_data["y"][sel] / dy).astype('int64') - cover_imin[1] * 2**L
             thisz = (local_data["z"][sel] / dz).astype('int64') - cover_imin[2] * 2**L
-            vals = na.array([local_data["CellMass"][sel]], order='F')
+	    vals = na.array([local_data["CellMass"][sel]], order='F')
             octree.add_array_to_tree(L, thisx, thisy, thisz, vals,
                na.ones_like(thisx).astype('float64'), treecode = 1)
         # Now we calculate the binding energy using a treecode.
@@ -610,6 +664,26 @@ def _combMaxLocation(data, *args):
 add_quantity("MaxLocation", function=_MaxLocation,
              combine_function=_combMaxLocation, n_ret = 6)
 
+def _MinLocation(data, field):
+    """
+    This function returns the location of the minimum of a set
+    of fields.
+    """
+    ma, mini, mx, my, mz, mg = 1e90, -1, -1, -1, -1, -1
+    if data[field].size > 0:
+        mini = na.argmin(data[field])
+        ma = data[field][mini]
+        mx, my, mz = [data[ax][mini] for ax in 'xyz']
+        mg = data["GridIndices"][mini]
+    return (ma, mini, mx, my, mz, mg)
+def _combMinLocation(data, *args):
+    args = [na.atleast_1d(arg) for arg in args]
+    i = na.argmin(args[0]) # ma is arg[0]
+    return [arg[i] for arg in args]
+add_quantity("MinLocation", function=_MinLocation,
+             combine_function=_combMinLocation, n_ret = 6)
+
+
 def _TotalQuantity(data, fields):
     """
     This function sums up a given field over the entire region
@@ -620,7 +694,7 @@ def _TotalQuantity(data, fields):
     totals = []
     for field in fields:
         if data[field].size < 1:
-            totals.append(0)
+            totals.append(0.0)
             continue
         totals.append(data[field].sum())
     return len(fields), totals

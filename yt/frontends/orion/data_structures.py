@@ -3,9 +3,9 @@ Data structures for Orion.
 
 Author: J. S. Oishi <jsoishi@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt.enzotools.org/
+Homepage: http://yt-project.org/
 License:
-  Copyright (C) 2008-2010 J. S. Oishi.  All Rights Reserved.
+  Copyright (C) 2008-2011 J. S. Oishi.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -45,6 +45,8 @@ from yt.data_objects.static_output import \
            StaticOutput
 from yt.utilities.definitions import \
     mpc_conversion
+from yt.utilities.parallel_tools.parallel_analysis_interface import \
+     parallel_root_only
 
 from .definitions import \
     orion2enzoDict, \
@@ -442,16 +444,12 @@ class OrionStaticOutput(StaticOutput):
     def __init__(self, plotname, paramFilename=None, fparamFilename=None,
                  data_style='orion_native', paranoia=False,
                  storage_filename = None):
-        """need to override for Orion file structure.
-
-        the paramfile is usually called "inputs"
+        """
+        The paramfile is usually called "inputs"
         and there may be a fortran inputs file usually called "probin"
         plotname here will be a directory name
-        as per BoxLib, data_style will be one of
-         * Native
-         * IEEE (not implemented in yt)
-         * ASCII (not implemented in yt)
-
+        as per BoxLib, data_style will be Native (implemented here), IEEE (not
+        yet implemented) or ASCII (not yet implemented.)
         """
         self.storage_filename = storage_filename
         self.paranoid_read = paranoia
@@ -489,8 +487,13 @@ class OrionStaticOutput(StaticOutput):
 
         # We check for the job_info file's existence because this is currently
         # what distinguishes Orion data from MAESTRO data.
-        return ( os.path.exists(os.path.join(pfname)) and 
-                 not os.path.exists(os.path.join(pname, "job_info")))
+        pfn = os.path.join(pfname)
+        if not os.path.exists(pfn): return False
+        castro = any(("castro." in line for line in open(pfn)))
+        nyx = any(("nyx." in line for line in open(pfn)))
+        maestro = os.path.exists(os.path.join(pname, "job_info"))
+        orion = (not castro) and (not maestro) and (not nyx)
+        return orion
         
     def _parse_parameter_file(self):
         """
@@ -621,4 +624,14 @@ class OrionStaticOutput(StaticOutput):
             self.conversion_factors["Time"] = 1.0
         for unit in mpc_conversion.keys():
             self.units[unit] = mpc_conversion[unit] / mpc_conversion["cm"]
+            
+    @parallel_root_only
+    def print_key_parameters(self):
+        for a in ["current_time", "domain_dimensions", "domain_left_edge",
+                  "domain_right_edge"]:
+            if not hasattr(self, a):
+                mylog.error("Missing %s in parameter file definition!", a)
+                continue
+            v = getattr(self, a)
+            mylog.info("Parameters: %-25s = %s", a, v)
 
