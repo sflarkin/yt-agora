@@ -26,7 +26,10 @@ License:
 import numpy as na
 
 from yt.data_objects.field_info_container import \
-    CodeFieldInfoContainer, \
+    FieldInfoContainer, \
+    NullFunc, \
+    TranslationFunc, \
+    FieldInfo, \
     ValidateParameter, \
     ValidateDataField, \
     ValidateProperty, \
@@ -37,40 +40,39 @@ from yt.utilities.physical_constants import \
     mh
 import yt.utilities.amr_utils as amr_utils
 
-class EnzoFieldContainer(CodeFieldInfoContainer):
-    """
-    This is a container for Enzo-specific fields.
-    """
-    _shared_state = {}
-    _field_list = {}
-EnzoFieldInfo = EnzoFieldContainer()
-add_enzo_field = EnzoFieldInfo.add_field
+EnzoFieldInfo = FieldInfoContainer.create_with_fallback(FieldInfo)
+add_field = EnzoFieldInfo.add_field
 
-add_field = add_enzo_field
+KnownEnzoFields = FieldInfoContainer()
+add_enzo_field = KnownEnzoFields.add_field
 
-_speciesList = ["HI","HII","Electron",
-               "HeI","HeII","HeIII",
-               "H2I","H2II","HM",
-               "DI","DII","HDI","Metal","PreShock"]
-_speciesMass = {"HI":1.0,"HII":1.0,"Electron":1.0,
-                "HeI":4.0,"HeII":4.0,"HeIII":4.0,
-                "H2I":2.0,"H2II":2.0,"HM":1.0,
-                "DI":2.0,"DII":2.0,"HDI":3.0}
+_speciesList = ["HI", "HII", "Electron",
+                "HeI", "HeII", "HeIII",
+                "H2I", "H2II", "HM",
+                "DI", "DII", "HDI", "Metal", "PreShock"]
+_speciesMass = {"HI": 1.0, "HII": 1.0, "Electron": 1.0,
+                "HeI": 4.0, "HeII": 4.0, "HeIII": 4.0,
+                "H2I": 2.0, "H2II": 2.0, "HM": 1.0,
+                "DI": 2.0, "DII": 2.0, "HDI": 3.0}
 
 def _SpeciesComovingDensity(field, data):
     sp = field.name.split("_")[0] + "_Density"
     ef = (1.0 + data.pf.current_redshift)**3.0
-    return data[sp]/ef
+    return data[sp] / ef
+
 def _SpeciesFraction(field, data):
     sp = field.name.split("_")[0] + "_Density"
-    return data[sp]/data["Density"]
+    return data[sp] / data["Density"]
+
 def _SpeciesMass(field, data):
     sp = field.name.split("_")[0] + "_Density"
     return data[sp] * data["CellVolume"]
+
 def _SpeciesNumberDensity(field, data):
     species = field.name.split("_")[0]
     sp = field.name.split("_")[0] + "_Density"
-    return data[sp]/_speciesMass[species]
+    return data[sp] / _speciesMass[species]
+
 def _convertCellMassMsun(data):
     return 5.027854e-34 # g^-1
 def _ConvertNumberDensity(data):
@@ -118,10 +120,10 @@ add_field("Metallicity3", units=r"Z_{\rm{\odot}}",
           validators=ValidateDataField("SN_Colour"),
           projection_conversion="1")
 
-add_field("Cooling_Time", units=r"\rm{s}",
-          function=lambda a, b: None,
-          validators=ValidateDataField("Cooling_Time"),
-          projection_conversion="1")
+add_enzo_field("Cooling_Time", units=r"\rm{s}",
+               function=NullFunc,
+               validators=ValidateDataField("Cooling_Time"),
+               projection_conversion="1")
 
 def _ThermalEnergy(field, data):
     if data.pf["HydroMethod"] == 2:
@@ -154,7 +156,9 @@ add_field("KineticEnergy",function=_KineticEnergy,
 def _convertEnergy(data):
     return data.convert("x-velocity")**2.0
 
-add_field("GasEnergy", function=lambda a, b: None,
+add_enzo_field("GasEnergy", function=NullFunc,
+          units=r"\rm{ergs}/\rm{g}", convert_function=_convertEnergy)
+add_enzo_field("Gas_Energy", function=NullFunc,
           units=r"\rm{ergs}/\rm{g}", convert_function=_convertEnergy)
 
 def _Gas_Energy(field, data):
@@ -162,7 +166,12 @@ def _Gas_Energy(field, data):
 add_field("Gas_Energy", function=_Gas_Energy,
           units=r"\rm{ergs}/\rm{g}", convert_function=_convertEnergy)
 
-add_field("TotalEnergy", function=lambda a, b: None,
+# We set up fields for both TotalEnergy and Total_Energy in the known fields
+# lists.  Note that this does not mean these will be the used definitions.
+add_enzo_field("TotalEnergy", function=NullFunc,
+          display_name = "\mathrm{Total}\/\mathrm{Energy}",
+          units=r"\rm{ergs}/\rm{g}", convert_function=_convertEnergy)
+add_enzo_field("Total_Energy", function=NullFunc,
           display_name = "\mathrm{Total}\/\mathrm{Energy}",
           units=r"\rm{ergs}/\rm{g}", convert_function=_convertEnergy)
 
@@ -221,38 +230,46 @@ _default_fields += [ "%s_Density" % sp for sp in _speciesList ]
 
 for field in _default_fields:
     dn = field.replace("_","\/")
-    add_field(field, function=lambda a, b: None, take_log=True,
+    add_enzo_field(field, function=NullFunc, take_log=True,
               display_name = dn,
-              validators=[ValidateDataField(field)], units=r"\rm{g}/\rm{cm}^3")
-EnzoFieldInfo["x-velocity"].projection_conversion='1'
-EnzoFieldInfo["y-velocity"].projection_conversion='1'
-EnzoFieldInfo["z-velocity"].projection_conversion='1'
+              validators=[ValidateDataField(field)], units=r"Unknown")
+KnownEnzoFields["x-velocity"].projection_conversion='1'
+KnownEnzoFields["y-velocity"].projection_conversion='1'
+KnownEnzoFields["z-velocity"].projection_conversion='1'
+
+def _convertBfield(data): 
+    return na.sqrt(4*na.pi*data.convert("Density")*data.convert("x-velocity")**2)
+for field in ['Bx','By','Bz']:
+    f = KnownEnzoFields[field]
+    f._convert_function=_convertBfield
+    f._units=r"\mathrm{Gau\ss}"
+    f.take_log=False
 
 # Now we override
 
 def _convertDensity(data):
     return data.convert("Density")
 for field in ["Density"] + [ "%s_Density" % sp for sp in _speciesList ]:
-    EnzoFieldInfo[field]._units = r"\rm{g}/\rm{cm}^3"
-    EnzoFieldInfo[field]._projected_units = r"\rm{g}/\rm{cm}^2"
-    EnzoFieldInfo[field]._convert_function=_convertDensity
+    KnownEnzoFields[field]._units = r"\rm{g}/\rm{cm}^3"
+    KnownEnzoFields[field]._projected_units = r"\rm{g}/\rm{cm}^2"
+    KnownEnzoFields[field]._convert_function=_convertDensity
 
-add_field("Dark_Matter_Density", function=lambda a,b: None,
+add_enzo_field("Dark_Matter_Density", function=NullFunc,
           convert_function=_convertDensity,
           validators=[ValidateDataField("Dark_Matter_Density"),
                       ValidateSpatial(0)],
           display_name = "Dark\ Matter\ Density",
           not_in_all = True)
 
-EnzoFieldInfo["Temperature"]._units = r"\rm{K}"
-EnzoFieldInfo["Temperature"].units = r"K"
-EnzoFieldInfo["Dust_Temperature"]._units = r"\rm{K}"
-EnzoFieldInfo["Dust_Temperature"].units = r"K"
+KnownEnzoFields["Temperature"]._units = r"\rm{K}"
+KnownEnzoFields["Temperature"].units = r"K"
+KnownEnzoFields["Dust_Temperature"]._units = r"\rm{K}"
+KnownEnzoFields["Dust_Temperature"].units = r"K"
 
 def _convertVelocity(data):
     return data.convert("x-velocity")
 for ax in ['x','y','z']:
-    f = EnzoFieldInfo["%s-velocity" % ax]
+    f = KnownEnzoFields["%s-velocity" % ax]
     f._units = r"\rm{cm}/\rm{s}"
     f._convert_function = _convertVelocity
     f.take_log = False
@@ -375,14 +392,6 @@ def _IsStarParticle(field, data):
 add_field('IsStarParticle', function=_IsStarParticle,
           particle_type = True)
 
-def _convertBfield(data): 
-    return na.sqrt(4*na.pi*data.convert("Density")*data.convert("x-velocity")**2)
-for field in ['Bx','By','Bz']:
-    f = EnzoFieldInfo[field]
-    f._convert_function=_convertBfield
-    f._units=r"\mathrm{Gau\ss}"
-    f.take_log=False
-
 def _Bmag(field, data):
     """ magnitude of bvec
     """
@@ -395,12 +404,7 @@ add_field("Bmag", function=_Bmag,display_name=r"|B|",units=r"\mathrm{Gau\ss}")
 # Now we do overrides for 2D fields
 #
 
-class Enzo2DFieldContainer(CodeFieldInfoContainer):
-    _shared_state = {}
-    _field_list = EnzoFieldContainer._field_list.copy()
-# We make a copy of the dict from the other, so we
-# can now update it...
-Enzo2DFieldInfo = Enzo2DFieldContainer()
+Enzo2DFieldInfo = FieldInfoContainer.create_with_fallback(EnzoFieldInfo)
 add_enzo_2d_field = Enzo2DFieldInfo.add_field
 
 def _CellArea(field, data):
@@ -438,12 +442,7 @@ add_enzo_2d_field("z-velocity", function=_zvel)
 # Now we do overrides for 1D fields
 #
 
-class Enzo1DFieldContainer(CodeFieldInfoContainer):
-    _shared_state = {}
-    _field_list = EnzoFieldContainer._field_list.copy()
-# We make a copy of the dict from the other, so we
-# can now update it...
-Enzo1DFieldInfo = Enzo1DFieldContainer()
+Enzo1DFieldInfo = FieldInfoContainer.create_with_fallback(EnzoFieldInfo)
 add_enzo_1d_field = Enzo1DFieldInfo.add_field
 
 def _CellLength(field, data):
@@ -474,7 +473,7 @@ add_enzo_1d_field("y-velocity", function=_yvel)
 def _convertBfield(data): 
     return na.sqrt(4*na.pi*data.convert("Density")*data.convert("x-velocity")**2)
 for field in ['Bx','By','Bz']:
-    f = EnzoFieldInfo[field]
+    f = KnownEnzoFields[field]
     f._convert_function=_convertBfield
     f._units=r"\mathrm{Gau\ss}"
     f.take_log=False
