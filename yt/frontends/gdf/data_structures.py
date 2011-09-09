@@ -24,9 +24,6 @@ License:
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import h5py
-import numpy as na
-import weakref
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
            AMRGridPatch
@@ -35,8 +32,9 @@ from yt.data_objects.hierarchy import \
 from yt.data_objects.static_output import \
            StaticOutput
 
-from .fields import GDFFieldContainer
-import pdb
+from .fields import GDFFieldContainer, KnownGDFFields
+from yt.data_objects.field_info_container import \
+    FieldInfoContainer, NullFunc
 
 class GDFGrid(AMRGridPatch):
     _id_offset = 0
@@ -62,7 +60,6 @@ class GDFGrid(AMRGridPatch):
             self.dds = na.array((RE-LE)/self.ActiveDimensions)
         if self.pf.dimensionality < 2: self.dds[1] = 1.0
         if self.pf.dimensionality < 3: self.dds[2] = 1.0
-        # pdb.set_trace()
         self.data['dx'], self.data['dy'], self.data['dz'] = self.dds
 
 class GDFHierarchy(AMRHierarchy):
@@ -116,7 +113,6 @@ class GDFHierarchy(AMRHierarchy):
         self.grid_right_edge = self.grid_left_edge + dx*self.grid_dimensions
         self.grid_particle_count = f['grid_particle_count'][:]
         self.grids = na.array(self.grids, dtype='object')
-        # pdb.set_trace()
 
     def _populate_grid_objects(self):
         for g in self.grids:
@@ -143,14 +139,14 @@ class GDFHierarchy(AMRHierarchy):
 
 class GDFStaticOutput(StaticOutput):
     _hierarchy_class = GDFHierarchy
-    _fieldinfo_class = GDFFieldContainer
+    _fieldinfo_fallback = GDFFieldContainer
+    _fieldinfo_known = GDFKnownFields
     
     def __init__(self, filename, data_style='grid_data_format',
                  storage_filename = None):
         StaticOutput.__init__(self, filename, data_style)
         self.storage_filename = storage_filename
         self.filename = filename
-        self.field_info = self._fieldinfo_class()
         
     def _set_units(self):
         """
@@ -170,8 +166,9 @@ class GDFStaticOutput(StaticOutput):
         self._handle = h5py.File(self.parameter_filename, "r")
         for field_name in self._handle["/field_types"]:
             self.units[field_name] = self._handle["/field_types/%s" % field_name].attrs['field_to_cgs']
+        self._handle.close()
         del self._handle
-        
+
     def _parse_parameter_file(self):
         self._handle = h5py.File(self.parameter_filename, "r")
         sp = self._handle["/simulation_parameters"].attrs
@@ -194,8 +191,9 @@ class GDFStaticOutput(StaticOutput):
         else:
             self.current_redshift = self.omega_lambda = self.omega_matter = \
                 self.hubble_constant = self.cosmological_simulation = 0.0
+        self._handle.close()
         del self._handle
-            
+        
     @classmethod
     def _is_valid(self, *args, **kwargs):
         try:

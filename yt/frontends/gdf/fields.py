@@ -24,53 +24,54 @@ License:
 """
 
 from yt.data_objects.field_info_container import \
-    CodeFieldInfoContainer, \
+    FieldInfoContainer, \
+    FieldInfo, \
     ValidateParameter, \
     ValidateDataField, \
     ValidateProperty, \
     ValidateSpatial, \
-    ValidateGridType
+    ValidateGridType, \
+    NullFunc, \
+    TranslationFunc
 import yt.data_objects.universal_fields
 
-class GDFFieldContainer(CodeFieldInfoContainer):
-    _shared_state = {}
-    _field_list = {}
-GDFFieldInfo = GDFFieldContainer()
-add_gdf_field = GDFFieldInfo.add_field
+GDFFieldInfo = FieldInfoContainer.create_with_fallback(FieldInfo)
+add_field = GDFFieldInfo.add_field
 
-add_field = add_gdf_field
+KnownGDFFields = FieldInfoContainer()
+add_gdf_field = KnownGDFFields.add_field
 
-add_field("density", function=lambda a,b: None, take_log=True,
+
+add_gdf_field("density", function=NullFunc, take_log=True,
           validators = [ValidateDataField("density")],
-          units=r"\rm{g}/\rm{cm}^3")
+          units=r"\rm{g}/\rm{cm}^3",
+          projected_units =r"\rm{g}/\rm{cm}^2")
 
-GDFFieldInfo["density"]._projected_units =r"\rm{g}/\rm{cm}^2"
-
-add_field("specific_energy", function=lambda a,b: None, take_log=True,
+add_gdf_field("specific_energy", function=NullFunc, take_log=True,
           validators = [ValidateDataField("specific_energy")],
           units=r"\rm{erg}/\rm{g}")
 
-add_field("velocity_x", function=lambda a,b: None, take_log=True,
+add_gdf_field("velocity_x", function=NullFunc, take_log=True,
           validators = [ValidateDataField("velocity_x")],
           units=r"\rm{cm}/\rm{s}")
 
-add_field("velocity_y", function=lambda a,b: None, take_log=True,
+add_gdf_field("velocity_y", function=NullFunc, take_log=True,
           validators = [ValidateDataField("velocity_y")],
           units=r"\rm{cm}/\rm{s}")
 
-add_field("velocity_z", function=lambda a,b: None, take_log=True,
+add_gdf_field("velocity_z", function=NullFunc, take_log=True,
           validators = [ValidateDataField("velocity_z")],
           units=r"\rm{cm}/\rm{s}")
 
-add_field("mag_field_x", function=lambda a,b: None, take_log=True,
+add_gdf_field("mag_field_x", function=NullFunc, take_log=True,
           validators = [ValidateDataField("mag_field_x")],
           units=r"\rm{cm}/\rm{s}")
 
-add_field("mag_field_y", function=lambda a,b: None, take_log=True,
+add_gdf_field("mag_field_y", function=NullFunc, take_log=True,
           validators = [ValidateDataField("mag_field_y")],
           units=r"\rm{cm}/\rm{s}")
 
-add_field("mag_field_z", function=lambda a,b: None, take_log=True,
+add_gdf_field("mag_field_z", function=NullFunc, take_log=True,
           validators = [ValidateDataField("mag_field_z")],
           units=r"\rm{cm}/\rm{s}")
-    
+
