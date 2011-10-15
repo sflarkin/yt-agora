@@ -77,9 +77,6 @@ from yt.frontends.ramses.api import \
 from yt.frontends.chombo.api import \
     ChomboStaticOutput, ChomboFieldInfo, add_chombo_field
 
-from yt.frontends.gdf.api import \
-    GDFStaticOutput, GDFFieldInfo, add_gdf_field
-
 from yt.frontends.art.api import \
     ARTStaticOutput, ARTFieldInfo, add_art_field
 
@@ -106,7 +103,7 @@ from yt.visualization.api import \
 
 from yt.visualization.volume_rendering.api import \
     ColorTransferFunction, PlanckTransferFunction, ProjectionTransferFunction, \
-    HomogenizedVolume, Camera
+    HomogenizedVolume, Camera, off_axis_projection
 
 for name, cls in callback_registry.items():
     exec("%s = cls" % name)

@@ -220,10 +220,9 @@ class EnzoHierarchy(AMRHierarchy):
     # Sets are sorted, so that won't work!
     def _parse_hierarchy(self):
         def _next_token_line(token, f):
-            line = f.readline()
-            while token not in line:
-                line = f.readline()
-            return line.split()[2:]
+            for line in f:
+                if line.startswith(token):
+                    return line.split()[2:]
         if os.path.exists(self.hierarchy_filename[:-9] + "harrays"):
             if self._parse_binary_hierarchy(): return
         t1 = time.time()
@@ -234,7 +233,6 @@ class EnzoHierarchy(AMRHierarchy):
         self.grids[0].Level = 0
         si, ei, LE, RE, fn, np = [], [], [], [], [], []
         all = [si, ei, LE, RE, fn]
-        f.readline() # Blank at top
         pbar = get_pbar("Parsing Hierarchy", self.num_grids)
         for grid_id in xrange(self.num_grids):
             pbar.update(grid_id)
@@ -247,16 +245,12 @@ class EnzoHierarchy(AMRHierarchy):
             fn.append(["-1"])
             if nb > 0: fn[-1] = _next_token_line("BaryonFileName", f)
             np.append(int(_next_token_line("NumberOfParticles", f)[0]))
-            if nb == 0 and np[-1] > 0: fn[-1] = _next_token_line("FileName", f)
-            line = f.readline()
-            while len(line) > 2:
+            if nb == 0 and np[-1] > 0: fn[-1] = _next_token_line("ParticleFileName", f)
+            for line in f:
+                if len(line) < 2: break
                 if line.startswith("Pointer:"):
                     vv = patt.findall(line)[0]
                     self.__pointer_handler(vv)
-                    line = f.readline()
-                    continue
-                params = line.split()
-                line = f.readline()
         pbar.finish()
         self._fill_arrays(ei, si, LE, RE, np)
         self.grids = na.array(self.grids, dtype='object')
@@ -550,12 +544,13 @@ class EnzoHierarchyInMemory(EnzoHierarchy):
                 self.grids[pid-1]._children_ids.append(self.grids[-1].id)
         self.max_level = self.grid_levels.max()
         mylog.debug("Preparing grids")
+        self.grids = na.empty(len(grids), dtype='object')
         for i, grid in enumerate(self.grids):
             if (i%1e4) == 0: mylog.debug("Prepared % 7i / % 7i grids", i, self.num_grids)
             grid.filename = None
             grid._prepare_grid()
             grid.proc_num = self.grid_procs[i,0]
-        self.grids = na.array(self.grids, dtype='object')
+            self.grids[gi] = grid
         mylog.debug("Prepared")
 
     def _initialize_grid_arrays(self):
@@ -764,6 +759,8 @@ class EnzoStaticOutput(StaticOutput):
                 else:
                     if any("." in v or "e+" in v or "e-" in v for v in vals):
                         pcast = float
+                    elif v == "inf":
+                        pcast = str
                     else:
                         pcast = int
             # Now we figure out what to do with it.
@@ -795,13 +792,22 @@ class EnzoStaticOutput(StaticOutput):
             self.conversion_factors[data_labels[k]] = v
         self.refine_by = self.parameters["RefineBy"]
         self.dimensionality = self.parameters["TopGridRank"]
-        self.domain_dimensions = self.parameters["TopGridDimensions"]
         if self.dimensionality > 1:
-            self.domain_left_edge = na.array(self.parameters["DomainLeftEdge"]).copy()
-            self.domain_right_edge = na.array(self.parameters["DomainRightEdge"]).copy()
+            self.domain_dimensions = self.parameters["TopGridDimensions"]
+            if len(self.domain_dimensions) < 3:
+                tmp = self.domain_dimensions.tolist()
+                tmp.append(1)
+                self.domain_dimensions = na.array(tmp)
+            self.domain_left_edge = na.array(self.parameters["DomainLeftEdge"],
+                                             "float64").copy()
+            self.domain_right_edge = na.array(self.parameters["DomainRightEdge"],
+                                             "float64").copy()
         else:
-            self.domain_left_edge = na.array(self.parameters["DomainLeftEdge"])
-            self.domain_right_edge = na.array(self.parameters["DomainRightEdge"])
+            self.domain_left_edge = na.array(self.parameters["DomainLeftEdge"],
+                                             "float64")
+            self.domain_right_edge = na.array(self.parameters["DomainRightEdge"],
+                                             "float64")
+            self.domain_dimensions = na.array([self.parameters["TopGridDimensions"],1,1])
 
         self.current_time = self.parameters["InitialTime"]
         # To be enabled when we can break old pickles:
