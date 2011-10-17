@@ -245,7 +245,7 @@ class EnzoHierarchy(AMRHierarchy):
             fn.append(["-1"])
             if nb > 0: fn[-1] = _next_token_line("BaryonFileName", f)
             np.append(int(_next_token_line("NumberOfParticles", f)[0]))
-            if nb == 0 and np[-1] > 0: fn[-1] = _next_token_line("FileName", f)
+            if nb == 0 and np[-1] > 0: fn[-1] = _next_token_line("ParticleFileName", f)
             for line in f:
                 if len(line) < 2: break
                 if line.startswith("Pointer:"):
@@ -544,12 +544,13 @@ class EnzoHierarchyInMemory(EnzoHierarchy):
                 self.grids[pid-1]._children_ids.append(self.grids[-1].id)
         self.max_level = self.grid_levels.max()
         mylog.debug("Preparing grids")
+        self.grids = na.empty(len(grids), dtype='object')
         for i, grid in enumerate(self.grids):
             if (i%1e4) == 0: mylog.debug("Prepared % 7i / % 7i grids", i, self.num_grids)
             grid.filename = None
             grid._prepare_grid()
             grid.proc_num = self.grid_procs[i,0]
-        self.grids = na.array(self.grids, dtype='object')
+            self.grids[gi] = grid
         mylog.debug("Prepared")
 
     def _initialize_grid_arrays(self):
@@ -793,6 +794,10 @@ class EnzoStaticOutput(StaticOutput):
         self.dimensionality = self.parameters["TopGridRank"]
         if self.dimensionality > 1:
             self.domain_dimensions = self.parameters["TopGridDimensions"]
+            if len(self.domain_dimensions) < 3:
+                tmp = self.domain_dimensions.tolist()
+                tmp.append(1)
+                self.domain_dimensions = na.array(tmp)
             self.domain_left_edge = na.array(self.parameters["DomainLeftEdge"],
                                              "float64").copy()
             self.domain_right_edge = na.array(self.parameters["DomainRightEdge"],
