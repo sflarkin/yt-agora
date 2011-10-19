@@ -1067,11 +1067,36 @@ class ParallelHOPHaloFinder(ParallelAnalysisInterface):
         """
         yt_counters("make_global_chain_densest_n")
         (self.top_keys, self.bot_keys, self.vals) = \
-            self.comm.mpi_maxdict_dict(self.chain_densest_n)
+            self.linearize_chain_dict(self.chain_densest_n)
         self.__max_memory()
         del self.chain_densest_n
         yt_counters("make_global_chain_densest_n")
-    
+
+    def linearize_chain_dict(self, data):
+        """
+        Similar to above, but finds maximums for dicts of dicts. This is
+        specificaly for a part of chainHOP.
+        """
+        top_keys = []
+        bot_keys = []
+        vals = []
+        for top_key in data:
+            for bot_key in data[top_key]:
+                top_keys.append(top_key)
+                bot_keys.append(bot_key)
+                vals.append(data[top_key][bot_key])
+        top_keys = na.array(top_keys, dtype='int64')
+        bot_keys = na.array(bot_keys, dtype='int64')
+        vals = na.array(vals, dtype='float64')
+
+        data.clear()
+
+        top_keys = self.comm.par_combine_object(top_keys, datatype='array', op='cat')
+        bot_keys = self.comm.par_combine_object(bot_keys, datatype='array', op='cat')
+        vals     = self.comm.par_combine_object(vals, datatype='array', op='cat')
+
+        return (top_keys, bot_keys, vals)
+
     def _build_groups(self):
         """
         With the collection of possible chain links, build groups.
