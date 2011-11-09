@@ -1,5 +1,5 @@
 """
-Chombo-specific fields
+GDF-specific fields
 
 Author: J. S. Oishi <jsoishi@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
@@ -32,82 +32,74 @@ from yt.data_objects.field_info_container import \
     ValidateGridType
 import yt.data_objects.universal_fields
 
-class ChomboFieldContainer(CodeFieldInfoContainer):
+log_translation_dict = {"Density": "density",
+                        "Pressure": "pressure"}
+
+translation_dict = {"x-velocity": "velocity_x",
+                    "y-velocity": "velocity_y",
+                    "z-velocity": "velocity_z"}
+                    
+# translation_dict = {"mag_field_x": "cell_centered_B_x ",
+#                     "mag_field_y": "cell_centered_B_y ",
+#                     "mag_field_z": "cell_centered_B_z "}
+
+class GDFFieldContainer(CodeFieldInfoContainer):
     _shared_state = {}
     _field_list = {}
-ChomboFieldInfo = ChomboFieldContainer()
-add_chombo_field = ChomboFieldInfo.add_field
+GDFFieldInfo = GDFFieldContainer()
+add_gdf_field = GDFFieldInfo.add_field
 
-add_field = add_chombo_field
+add_field = add_gdf_field
 
 add_field("density", function=lambda a,b: None, take_log=True,
           validators = [ValidateDataField("density")],
           units=r"\rm{g}/\rm{cm}^3")
 
-ChomboFieldInfo["density"]._projected_units =r"\rm{g}/\rm{cm}^2"
+GDFFieldInfo["density"]._projected_units =r"\rm{g}/\rm{cm}^2"
 
-add_field("X-momentum", function=lambda a,b: None, take_log=False,
-          validators = [ValidateDataField("X-Momentum")],
-          units=r"",display_name=r"B_x")
-ChomboFieldInfo["X-momentum"]._projected_units=r""
+add_field("specific_energy", function=lambda a,b: None, take_log=True,
+          validators = [ValidateDataField("specific_energy")],
+          units=r"\rm{erg}/\rm{g}")
 
-add_field("Y-momentum", function=lambda a,b: None, take_log=False,
-          validators = [ValidateDataField("Y-Momentum")],
-          units=r"",display_name=r"B_y")
-ChomboFieldInfo["Y-momentum"]._projected_units=r""
+add_field("pressure", function=lambda a,b: None, take_log=True,
+          validators = [ValidateDataField("pressure")],
+          units=r"\rm{erg}/\rm{g}")
 
-add_field("Z-momentum", function=lambda a,b: None, take_log=False,
-          validators = [ValidateDataField("Z-Momentum")],
-          units=r"",display_name=r"B_z")
-ChomboFieldInfo["Z-momentum"]._projected_units=r""
+add_field("velocity_x", function=lambda a,b: None, take_log=False,
+          validators = [ValidateDataField("velocity_x")],
+          units=r"\rm{cm}/\rm{s}")
 
-add_field("X-magnfield", function=lambda a,b: None, take_log=False,
-          validators = [ValidateDataField("X-Magnfield")],
-          units=r"",display_name=r"B_x")
-ChomboFieldInfo["X-magnfield"]._projected_units=r""
+add_field("velocity_y", function=lambda a,b: None, take_log=False,
+          validators = [ValidateDataField("velocity_y")],
+          units=r"\rm{cm}/\rm{s}")
 
-add_field("Y-magnfield", function=lambda a,b: None, take_log=False,
-          validators = [ValidateDataField("Y-Magnfield")],
-          units=r"",display_name=r"B_y")
-ChomboFieldInfo["Y-magnfield"]._projected_units=r""
+add_field("velocity_z", function=lambda a,b: None, take_log=False,
+          validators = [ValidateDataField("velocity_z")],
+          units=r"\rm{cm}/\rm{s}")
 
-add_field("Z-magnfield", function=lambda a,b: None, take_log=False,
-          validators = [ValidateDataField("Z-Magnfield")],
-          units=r"",display_name=r"B_z")
-ChomboFieldInfo["Z-magnfield"]._projected_units=r""
+add_field("mag_field_x", function=lambda a,b: None, take_log=False,
+          validators = [ValidateDataField("mag_field_x")],
+          units=r"\rm{cm}/\rm{s}")
 
-def _MagneticEnergy(field,data):
-    return (data["X-magnfield"]**2 +
-            data["Y-magnfield"]**2 +
-            data["Z-magnfield"]**2)/2.
-add_field("MagneticEnergy", function=_MagneticEnergy, take_log=True,
-          units=r"",display_name=r"B^2/8\pi")
-ChomboFieldInfo["MagneticEnergy"]._projected_units=r""
+add_field("mag_field_y", function=lambda a,b: None, take_log=False,
+          validators = [ValidateDataField("mag_field_y")],
+          units=r"\rm{cm}/\rm{s}")
 
-def _xVelocity(field, data):
-    """generate x-velocity from x-momentum and density
+add_field("mag_field_z", function=lambda a,b: None, take_log=False,
+          validators = [ValidateDataField("mag_field_z")],
+          units=r"\rm{cm}/\rm{s}")
 
-    """
-    return data["X-momentum"]/data["density"]
-add_field("x-velocity",function=_xVelocity, take_log=False,
-          units=r'\rm{cm}/\rm{s}')
+def _get_alias(alias):
+    def _alias(field, data):
+        return data[alias]
+    return _alias
 
-def _yVelocity(field,data):
-    """generate y-velocity from y-momentum and density
+def _generate_translation(mine, theirs ,log_field=True):
+    add_field(theirs, function=_get_alias(mine), take_log=log_field)
 
-    """
-    #try:
-    #    return data["xvel"]
-    #except KeyError:
-    return data["Y-momentum"]/data["density"]
-add_field("y-velocity",function=_yVelocity, take_log=False,
-          units=r'\rm{cm}/\rm{s}')
+for f,v in log_translation_dict.items():
+    _generate_translation(v, f, log_field=True)
 
-def _zVelocity(field,data):
-    """generate z-velocity from z-momentum and density
+for f,v in translation_dict.items():
+    _generate_translation(v, f, log_field=False)
 
-    """
-    return data["Z-momentum"]/data["density"]
-add_field("z-velocity",function=_zVelocity, take_log=False,
-          units=r'\rm{cm}/\rm{s}')
-    
