@@ -24,6 +24,9 @@ License:
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+import h5py
+import numpy as na
+import weakref
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
            AMRGridPatch
@@ -35,6 +38,7 @@ from yt.data_objects.static_output import \
 from .fields import GDFFieldInfo, KnownGDFFields
 from yt.data_objects.field_info_container import \
     FieldInfoContainer, NullFunc
+import pdb
 
 class GDFGrid(AMRGridPatch):
     _id_offset = 0
@@ -60,7 +64,7 @@ class GDFGrid(AMRGridPatch):
             self.dds = na.array((RE-LE)/self.ActiveDimensions)
         if self.pf.dimensionality < 2: self.dds[1] = 1.0
         if self.pf.dimensionality < 3: self.dds[2] = 1.0
-        self.data['dx'], self.data['dy'], self.data['dz'] = self.dds
+        self.field_data['dx'], self.field_data['dy'], self.field_data['dz'] = self.dds
 
 class GDFHierarchy(AMRHierarchy):
 
@@ -92,27 +96,28 @@ class GDFHierarchy(AMRHierarchy):
         self.num_grids = self._fhandle['/grid_parent_id'].shape[0]
         
     def _parse_hierarchy(self):
-        f = self._fhandle # shortcut
+        f = self._fhandle 
         
         # this relies on the first Group in the H5 file being
         # 'Chombo_global'
         levels = f.listnames()[1:]
-        self.grids = []
+        dxs=[]
+        self.grids = na.empty(self.num_grids, dtype='object')
         for i, grid in enumerate(f['data'].keys()):
-            self.grids.append(self.grid(i, self, f['grid_level'][i],
-                                        f['grid_left_index'][i],
-                                        f['grid_dimensions'][i]))
-            self.grids[-1]._level_id = f['grid_level'][i]
+            self.grids[i] = self.grid(i, self, f['grid_level'][i],
+                                      f['grid_left_index'][i],
+                                      f['grid_dimensions'][i])
+            self.grids[i]._level_id = f['grid_level'][i]
 
-        dx = (self.parameter_file.domain_right_edge-
-              self.parameter_file.domain_left_edge)/self.parameter_file.domain_dimensions
-        dx = dx/self.parameter_file.refine_by**(f['grid_level'][:])
-
+            dx = (self.parameter_file.domain_right_edge-
+                  self.parameter_file.domain_left_edge)/self.parameter_file.domain_dimensions
+            dx = dx/self.parameter_file.refine_by**(f['grid_level'][i])
+            dxs.append(dx)
+        dx = na.array(dxs)
         self.grid_left_edge = self.parameter_file.domain_left_edge + dx*f['grid_left_index'][:]
-        self.grid_dimensions = f['grid_dimensions'][:]
+        self.grid_dimensions = f['grid_dimensions'][:].astype("int32")
         self.grid_right_edge = self.grid_left_edge + dx*self.grid_dimensions
         self.grid_particle_count = f['grid_particle_count'][:]
-        self.grids = na.array(self.grids, dtype='object')
 
     def _populate_grid_objects(self):
         for g in self.grids:
@@ -158,6 +163,7 @@ class GDFStaticOutput(StaticOutput):
             self._parse_parameter_file()
         self.time_units['1'] = 1
         self.units['1'] = 1.0
+        self.units['cm'] = 1.0
         self.units['unitary'] = 1.0 / (self.domain_right_edge - self.domain_left_edge).max()
         seconds = 1
         self.time_units['years'] = seconds / (365*3600*24.0)
@@ -168,7 +174,7 @@ class GDFStaticOutput(StaticOutput):
             self.units[field_name] = self._handle["/field_types/%s" % field_name].attrs['field_to_cgs']
         self._handle.close()
         del self._handle
-
+        
     def _parse_parameter_file(self):
         self._handle = h5py.File(self.parameter_filename, "r")
         sp = self._handle["/simulation_parameters"].attrs
@@ -181,6 +187,7 @@ class GDFStaticOutput(StaticOutput):
         self.unique_identifier = sp["unique_identifier"]
         self.cosmological_simulation = sp["cosmological_simulation"]
         if sp["num_ghost_zones"] != 0: raise RuntimeError
+        self.num_ghost_zones = sp["num_ghost_zones"]
         self.field_ordering = sp["field_ordering"]
         self.boundary_conditions = sp["boundary_conditions"][:]
         if self.cosmological_simulation:
@@ -191,9 +198,10 @@ class GDFStaticOutput(StaticOutput):
         else:
             self.current_redshift = self.omega_lambda = self.omega_matter = \
                 self.hubble_constant = self.cosmological_simulation = 0.0
+        self.parameters["HydroMethod"] = 0 # Hardcode for now until field staggering is supported.
         self._handle.close()
         del self._handle
-        
+            
     @classmethod
     def _is_valid(self, *args, **kwargs):
         try:
