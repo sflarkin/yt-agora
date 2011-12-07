@@ -193,6 +193,9 @@ class Camera(ParallelAnalysisInterface):
         self.steady_north = steady_north
         self.expand_factor = expand_factor
         # This seems to be necessary for now.  Not sure what goes wrong when not true.
+        if na.all(north_vector == normal_vector):
+            mylog.error("North vector and normal vector are the same.  Disregarding north vector.")
+            north_vector == None
         if north_vector is not None: self.steady_north=True
         self.north_vector = north_vector
         self.rotation_vector = north_vector
@@ -446,6 +449,8 @@ class Camera(ParallelAnalysisInterface):
                 if not iterable(final_width):
                     width = na.array([final_width, final_width, final_width]) 
                     # front/back, left/right, top/bottom
+                if (self.center == 0.0).all():
+                    self.center += (na.array(final) - self.center) / (10. * n_steps)
                 final_zoom = final_width/na.array(self.width)
                 dW = final_zoom**(1.0/n_steps)
 	    else:
@@ -789,7 +794,7 @@ class StereoPairCamera(Camera):
         return (left_camera, right_camera)
 
 def off_axis_projection(pf, center, normal_vector, width, resolution,
-                        field, weight = None, volume = None):
+                        field, weight = None, volume = None, no_ghost = True):
     r"""Project through a parameter file, off-axis, and return the image plane.
 
     This function will accept the necessary items to integrate through a volume
@@ -821,6 +826,14 @@ def off_axis_projection(pf, center, normal_vector, width, resolution,
     volume : `yt.extensions.volume_rendering.HomogenizedVolume`, optional
         The volume to ray cast through.  Can be specified for finer-grained
         control, but otherwise will be automatically generated.
+    no_ghost: bool, optional
+        Optimization option.  If True, homogenized bricks will
+        extrapolate out from grid instead of interpolating from
+        ghost zones that have to first be calculated.  This can
+        lead to large speed improvements, but at a loss of
+        accuracy/smoothness in resulting image.  The effects are
+        less notable when the transfer function is smooth and
+        broad. Default: True
 
     Returns
     -------
@@ -848,7 +861,7 @@ def off_axis_projection(pf, center, normal_vector, width, resolution,
     cam = pf.h.camera(center, normal_vector, width, resolution, tf,
                       fields = fields,
                       log_fields = [False] * len(fields),
-                      volume = volume)
+                      volume = volume, no_ghost = no_ghost)
     vals = cam.snapshot()
     image = vals[:,:,0]
     if weight is None:
