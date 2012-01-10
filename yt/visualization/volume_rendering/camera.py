@@ -26,19 +26,25 @@ License:
 import numpy as na
 
 from yt.funcs import *
+from yt.utilities.math_utils import *
 
 from .grid_partitioner import HomogenizedVolume
 from .transfer_functions import ProjectionTransferFunction
 
-from yt.utilities.amr_utils import TransferFunctionProxy, VectorPlane, \
-    arr_vec2pix_nest, arr_pix2vec_nest, AdaptiveRaySource, \
-    arr_ang2pix_nest, arr_fisheye_vectors
+#from yt.utilities.amr_utils import \
+#    arr_vec2pix_nest, arr_pix2vec_nest, AdaptiveRaySource, \
+#    arr_ang2pix_nest
 from yt.visualization.image_writer import write_bitmap
 from yt.data_objects.data_containers import data_object_registry
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelAnalysisInterface
 from yt.utilities.amr_kdtree.api import AMRKDTree
 from numpy import pi
+
+from yt.utilities.amr_utils import \
+    PartitionedGrid, ProjectionSampler, VolumeRenderSampler, \
+    arr_vec2pix_nest, arr_pix2vec_nest, arr_ang2pix_nest, \
+    pixelize_healpix
 
 class Camera(ParallelAnalysisInterface):
     def __init__(self, center, normal_vector, width,
@@ -318,11 +324,10 @@ class Camera(ParallelAnalysisInterface):
         positions[:,:,1] = inv_mat[1,0]*px+inv_mat[1,1]*py+self.back_center[1]
         positions[:,:,2] = inv_mat[2,0]*px+inv_mat[2,1]*py+self.back_center[2]
         bounds = (px.min(), px.max(), py.min(), py.max())
-        vector_plane = VectorPlane(positions, self.box_vectors[2],
-                                      self.back_center, bounds, image,
-                                      self.unit_vectors[0],
-                                      self.unit_vectors[1])
-        return vector_plane
+        return (positions, self.box_vectors[2],
+                self.back_center, bounds, image,
+                self.unit_vectors[0],
+                self.unit_vectors[1])
 
     def snapshot(self, fn = None, clip_ratio = None):
         r"""Ray-cast the camera.
@@ -346,19 +351,25 @@ class Camera(ParallelAnalysisInterface):
         """
         image = na.zeros((self.resolution[0], self.resolution[1], 3),
                          dtype='float64', order='C')
-        vector_plane = self.get_vector_plane(image)
-        tfp = TransferFunctionProxy(self.transfer_function) # Reset it every time
-        tfp.ns = self.sub_samples
+        rotp = na.concatenate([self.inv_mat.ravel('F'), self.back_center.ravel()])
+        args = (rotp, self.box_vectors[2], self.back_center,
+                (-self.width[0]/2.0, self.width[0]/2.0,
+                 -self.width[1]/2.0, self.width[1]/2.0),
+                image, self.unit_vectors[0], self.unit_vectors[1],
+                na.array(self.width),
+                self.transfer_function, self.sub_samples)
+        sampler = VolumeRenderSampler(*args)
         self.volume.initialize_source()
 
         pbar = get_pbar("Ray casting",
                         (self.volume.brick_dimensions + 1).prod(axis=-1).sum())
         total_cells = 0
         for brick in self.volume.traverse(self.back_center, self.front_center, image):
-            brick.cast_plane(tfp, vector_plane)
+            sampler(brick)
             total_cells += na.prod(brick.my_data[0].shape)
             pbar.update(total_cells)
         pbar.finish()
+        image = sampler.aimage
 
         if self.comm.rank is 0 and fn is not None:
             if clip_ratio is not None:
@@ -700,10 +711,10 @@ class HEALpixCamera(Camera):
             img = na.log10(image[:,0,0][pixi]).reshape((800,800))
 
             fig = matplotlib.figure.Figure((10, 5))
-            ax = fig.add_subplot(1,1,1,projection='mollweide')
+            ax = fig.add_subplot(1,1,1,projection='hammer')
             implot = ax.imshow(img, extent=(-pi,pi,-pi/2,pi/2), clip_on=False, aspect=0.5)
             cb = fig.colorbar(implot, orientation='horizontal')
-            cb.set_label(r"$\mathrm{log}\/\mathrm{Column}\/\mathrm{Density}\/[\mathrm{g}/\mathrm{cm}^2]$")
+            cb.set_label(r"$\mathrm{Column}\/\mathrm{Density}\/[\mathrm{g}/\mathrm{cm}^2]$")
             ax.xaxis.set_ticks(())
             ax.yaxis.set_ticks(())
             canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
@@ -847,7 +858,7 @@ class FisheyeCamera(Camera):
 
 
 def off_axis_projection(pf, center, normal_vector, width, resolution,
-                        field, weight = None, volume = None, no_ghost = True):
+                        field, weight = None):
     r"""Project through a parameter file, off-axis, and return the image plane.
 
     This function will accept the necessary items to integrate through a volume
@@ -876,17 +887,6 @@ def off_axis_projection(pf, center, normal_vector, width, resolution,
         If supplied, the field will be pre-multiplied by this, then divided by
         the integrated value of this field.  This returns an average rather
         than a sum.
-    volume : `yt.extensions.volume_rendering.HomogenizedVolume`, optional
-        The volume to ray cast through.  Can be specified for finer-grained
-        control, but otherwise will be automatically generated.
-    no_ghost: bool, optional
-        Optimization option.  If True, homogenized bricks will
-        extrapolate out from grid instead of interpolating from
-        ghost zones that have to first be calculated.  This can
-        lead to large speed improvements, but at a loss of
-        accuracy/smoothness in resulting image.  The effects are
-        less notable when the transfer function is smooth and
-        broad. Default: True
 
     Returns
     -------
@@ -906,21 +906,170 @@ def off_axis_projection(pf, center, normal_vector, width, resolution,
     fields = [field]
     if weight is not None:
         # This is a temporary field, which we will remove at the end.
+        def _make_wf(f, w):
+            def temp_weightfield(a, b):
+                tr = b[f].astype("float64") * b[w]
+                return tr
+            return temp_weightfield
         pf.field_info.add_field("temp_weightfield",
-            function=lambda a,b:b[field]*b[weight])
+            function=_make_wf(field, weight))
         fields = ["temp_weightfield", weight]
-        tf = ProjectionTransferFunction(n_fields = 2)
-    tf = ProjectionTransferFunction(n_fields = len(fields))
-    cam = pf.h.camera(center, normal_vector, width, resolution, tf,
-                      fields = fields,
-                      log_fields = [False] * len(fields),
-                      volume = volume, no_ghost = no_ghost)
-    vals = cam.snapshot()
-    image = vals[:,:,0]
+    image = na.zeros((resolution, resolution, 3), dtype='float64',
+                      order='C')
+    normal_vector, north_vector, east_vector = ortho_find(normal_vector)
+    unit_vectors = [north_vector, east_vector, normal_vector]
+    back_center= center - 0.5*width * normal_vector
+    rotp = na.concatenate([na.linalg.pinv(unit_vectors).ravel('F'),
+                           back_center])
+    sampler = ProjectionSampler(
+        rotp, normal_vector * width, back_center,
+        (-width/2, width/2, -width/2, width/2),
+        image, north_vector, east_vector,
+        na.array([width, width, width], dtype='float64'))
+    # Calculate the eight corners of the box
+    # Back corners ...
+    mi = pf.domain_right_edge.copy()
+    ma = pf.domain_left_edge.copy()
+    for off1 in [-1, 1]:
+        for off2 in [-1, 1]:
+            for off3 in [-1, 1]:
+                this_point = (center + width/2.0 * off1 * north_vector
+                                     + width/2.0 * off2 * east_vector
+                                     + width/2.0 * off3 * normal_vector)
+                na.minimum(mi, this_point, mi)
+                na.maximum(ma, this_point, ma)
+    # Now we have a bounding box.
+    grids = pf.h.region(center, mi, ma)._grids
+    print len(grids), len(pf.h.grids)
+    pb = get_pbar("Sampling ", len(grids))
+    for i,grid in enumerate(grids):
+        data = [(grid[field] * grid.child_mask).astype("float64")
+                for field in fields]
+        pg = PartitionedGrid(
+            grid.id, data,
+            grid.LeftEdge, grid.RightEdge, grid.ActiveDimensions.astype("int64"))
+        grid.clear_data()
+        sampler(pg)
+        pb.update(i)
+    pb.finish()
+    image = sampler.aimage
     if weight is None:
         dl = width * pf.units[pf.field_info[field].projection_conversion]
         image *= dl
     else:
-        image /= vals[:,:,1]
+        image[:,:,0] /= image[:,:,1]
         pf.field_info.pop("temp_weightfield")
-    return image
+    return image[:,:,0]
+
+def allsky_projection(pf, center, radius, nside, field, weight = None,
+                      rotation = None):
+    r"""Project through a parameter file, through an allsky-method
+    decomposition from HEALpix, and return the image plane.
+
+    This function will accept the necessary items to integrate through a volume
+    over 4pi and return the integrated field of view to the user.  Note that if
+    a weight is supplied, it will multiply the pre-interpolated values
+    together.
+
+    Parameters
+    ----------
+    pf : `~yt.data_objects.api.StaticOutput`
+        This is the parameter file to volume render.
+    center : array_like
+        The current "center" of the view port -- the focal point for the
+        camera.
+    radius : float or list of floats
+        The radius to integrate out to of the image.
+    nside : int
+        The HEALpix degree.  The number of rays integrated is 12*(Nside**2)
+        Must be a power of two!
+    field : string
+        The field to project through the volume
+    weight : optional, default None
+        If supplied, the field will be pre-multiplied by this, then divided by
+        the integrated value of this field.  This returns an average rather
+        than a sum.
+
+    Returns
+    -------
+    image : array
+        An ((Nside**2)*12,1,3) array of the final integrated values, in float64 form.
+
+    Examples
+    --------
+
+    >>> image = allsky_projection(pf, [0.5, 0.5, 0.5], 1.0/pf['mpc'],
+                      32, "Temperature", "Density")
+    >>> plot_allsky_healpix(image, 32, "healpix.png")
+
+    """
+    # We manually modify the ProjectionTransferFunction to get it to work the
+    # way we want, with a second field that's also passed through.
+    fields = [field]
+    center = na.array(center, dtype='float64')
+    if weight is not None:
+        # This is a temporary field, which we will remove at the end.
+        def _make_wf(f, w):
+            def temp_weightfield(a, b):
+                tr = b[f].astype("float64") * b[w]
+                return tr
+            return temp_weightfield
+        pf.field_info.add_field("temp_weightfield",
+            function=_make_wf(field, weight))
+        fields = ["temp_weightfield", weight]
+    nv = 12*nside**2
+    image = na.zeros((nv,1,3), dtype='float64', order='C')
+    vs = arr_pix2vec_nest(nside, na.arange(nv))
+    vs += na.random.random(vs.shape)*1e-10 - 0.5e-10
+    vs *= radius
+    vs.shape = (nv,1,3)
+    if rotation is not None:
+        vs2 = vs.copy()
+        for i in range(3):
+            vs[:,:,i] = (vs2 * rotation[:,i]).sum(axis=2)
+    positions = na.ones((nv, 1, 3), dtype='float64', order='C') * center
+    uv = na.ones(3, dtype='float64')
+    grids = pf.h.sphere(center, radius)._grids
+    sampler = ProjectionSampler(positions, vs, center, (0.0, 0.0, 0.0, 0.0),
+                                image, uv, uv, na.zeros(3, dtype='float64'))
+    pb = get_pbar("Sampling ", len(grids))
+    for i,grid in enumerate(grids):
+        data = [grid[field] * grid.child_mask.astype('float64')
+                for field in fields]
+        pg = PartitionedGrid(
+            grid.id, data,
+            grid.LeftEdge, grid.RightEdge,
+            grid.ActiveDimensions.astype("int64"))
+        grid.clear_data()
+        sampler(pg)
+        pb.update(i)
+    pb.finish()
+    image = sampler.aimage
+    if weight is None:
+        dl = radius * pf.units[pf.field_info[field].projection_conversion]
+        image *= dl
+    else:
+        image[:,:,0] /= image[:,:,1]
+        pf.field_info.pop("temp_weightfield")
+    return image[:,0,0], (vs, positions, image)
+
+def plot_allsky_healpix(image, nside, fn, label = "", rotation = None,
+                        take_log = True, resolution=512):
+    import matplotlib.figure
+    import matplotlib.backends.backend_agg
+    if rotation is None: rotation = na.eye(3).astype("float64")
+
+    img, count = pixelize_healpix(nside, image, resolution, resolution, rotation)
+
+    fig = matplotlib.figure.Figure((10, 5))
+    ax = fig.add_subplot(1,1,1,projection='aitoff')
+    if take_log: func = na.log10
+    else: func = lambda a: a
+    implot = ax.imshow(func(img), extent=(-pi,pi,-pi/2,pi/2), clip_on=False, aspect=0.5)
+    cb = fig.colorbar(implot, orientation='horizontal')
+    cb.set_label(label)
+    ax.xaxis.set_ticks(())
+    ax.yaxis.set_ticks(())
+    canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
+    canvas.print_figure(fn)
+    return img, count
