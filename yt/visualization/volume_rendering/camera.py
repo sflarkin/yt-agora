@@ -983,7 +983,7 @@ def off_axis_projection(pf, center, normal_vector, width, resolution,
     return image[:,:,0]
 
 def allsky_projection(pf, center, radius, nside, field, weight = None,
-                      rotation = None):
+                      inner_radius = 10, rotation = None):
     r"""Project through a parameter file, through an allsky-method
     decomposition from HEALpix, and return the image plane.
 
@@ -1010,6 +1010,14 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
         If supplied, the field will be pre-multiplied by this, then divided by
         the integrated value of this field.  This returns an average rather
         than a sum.
+    inner_radius : optional, float, defaults to 0.05
+        The radius of the inner clipping plane, in units of the dx at the point
+        at which the volume rendering is centered.  This avoids unphysical
+        effects of nearby cells.
+    rotation : optional, 3x3 array
+        If supplied, the vectors will be rotated by this.  You can construct
+        this by, for instance, calling na.array([v1,v2,v3]) where those are the
+        three reference planes of an orthogonal frame (see ortho_find).
 
     Returns
     -------
@@ -1041,14 +1049,15 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
     nv = 12*nside**2
     image = na.zeros((nv,1,3), dtype='float64', order='C')
     vs = arr_pix2vec_nest(nside, na.arange(nv))
-    vs += na.random.random(vs.shape)*1e-10 - 0.5e-10
-    vs *= radius
     vs.shape = (nv,1,3)
     if rotation is not None:
         vs2 = vs.copy()
         for i in range(3):
             vs[:,:,i] = (vs2 * rotation[:,i]).sum(axis=2)
     positions = na.ones((nv, 1, 3), dtype='float64', order='C') * center
+    dx = min(g.dds.min() for g in pf.h.find_point(center)[0])
+    positions += inner_radius * dx * vs
+    vs *= radius
     uv = na.ones(3, dtype='float64')
     grids = pf.h.sphere(center, radius)._grids
     sampler = ProjectionSampler(positions, vs, center, (0.0, 0.0, 0.0, 0.0),
@@ -1072,7 +1081,7 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
     else:
         image[:,:,0] /= image[:,:,1]
         pf.field_info.pop("temp_weightfield")
-    return image[:,0,0], (vs, positions, image)
+    return image[:,0,0]
 
 def plot_allsky_healpix(image, nside, fn, label = "", rotation = None,
                         take_log = True, resolution=512):
