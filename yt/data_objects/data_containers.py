@@ -2955,11 +2955,11 @@ class AMRCylinderBase(AMR3DData):
         can define a cylinder of any proportion.  Only cells whose centers are
         within the cylinder will be selected.
         """
-        AMR3DData.__init__(self, na.array(center), fields, pf, **kwargs)
+        AMR3DData.__init__(self, center, fields, pf, **kwargs)
         self._norm_vec = na.array(normal)/na.sqrt(na.dot(normal,normal))
         self.set_field_parameter("height_vector", self._norm_vec)
-        self._height = height
-        self._radius = radius
+        self._height = fix_length(height, self.pf)
+        self._radius = fix_length(radius, self.pf)
         self._d = -1.0 * na.dot(self._norm_vec, self.center)
         self._refresh_data()
 
@@ -3274,9 +3274,7 @@ class AMRSphereBase(AMR3DData):
         """
         AMR3DData.__init__(self, center, fields, pf, **kwargs)
         # Unpack the radius, if necessary
-        if isinstance(radius, (list, tuple)) and len(radius) == 2 and \
-           isinstance(radius[1], types.StringTypes):
-           radius = radius[0]/self.pf[radius[1]]
+        radius = fix_length(radius, self.pf)
         if radius < self.hierarchy.get_smallest_dx():
             raise YTSphereTooSmall(pf, radius, self.hierarchy.get_smallest_dx())
         self.set_field_parameter('radius',radius)
@@ -3351,13 +3349,11 @@ class AMRCoveringGridBase(AMR3DData):
            na.any(self.right_edge + buffer > self.pf.domain_right_edge):
             grids,ind = self.pf.hierarchy.get_periodic_box_grids_below_level(
                             self.left_edge - buffer,
-                            self.right_edge + buffer, self.level,
-                            min(self.level, self.pf.min_level))
+                            self.right_edge + buffer, self.level)
         else:
             grids,ind = self.pf.hierarchy.get_box_grids_below_level(
                 self.left_edge - buffer,
-                self.right_edge + buffer, self.level,
-                min(self.level, self.pf.min_level))
+                self.right_edge + buffer, self.level)
         sort_ind = na.argsort(self.pf.h.grid_levels.ravel()[ind])
         self._grids = self.pf.hierarchy.grids[ind][(sort_ind,)][::-1]
 
@@ -3566,10 +3562,9 @@ class AMRSmoothedCoveringGridBase(AMRCoveringGridBase):
         for gi, grid in enumerate(self._grids):
             if self._use_pbar: pbar.update(gi)
             if grid.Level > last_level and grid.Level <= self.level:
-                while grid.Level > last_level:
-                    self._update_level_state(last_level + 1)
-                    self._refine(1, fields_to_get)
-                    last_level += 1
+                self._update_level_state(last_level + 1)
+                self._refine(1, fields_to_get)
+                last_level = grid.Level
             self._get_data_from_grid(grid, fields_to_get)
         if self.level > 0:
             for field in fields_to_get:
@@ -3698,14 +3693,18 @@ class AMRBooleanRegionBase(AMR3DData):
         # Using the processed cut_masks, we'll figure out what grids
         # are left in the hybrid region.
         for region in self._all_regions:
-            region._get_list_of_grids()
-            for grid in region._grids:
+            try:
+                region._get_list_of_grids()
+                alias = region
+            except AttributeError:
+                alias = region.data
+            for grid in alias._grids:
                 if grid in self._some_overlap or grid in self._all_overlap:
                     continue
                 # Get the cut_mask for this grid in this region, and see
                 # if there's any overlap with the overall cut_mask.
                 overall = self._get_cut_mask(grid)
-                local = force_array(region._get_cut_mask(grid),
+                local = force_array(alias._get_cut_mask(grid),
                     grid.ActiveDimensions)
                 # Below we don't want to match empty masks.
                 if overall.sum() == 0 and local.sum() == 0: continue
@@ -3779,6 +3778,11 @@ class AMRBooleanRegionBase(AMR3DData):
                         break
                 level_masks.append(force_array(self._get_level_mask(ops[i + 1:end],
                     grid), grid.ActiveDimensions))
+            elif isinstance(item.data, AMRData):
+                level_masks.append(force_array(item.data._get_cut_mask(grid),
+                    grid.ActiveDimensions))
+            else:
+                mylog.error("Item in the boolean construction unidentified.")
         # Now we do the logic on our level_mask.
         # There should be no nested logic anymore.
         # The first item should be a cut_mask,
