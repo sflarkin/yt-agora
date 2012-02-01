@@ -324,7 +324,7 @@ class Camera(ParallelAnalysisInterface):
                                       self.unit_vectors[1])
         return vector_plane
 
-    def snapshot(self, fn = None, clip_ratio = None):
+    def snapshot(self, fn = None, clip_ratio = None, double_check = False):
         r"""Ray-cast the camera.
 
         This method instructs the camera to take a snapshot -- i.e., call the ray
@@ -354,6 +354,11 @@ class Camera(ParallelAnalysisInterface):
         pbar = get_pbar("Ray casting",
                         (self.volume.brick_dimensions + 1).prod(axis=-1).sum())
         total_cells = 0
+        if double_check:
+            for brick in self.volume.bricks:
+                for data in brick.my_data:
+                    if na.any(na.isnan(data)):
+                        raise RuntimeError
         for brick in self.volume.traverse(self.back_center, self.front_center, image):
             brick.cast_plane(tfp, vector_plane)
             total_cells += na.prod(brick.my_data[0].shape)
@@ -863,9 +868,9 @@ class FisheyeCamera(Camera):
 
 class MosaicFisheyeCamera(Camera):
     def __init__(self, center, radius, fov, resolution, focal_center=None,
-                 transfer_function = None, fields = None,
-                 sub_samples = 5, log_fields = None, volume = None,
-                 pf = None, l_max=None, no_ghost=False,nimx=1, nimy=1, procs_per_wg=None,
+                 transfer_function=None, fields=None,
+                 sub_samples=5, log_fields=None, volume=None,
+                 pf=None, l_max=None, no_ghost=False,nimx=1, nimy=1, procs_per_wg=None,
                  rotation=None):
         r"""A fisheye lens camera, taking adantage of image plane decomposition
         for parallelism..
@@ -1138,7 +1143,7 @@ class MosaicFisheyeCamera(Camera):
                             final_image[i*nx:(i+1)*nx, j*ny:(j+1)*ny,:] = arr
                             del arr
                     if clip_ratio is not None:
-                        write_bitmap(final_image, fn, clip_ratio*final_image.max())
+                        write_bitmap(final_image, fn, clip_ratio*final_image.std())
                     else:
                         write_bitmap(final_image, fn)
                 else:
