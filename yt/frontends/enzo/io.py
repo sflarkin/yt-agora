@@ -37,6 +37,12 @@ from yt.utilities import hdf5_light_reader
 from yt.utilities.io_handler import \
     BaseIOHandler, _axis_ids
 from yt.utilities.logger import ytLogger as mylog
+import h5py
+from yt.geometry.selection_routines import \
+    convert_mask_to_indices
+
+import numpy as na
+from yt.funcs import *
 
 class IOHandlerEnzoHDF4(BaseIOHandler):
 
@@ -196,6 +202,37 @@ class IOHandlerPackedHDF5(BaseIOHandler):
     @property
     def _read_exception(self):
         return (exceptions.KeyError, hdf5_light_reader.ReadingError)
+
+    def _read_selection(self, grids, selector, fields):
+        last = None
+        rv = {}
+        counts = {}
+        for g in grids:
+            counts[g.id] = selector.count_cells(g)
+        count = sum(counts.values())
+        # Now we have to do something unpleasant
+        grids = list(sorted(grids, key=lambda a: a.filename))
+        last = grids[0].filename
+        handle = h5py.File(last)
+        for field in fields:
+            ds = handle["/Grid%08i/%s" % (grids[0].id, field)]
+            rv[field] = na.empty(count, dtype=ds.dtype)
+        ind = 0
+        mylog.info("Reading %s cells of %s fields in %s grids",
+                   count, len(fields), len(grids))
+        for i,g in enumerate(grids):
+            if last != g.filename:
+                handle.close()
+                last = g.filename
+                handle = h5py.File(last)
+            mask = selector.fill_mask(g)
+            c = counts[g.id]
+            for field in fields:
+                ds = handle["/Grid%08i/%s" % (g.id, field)]
+                rv[field][ind:ind+c] = ds[:].transpose()[mask]
+            ind += c
+        handle.close()
+        return rv
 
 class IOHandlerPackedHDF5GhostZones(IOHandlerPackedHDF5):
     _data_style = "enzo_packed_3d_gz"

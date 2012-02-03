@@ -1,5 +1,5 @@
 """
-API for yt.visualization.volume_rendering
+API for Geometry Handlers
 
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: UCSD
@@ -28,14 +28,8 @@ License:
 
 """
 
-from transfer_functions import TransferFunction, ColorTransferFunction, \
-                             PlanckTransferFunction, \
-                             MultiVariateTransferFunction, \
-                             ProjectionTransferFunction
-from grid_partitioner import HomogenizedVolume, \
-                             export_partitioned_grids, \
-                             import_partitioned_grids
-from image_handling import export_rgba, import_rgba, \
-                           plot_channel, plot_rgb
-from camera import Camera, PerspectiveCamera, StereoPairCamera, \
-    off_axis_projection, FisheyeCamera, MosaicFisheyeCamera
+from geometry_handler import \
+    GeometryHandler
+
+from grid_geometry_handler import \
+    GridGeometryHandler
