@@ -35,8 +35,8 @@ import pdb
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
       AMRGridPatch
-from yt.data_objects.hierarchy import \
-      AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+      GridGeometryHandler
 from yt.data_objects.static_output import \
       StaticOutput
 from yt.data_objects.field_info_container import \
@@ -110,7 +110,7 @@ class ARTGrid(AMRGridPatch):
     def __repr__(self):
         return "ARTGrid_%04i (%s)" % (self.id, self.ActiveDimensions)
 
-class ARTHierarchy(AMRHierarchy):
+class ARTHierarchy(GridGeometryHandler):
 
     grid = ARTGrid
     _handle = None
@@ -123,7 +123,7 @@ class ARTHierarchy(AMRHierarchy):
         self.directory = os.path.dirname(self.hierarchy_filename)
 
         self.float_type = na.float64
-        AMRHierarchy.__init__(self,pf,data_style)
+        GridGeometryHandler.__init__(self,pf,data_style)
 
     def _initialize_data_storage(self):
         pass
@@ -138,7 +138,7 @@ class ARTHierarchy(AMRHierarchy):
     
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
     def _count_grids(self):

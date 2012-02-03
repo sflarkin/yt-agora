@@ -1,5 +1,5 @@
 """
-AMR hierarchy container class
+Geometry container base class.
 
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
@@ -23,29 +23,25 @@ License:
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import h5py
-import numpy as na
-import string, re, gc, time, cPickle, pdb
+import os
+import cPickle
 import weakref
-
-from itertools import chain, izip
-from new import classobj
+import h5py
+from exceptions import IOError, TypeError
+from types import ClassType
 
 from yt.funcs import *
-
-from yt.arraytypes import blankRecordArray
 from yt.config import ytcfg
-from yt.data_objects.field_info_container import NullFunc
-from yt.utilities.definitions import MAXLEVEL
+from yt.data_objects.data_containers import \
+    data_object_registry
+from yt.data_objects.field_info_container import \
+    NullFunc
 from yt.utilities.io_handler import io_registry
+from yt.utilities.logger import ytLogger as mylog
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelAnalysisInterface, parallel_splitter
-from object_finding_mixin import ObjectFindingMixin
 
-from .data_containers import data_object_registry
-
-class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
-    float_type = 'float64'
+class GeometryHandler(ParallelAnalysisInterface):
 
     def __init__(self, pf, data_style):
         ParallelAnalysisInterface.__init__(self)
@@ -57,21 +53,12 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
         mylog.debug("Initializing data storage.")
         self._initialize_data_storage()
 
-        mylog.debug("Counting grids.")
-        self._count_grids()
-
         # Must be defined in subclass
         mylog.debug("Setting up classes.")
         self._setup_classes()
 
-        mylog.debug("Counting grids.")
-        self._initialize_grid_arrays()
-
-        mylog.debug("Parsing hierarchy.")
-        self._parse_hierarchy()
-
-        mylog.debug("Constructing grid objects.")
-        self._populate_grid_objects()
+        mylog.debug("Setting up domain geometry.")
+        self._setup_geometry()
 
         mylog.debug("Initializing data grid data IO")
         self._setup_data_io()
@@ -85,26 +72,9 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
         mylog.debug("Setting up derived fields")
         self._setup_derived_fields()
 
-        mylog.debug("Re-examining hierarchy")
-        self._initialize_level_stats()
-
     def __del__(self):
         if self._data_file is not None:
             self._data_file.close()
-
-    def _get_parameters(self):
-        return self.parameter_file.parameters
-    parameters=property(_get_parameters)
-
-    def select_grids(self, level):
-        """
-        Returns an array of grids at *level*.
-        """
-        return self.grids[self.grid_levels.flat == level]
-
-    def get_levels(self):
-        for level in range(self.max_level+1):
-            yield self.select_grids(level)
 
     def _initialize_state_variables(self):
         self._parallel_locking = False
@@ -112,14 +82,6 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
         self._data_mode = None
         self._max_locations = {}
         self.num_grids = None
-
-    def _initialize_grid_arrays(self):
-        mylog.debug("Allocating arrays for %s grids", self.num_grids)
-        self.grid_dimensions = na.ones((self.num_grids,3), 'int32')
-        self.grid_left_edge = na.zeros((self.num_grids,3), self.float_type)
-        self.grid_right_edge = na.ones((self.num_grids,3), self.float_type)
-        self.grid_levels = na.zeros((self.num_grids,1), 'int32')
-        self.grid_particle_count = na.zeros((self.num_grids,1), 'int32')
 
     def _setup_classes(self, dd):
         # Called by subclass
@@ -178,26 +140,12 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
                 self.derived_field_list.append(field)
 
     # Now all the object related stuff
-
     def all_data(self, find_max=False):
         pf = self.parameter_file
         if find_max: c = self.find_max("Density")[1]
         else: c = (pf.domain_right_edge + pf.domain_left_edge)/2.0
-        return self.region(c, 
+        return self.region(c,
             pf.domain_left_edge, pf.domain_right_edge)
-
-    def clear_all_data(self):
-        """
-        This routine clears all the data currently being held onto by the grids
-        and the data io handler.
-        """
-        for g in self.grids: g.clear_data()
-        self.io.queue.clear()
-
-    def _get_data_reader_dict(self):
-        dd = { 'pf' : self.parameter_file, # Already weak
-               'hierarchy': weakref.proxy(self) }
-        return dd
 
     def _initialize_data_storage(self):
         if not ytcfg.getboolean('yt','serialize'): return
@@ -277,13 +225,18 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
         del self._data_file
         self._data_file = h5py.File(self.__data_filename, self._data_mode)
 
+    save_data = parallel_splitter(_save_data, _reload_data_file)
+
+    def _get_data_reader_dict(self):
+        dd = { 'pf' : self.parameter_file, # Already weak
+               'hierarchy': weakref.proxy(self) }
+        return dd
+
     def _reset_save_data(self,round_robin=False):
         if round_robin:
             self.save_data = self._save_data
         else:
             self.save_data = parallel_splitter(self._save_data, self._reload_data_file)
-    
-    save_data = parallel_splitter(_save_data, _reload_data_file)
 
     def save_object(self, obj, name):
         """
@@ -337,110 +290,7 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
             del self._data_file
             self._data_file = None
 
-    def _deserialize_hierarchy(self, harray):
-        # THIS IS BROKEN AND NEEDS TO BE FIXED
-        mylog.debug("Cached entry found.")
-        self.gridDimensions[:] = harray[:,0:3]
-        self.gridStartIndices[:] = harray[:,3:6]
-        self.gridEndIndices[:] = harray[:,6:9]
-        self.gridLeftEdge[:] = harray[:,9:12]
-        self.gridRightEdge[:] = harray[:,12:15]
-        self.gridLevels[:] = harray[:,15:16]
-        self.gridTimes[:] = harray[:,16:17]
-        self.gridNumberOfParticles[:] = harray[:,17:18]
-
-    def get_smallest_dx(self):
-        """
-        Returns (in code units) the smallest cell size in the simulation.
-        """
-        return self.select_grids(self.grid_levels.max())[0].dds[0]
-
     def _add_object_class(self, name, class_name, base, dd):
         self.object_types.append(name)
-        obj = classobj(class_name, (base,), dd)
+        obj = type(class_name, (base,), dd)
         setattr(self, name, obj)
-
-    def _initialize_level_stats(self):
-        # Now some statistics:
-        #   0 = number of grids
-        #   1 = number of cells
-        #   2 = blank
-        desc = {'names': ['numgrids','numcells','level'],
-                'formats':['Int32']*3}
-        self.level_stats = blankRecordArray(desc, MAXLEVEL)
-        self.level_stats['level'] = [i for i in range(MAXLEVEL)]
-        self.level_stats['numgrids'] = [0 for i in range(MAXLEVEL)]
-        self.level_stats['numcells'] = [0 for i in range(MAXLEVEL)]
-        for level in xrange(self.max_level+1):
-            self.level_stats[level]['numgrids'] = na.sum(self.grid_levels == level)
-            li = (self.grid_levels[:,0] == level)
-            self.level_stats[level]['numcells'] = self.grid_dimensions[li,:].prod(axis=1).sum()
-
-    @property
-    def grid_corners(self):
-        return na.array([
-          [self.grid_left_edge[:,0], self.grid_left_edge[:,1], self.grid_left_edge[:,2]],
-          [self.grid_right_edge[:,0], self.grid_left_edge[:,1], self.grid_left_edge[:,2]],
-          [self.grid_right_edge[:,0], self.grid_right_edge[:,1], self.grid_left_edge[:,2]],
-          [self.grid_right_edge[:,0], self.grid_right_edge[:,1], self.grid_right_edge[:,2]],
-          [self.grid_left_edge[:,0], self.grid_right_edge[:,1], self.grid_right_edge[:,2]],
-          [self.grid_left_edge[:,0], self.grid_left_edge[:,1], self.grid_right_edge[:,2]],
-          [self.grid_right_edge[:,0], self.grid_left_edge[:,1], self.grid_right_edge[:,2]],
-          [self.grid_left_edge[:,0], self.grid_right_edge[:,1], self.grid_left_edge[:,2]],
-        ], dtype='float64')
-
-    def print_stats(self):
-        """
-        Prints out (stdout) relevant information about the simulation
-        """
-        header = "%3s\t%6s\t%11s" % ("level","# grids", "# cells")
-        print header
-        print "%s" % (len(header.expandtabs())*"-")
-        for level in xrange(MAXLEVEL):
-            if (self.level_stats['numgrids'][level]) == 0:
-                break
-            print "% 3i\t% 6i\t% 11i" % \
-                  (level, self.level_stats['numgrids'][level],
-                   self.level_stats['numcells'][level])
-            dx = self.select_grids(level)[0].dds[0]
-        print "-" * 28
-        print "   \t% 6i\t% 11i" % (self.level_stats['numgrids'].sum(), self.level_stats['numcells'].sum())
-        print "\n"
-        try:
-            print "z = %0.8f" % (self["CosmologyCurrentRedshift"])
-        except:
-            pass
-        t_s = self.pf.current_time * self.pf["Time"]
-        print "t = %0.8e = %0.8e s = %0.8e years" % \
-            (self.pf.current_time, \
-             t_s, t_s / (365*24*3600.0) )
-        print "\nSmallest Cell:"
-        u=[]
-        for item in self.parameter_file.units.items():
-            u.append((item[1],item[0]))
-        u.sort()
-        for unit in u:
-            print "\tWidth: %0.3e %s" % (dx*unit[0], unit[1])
-
-
-scanf_regex = {}
-scanf_regex['e'] = r"[-+]?\d+\.?\d*?|\.\d+[eE][-+]?\d+?"
-scanf_regex['g'] = scanf_regex['e']
-scanf_regex['f'] = scanf_regex['e']
-scanf_regex['F'] = scanf_regex['e']
-#scanf_regex['g'] = r"[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?"
-#scanf_regex['f'] = r"[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?"
-#scanf_regex['F'] = r"[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?"
-scanf_regex['i'] = r"[-+]?(0[xX][\dA-Fa-f]+|0[0-7]*|\d+)"
-scanf_regex['d'] = r"[-+]?\d+"
-scanf_regex['s'] = r"\S+"
-
-def constructRegularExpressions(param, toReadTypes):
-    re_e=r"[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?"
-    re_i=r"[-+]?(0[xX][\dA-Fa-f]+|0[0-7]*|\d+)"
-    rs = "^%s\s*=\s*" % (param)
-    for t in toReadTypes:
-        rs += "(%s)\s*" % (scanf_regex[t])
-    rs +="$"
-    return re.compile(rs,re.M)
-
