@@ -36,27 +36,58 @@ from .tick_locators import LogLocator, LinearLocator
 
 from yt.funcs import *
 from yt.utilities.amr_utils import write_png_to_string
+from yt.utilities.definitions import \
+    x_dict, x_names, \
+    y_dict, y_names, \
+    axis_names, \
+    axis_labels
 
 def invalidate_data(f):
     @wraps(f)
     def newfunc(*args, **kwargs):
-        f(*args, **kwargs)
+        rv = f(*args, **kwargs)
         args[0]._data_valid = False
         args[0]._plot_valid = False
         args[0]._recreate_frb()
         if args[0]._initfinished:
             args[0]._setup_plots()
+        return rv
     return newfunc
 
 def invalidate_plot(f):
     @wraps(f)
     def newfunc(*args, **kwargs):
+        rv = f(*args, **kwargs)
         args[0]._plot_valid = False
         args[0]._setup_plots()
-        return f(*args, **kwargs)
+        return rv
     return newfunc
 
+field_transforms = {}
+
+class FieldTransform(object):
+    def __init__(self, name, func, locator):
+        self.name = name
+        self.func = func
+        self.locator = locator
+        field_transforms[name] = self
+
+    def __call__(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
+
+    def ticks(self, mi, ma):
+        try:
+            ticks = self.locator(mi, ma)
+        except:
+            ticks = []
+        return ticks
+
+log_transform = FieldTransform('log10', na.log10, LogLocator())
+linear_transform = FieldTransform('linear', lambda x: x, LinearLocator())
+
 class PlotWindow(object):
+    _plot_valid = False
+    _colorbar_valid = False
     def __init__(self, data_source, bounds, buff_size=(800,800), antialias = True, periodic = True):
         r"""
         PlotWindow(data_source, bounds, buff_size=(800,800), antialias = True)
@@ -240,16 +271,17 @@ class PWViewer(PlotWindow):
         setup = kwargs.pop("setup", True)
         PlotWindow.__init__(self, *args,**kwargs)
         self._field_transform = {}
+        self._colormaps = defaultdict(lambda: 'algae')
         for field in self._frb.data.keys():
             if self._frb.pf.field_info[field].take_log:
-                self._field_transform[field] = na.log
+                self._field_transform[field] = log_transform
             else:
-                self._field_transform[field] = lambda x: x
+                self._field_transform[field] = linear_transform
 
         if setup: self._setup_plots()
 
     @invalidate_plot
-    def set_log(self,field,log):
+    def set_log(self, field, log):
         """set a field to log or linear.
         
         Parameters
@@ -261,16 +293,20 @@ class PWViewer(PlotWindow):
 
         """
         if log:
-            self._field_transform[field] = na.log
+            self._field_transform[field] = log_transform
         else:
-            self._field_transform[field] = lambda x: x
-
-    def set_transform(self, field, func):
-        self._field_transform[field] = func
+            self._field_transform[field] = linear_transform
 
     @invalidate_plot
-    def set_cmap(self):
-        pass
+    def set_transform(self, field, name):
+        if name not in field_transforms: 
+            raise KeyError(name)
+        self._field_transform[field] = field_transforms[name]
+
+    @invalidate_plot
+    def set_cmap(self, field, cmap_name):
+        self._colorbar_valid = False
+        self._colormaps[field] = cmap_name
 
     @invalidate_plot
     def set_zlim(self):
@@ -309,7 +345,11 @@ _metadata_template = """
 <br>
 Field of View:  %(x_width)0.3f %(unit)s<br>
 Minimum Value:  %(mi)0.3e %(units)s<br>
-Maximum Value:  %(ma)0.3e %(units)s
+Maximum Value:  %(ma)0.3e %(units)s<br>
+Central Point:  (data coords)<br>
+&nbsp;&nbsp;&nbsp;%(xc)0.14f<br>
+&nbsp;&nbsp;&nbsp;%(yc)0.14f<br>
+&nbsp;&nbsp;&nbsp;%(zc)0.14f
 """
 
 class PWViewerExtJS(PWViewer):
@@ -319,7 +359,6 @@ class PWViewerExtJS(PWViewer):
     _ext_widget_id = None
     _current_field = None
     _widget_name = "plot_window"
-    cmap = 'algae'
 
     def _setup_plots(self):
         from yt.gui.reason.bottle_mods import PayloadHandler
@@ -332,18 +371,21 @@ class PWViewerExtJS(PWViewer):
         else:
             fields = self._frb.data.keys()
             addl_keys = {}
+        if self._colorbar_valid == False:
+            addl_keys['colorbar_image'] = self._get_cbar_image()
+            self._colorbar_valid = True
         min_zoom = 200*self._frb.pf.h.get_smallest_dx() * self._frb.pf['unitary']
         for field in fields:
-            to_plot = apply_colormap(self._frb[field], func = self._field_transform[field])
+            to_plot = apply_colormap(self._frb[field],
+                func = self._field_transform[field],
+                cmap_name = self._colormaps[field])
             pngs = write_png_to_string(to_plot)
             img_data = base64.b64encode(pngs)
             # We scale the width between 200*min_dx and 1.0
             x_width = self.xlim[1] - self.xlim[0]
             zoom_fac = na.log10(x_width*self._frb.pf['unitary'])/na.log10(min_zoom)
             zoom_fac = 100.0*max(0.0, zoom_fac)
-            ticks = self.get_ticks(self._frb[field].min(),
-                                   self._frb[field].max(), 
-                                   take_log = self._frb.pf.field_info[field].take_log)
+            ticks = self.get_ticks(field)
             payload = {'type':'png_string',
                        'image_data':img_data,
                        'metadata_string': self.get_metadata(field),
@@ -352,34 +394,25 @@ class PWViewerExtJS(PWViewer):
             payload.update(addl_keys)
             ph.add_payload(payload)
 
-    def get_ticks(self, mi, ma, height = 400, take_log = False):
+    def get_ticks(self, field, height = 400):
         # This will eventually change to work with non-logged fields
         ticks = []
-        if take_log and mi > 0.0 and ma > 0.0:
-            ll = LogLocator() 
-            tick_locs = ll(mi, ma)
-            mi = na.log10(mi)
-            ma = na.log10(ma)
-            for v1,v2 in zip(tick_locs, na.log10(tick_locs)):
-                if v2 < mi or v2 > ma: continue
-                p = height - height * (v2 - mi)/(ma - mi)
-                ticks.append((p,v1,v2))
-                #print v1, v2, mi, ma, height, p
-        else:
-            ll = LinearLocator()
-            tick_locs = ll(mi, ma)
-            for v in tick_locs:
-                p = height - height * (v - mi)/(ma-mi)
-                ticks.append((p,v,"%0.3e" % (v)))
-
+        transform = self._field_transform[field]
+        mi, ma = self._frb[field].min(), self._frb[field].max()
+        tick_locs = transform.ticks(mi, ma)
+        mi, ma = transform((mi, ma))
+        for v1,v2 in zip(tick_locs, transform(tick_locs)):
+            if v2 < mi or v2 > ma: continue
+            p = height - height * (v2 - mi)/(ma - mi)
+            ticks.append((p,v1,v2))
         return ticks
 
-    def _get_cbar_image(self, height = 400, width = 40):
-        # Right now there's just the single 'cmap', but that will eventually
-        # change.  I think?
+    def _get_cbar_image(self, height = 400, width = 40, field = None):
+        if field is None: field = self._current_field
+        cmap_name = self._colormaps[field]
         vals = na.mgrid[1:0:height * 1j] * na.ones(width)[:,None]
         vals = vals.transpose()
-        to_plot = apply_colormap(vals)
+        to_plot = apply_colormap(vals, cmap_name = cmap_name)
         pngs = write_png_to_string(to_plot)
         img_data = base64.b64encode(pngs)
         return img_data
@@ -402,11 +435,21 @@ class PWViewerExtJS(PWViewer):
         y_width = self.ylim[1] - self.ylim[0]
         unit = get_smallest_appropriate_unit(x_width, self._frb.pf)
         units = self.get_field_units(field)
+        center = getattr(self._frb.data_source, "center", None)
+        if center is None or self._frb.axis == 4:
+            xc, yc, zc = -999, -999, -999
+        else:
+            center[x_dict[self._frb.axis]] = 0.5 * (
+                self.xlim[0] + self.xlim[1])
+            center[y_dict[self._frb.axis]] = 0.5 * (
+                self.ylim[0] + self.ylim[1])
+            xc, yc, zc = center
         md = _metadata_template % dict(
                 pf = self._frb.pf,
                 x_width = x_width*self._frb.pf[unit],
                 y_width = y_width*self._frb.pf[unit],
-                unit = unit, units = units, mi = mi, ma = ma)
+                unit = unit, units = units, mi = mi, ma = ma,
+                xc = xc, yc = yc, zc = zc)
         return md
 
     def image_recenter(self, img_x, img_y, img_size_x, img_size_y):
@@ -422,9 +465,9 @@ class PWViewerExtJS(PWViewer):
         self._current_field = field
         self._frb[field]
         if self._frb.pf.field_info[field].take_log:
-            self._field_transform[field] = na.log
+            self._field_transform[field] = log_transform
         else:
-            self._field_transform[field] = lambda x: x
+            self._field_transform[field] = linear_transform
 
     def get_field_units(self, field, strip_mathml = True):
         ds = self._frb.data_source
@@ -474,7 +517,6 @@ class YtPlot(object):
 class Yt2DPlot(YtPlot):
     zmin = None
     zmax = None
-    cmap = 'algae'
     zlabel = None
 
     # def __init__(self, data):
@@ -485,17 +527,14 @@ class Yt2DPlot(YtPlot):
         self.zmin = zmin
         self.zmax = zmax
 
-    @invalidate_plot
-    def set_cmap(self,cmap):
-        self.cmap = cmap
-
 class YtWindowPlot(Yt2DPlot):
     def __init__(self, data, size=(10,8)):
         YtPlot.__init__(self, data, size)
         self.__init_image(data)
 
     def __init_image(self, data):
-        self.image = self.axes.imshow(data,cmap=self.cmap)
+        #self.image = self.axes.imshow(data, cmap=self.cmap)
+        pass
 
 class YtProfilePlot(Yt2DPlot):
     def __init__(self):
