@@ -86,8 +86,27 @@ columns = ["GlobalHaloID", "SnapCurrentTimeIdentifier", "SnapZ",
 "ChildHaloID3", "ChildHaloFrac3",
 "ChildHaloID4", "ChildHaloFrac4"]
 
+# Below we make the SQL command that creates the table "Halos" in the
+# database. This table is where all the data is stored.
+# Each column of data is named and its datatype is specified.
+# The GlobalHaloID is given the PRIMARY KEY property, which means that
+# the SQLite machinery assigns a consecutive and unique integer value
+# to that field automatically as each new entry is entered (that is,
+# if GlobalHaloID isn't specified already).
+create_db_line = "CREATE TABLE Halos ("
+for i, col in enumerate(columns):
+    if i == 0:
+        create_db_line += "%s %s PRIMARY KEY," % (col, column_types[col])
+    else:
+        create_db_line += " %s %s," % (col, column_types[col])
+# Clean of trailing comma, and closing stuff.
+create_db_line = create_db_line[:-1] + ");"
+
 NumNeighbors = 15
 NumDB = 5
+
+def minus_one():
+    return -1
 
 class DatabaseFunctions(object):
     # Common database functions so it doesn't have to be repeated.
@@ -162,6 +181,8 @@ class MergerTree(DatabaseFunctions, ParallelAnalysisInterface):
         self.FOF_link_length= FOF_link_length # For FOF
         self.dm_only = dm_only
         self.refresh = refresh
+        self.index = index
+        self.zs = {}
         # MPI stuff
         if self.comm.rank is None:
             self.comm.rank = 0
@@ -173,12 +194,19 @@ class MergerTree(DatabaseFunctions, ParallelAnalysisInterface):
                 os.unlink(self.database)
             except:
                 pass
-        self._open_create_database()
-        self._create_halo_table()
+        if self.comm.rank == 0:
+            self._open_create_database()
+            self._create_halo_table()
         self._run_halo_finder_add_to_db()
         # Find the h5 file names for all the halos.
         for snap in self.restart_files:
             self._build_h5_refs(snap)
+        # Find out how much work is already stored in the database.
+        if self.comm.rank == 0:
+            z_progress = self._find_progress()
+        else:
+            z_progress = None
+        z_progress = self.comm.mpi_bcast(z_progress)
         # Loop over the pairs of snapshots to locate likely neighbors, and
         # then use those likely neighbors to compute fractional contributions.
         last = None
@@ -187,16 +215,22 @@ class MergerTree(DatabaseFunctions, ParallelAnalysisInterface):
         for snap, pair in enumerate(zip(self.restart_files[:-1], self.restart_files[1:])):
             if not self.with_halos[snap] or not self.with_halos[snap+1]:
                 continue
+            if self.zs[pair[0]] > z_progress:
+                continue
             self._find_likely_children(pair[0], pair[1])
             # last is the data for the parent dataset, which can be supplied
             # as the child from the previous round for all but the first loop.
             last = self._compute_child_fraction(pair[0], pair[1], last)
+            if self.comm.rank == 0:
+                mylog.info("Updating database with parent-child relationships.")
+                self._copy_and_update_db()
+                # This has to happen because we delete the old database above.
+                self._open_create_database()
         del last
-        # Now update the database with all the writes.
-        mylog.info("Updating database with parent-child relationships.")
         if self.comm.rank == 0:
-            self._copy_and_update_db()
-        self.comm.barrier()
+            if self.index:
+                self._write_index()
+            self._close_database()
         self.comm.barrier()
         mylog.info("Done!")
         
@@ -210,6 +244,7 @@ class MergerTree(DatabaseFunctions, ParallelAnalysisInterface):
         for cycle, file in enumerate(self.restart_files):
             gc.collect()
             pf = load(file)
+            self.zs[file] = pf.current_redshift
             self.period = pf.domain_right_edge - pf.domain_left_edge
             # If the halos are already found, skip this data step, unless
             # refresh is True.
@@ -281,30 +316,16 @@ class MergerTree(DatabaseFunctions, ParallelAnalysisInterface):
     def _open_create_database(self):
         # open the database. This creates the database file on disk if it
         # doesn't already exist. Open it on root only.
-        if self.comm.rank == 0:
-            self.conn = sql.connect(self.database)
-            self.cursor = self.conn.cursor()
+        self.conn = sql.connect(self.database)
+        self.cursor = self.conn.cursor()
 
     def _create_halo_table(self):
-        if self.comm.rank == 0:
-            # Handle the error if it already exists.
-            try:
-                # Create the table that will store the halo data.
-                line = "CREATE TABLE Halos (GlobalHaloID INTEGER PRIMARY KEY,\
-                    SnapCurrentTimeIdentifier INTEGER, SnapZ FLOAT, SnapHaloID INTEGER, \
-                    HaloMass FLOAT,\
-                    NumPart INTEGER, CenMassX FLOAT, CenMassY FLOAT,\
-                    CenMassZ FLOAT, BulkVelX FLOAT, BulkVelY FLOAT, BulkVelZ FLOAT,\
-                    MaxRad FLOAT,\
-                    ChildHaloID0 INTEGER, ChildHaloFrac0 FLOAT, \
-                    ChildHaloID1 INTEGER, ChildHaloFrac1 FLOAT, \
-                    ChildHaloID2 INTEGER, ChildHaloFrac2 FLOAT, \
-                    ChildHaloID3 INTEGER, ChildHaloFrac3 FLOAT, \
-                    ChildHaloID4 INTEGER, ChildHaloFrac4 FLOAT);"
-                self.cursor.execute(line)
-                self.conn.commit()
-            except sql.OperationalError:
-                pass
+        # Handle the error if the table already exists by doing nothing.
+        try:
+            self.cursor.execute(create_db_line)
+            self.conn.commit()
+        except sql.OperationalError:
+            pass
     
     def _find_likely_children(self, parentfile, childfile):
         # For each halo in the parent list, identify likely children in the 
@@ -376,10 +397,18 @@ class MergerTree(DatabaseFunctions, ParallelAnalysisInterface):
         self.candidates = candidates
         
         # This stores the masses contributed to each child candidate.
-        self.child_mass_arr = na.zeros(len(candidates)*NumNeighbors, dtype='float64')
+        # The +1 is an extra element in the array that collects garbage
+        # values. This is allowing us to eliminate a try/except later.
+        # This extra array element will be cut off eventually.
+        self.child_mass_arr = na.zeros(len(candidates)*NumNeighbors + 1,
+            dtype='float64')
         # Records where to put the entries in the above array.
         self.child_mass_loc = defaultdict(dict)
+        # Fill it out with sub-nested default dicts that point to the
+        # garbage slot, and then fill it will correct values for (possibly)
+        # related parent/child halo pairs.
         for i,halo in enumerate(sorted(candidates)):
+            self.child_mass_loc[halo] = defaultdict(minus_one)
             for j, child in enumerate(candidates[halo]):
                 self.child_mass_loc[halo][child] = i*NumNeighbors + j
 
@@ -480,7 +509,7 @@ class MergerTree(DatabaseFunctions, ParallelAnalysisInterface):
         
         # Match particles in halos.
         self._match(parent_IDs, child_IDs, parent_halos, child_halos,
-        parent_masses, parent_send, child_send)
+            parent_masses, parent_send, child_send)
 
         # Now we send all the un-matched particles to the root task for one more
         # pass. This depends on the assumption that most of the particles do
@@ -521,6 +550,9 @@ class MergerTree(DatabaseFunctions, ParallelAnalysisInterface):
 
         # Now we sum up the contributions globally.
         self.child_mass_arr = self.comm.mpi_allreduce(self.child_mass_arr)
+        
+        # Trim off the garbage collection.
+        self.child_mass_arr = self.child_mass_arr[:-1]
         
         if self.comm.rank == 0:
             # Turn these Msol masses into percentages of the parent.
@@ -585,45 +617,28 @@ class MergerTree(DatabaseFunctions, ParallelAnalysisInterface):
 
     def _match(self, parent_IDs, child_IDs, parent_halos, child_halos,
             parent_masses, parent_send = None, child_send = None):
-        # Parent IDs on the left, child IDs on the right. We skip down both
-        # columns matching IDs. If they are out of synch, the index(es) is/are
-        # advanced until they match up again.
-        matched = 0
-        left = 0
-        right = 0
-        while left < parent_IDs.size and right < child_IDs.size:
-            if parent_IDs[left] == child_IDs[right]:
-                # They match up, add this relationship.
-                try:
-                    loc = self.child_mass_loc[parent_halos[left]][child_halos[right]]
-                except KeyError:
-                    # This happens when a child halo contains a particle from
-                    # a parent halo, but the child is not identified as a 
-                    # candidate child halo. So we do nothing and move on with
-                    # our lives.
-                    left += 1
-                    right += 1
-                    continue
-                self.child_mass_arr[loc] += parent_masses[left]
-                # If needed, mark this pair so we don't send them later.
-                if parent_send is not None:
-                    parent_send[left] = False
-                    child_send[right] = False
-                matched += 1
-                left += 1
-                right += 1
-                continue
-            if parent_IDs[left] < child_IDs[right]:
-                # The left is too small, so we need to increase it.
-                left += 1
-                continue
-            if parent_IDs[left] > child_IDs[right]:
-                # Right too small.
-                right += 1
-                continue
+        # Pick out IDs that are in both arrays.
+        parent_in_child = na.in1d(parent_IDs, child_IDs, assume_unique = True)
+        child_in_parent = na.in1d(child_IDs, parent_IDs, assume_unique = True)
+        # Pare down the arrays to just matched particle IDs.
+        parent_halos_cut = parent_halos[parent_in_child]
+        child_halos_cut = child_halos[child_in_parent]
+        parent_masses_cut = parent_masses[parent_in_child]
+        # Mark the IDs that have matches so they're not sent later.
+        if parent_send is not None:
+            parent_send[parent_in_child] = False
+            child_send[child_in_parent] = False
+        # For matching pairs of particles, add the contribution of the mass.
+        # Occasionally, there are matches of particle IDs where the parent
+        # and child halos have not been identified as likely relations,
+        # and in that case loc will be returned as -1, which is the 'garbage'
+        # position in child_mass_arr. This will be trimmed off later.
+        for i,pair in enumerate(zip(parent_halos_cut, child_halos_cut)):
+            loc = self.child_mass_loc[pair[0]][pair[1]]
+            self.child_mass_arr[loc] += parent_masses_cut[i]
         if parent_send is None:
             mylog.info("Clean-up round matched %d of %d parents and %d children." % \
-            (matched, parent_IDs.size, child_IDs.size))
+            (parent_in_child.sum(), parent_IDs.size, child_IDs.size))
 
     def _copy_and_update_db(self):
         """
@@ -680,16 +695,33 @@ class MergerTree(DatabaseFunctions, ParallelAnalysisInterface):
         for insert in to_write:
             temp_cursor.execute(line, insert)
         temp_conn.commit()
+        temp_cursor.close()
+        temp_conn.close()
+        self._close_database()
+        os.rename(temp_name, self.database)
+
+    def _write_index(self):
         mylog.info("Creating database index.")
         line = "CREATE INDEX IF NOT EXISTS HalosIndex ON Halos ("
         for name in columns:
             line += name +","
         line = line[:-1] + ");"
-        temp_cursor.execute(line)
-        temp_cursor.close()
-        temp_conn.close()
-        self._close_database()
-        os.rename(temp_name, self.database)
+        self.cursor.execute(line)
+
+    def _find_progress(self):
+        # This queries the database to see how far along work has already come
+        # to identify parent->child relationships.
+        line = """SELECT ChildHaloID0, SnapZ from halos WHERE SnapHaloID = 0
+        ORDER BY SnapZ DESC;"""
+        self.cursor.execute(line)
+        results = self.cursor.fetchone()
+        while results:
+            results = list(results)
+            if results[0] == -1:
+                # We've hit a dump that does not have relationships. Save this.
+                return results[1] # the SnapZ.
+            results = self.cursor.fetchone()
+        return 0.
 
 class MergerTreeConnect(DatabaseFunctions):
     def __init__(self, database='halos.db'):
