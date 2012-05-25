@@ -1437,7 +1437,7 @@ class YTUploadImageCmd(YTCommand):
         if 'upload' in rv and 'links' in rv['upload']:
             print
             print "Image successfully uploaded!  You can find it at:"
-            print "    %s" % (rv['upload']['links']['imgur_page'])
+            print "    %s" % (rv['upload']['links']['original'])
             print
             print "If you'd like to delete it, visit this page:"
             print "    %s" % (rv['upload']['links']['delete_page'])
