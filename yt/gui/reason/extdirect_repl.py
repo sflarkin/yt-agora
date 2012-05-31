@@ -41,6 +41,7 @@ import base64
 import imp
 import threading
 import Queue
+import zipfile
 
 from yt.funcs import *
 from yt.utilities.logger import ytLogger, ufstring
@@ -50,7 +51,7 @@ from yt.visualization.api import Streamlines
 
 from .bottle_mods import preroute, BottleDirectRouter, notify_route, \
                          PayloadHandler
-from yt.utilities.bottle import response, request, route
+from yt.utilities.bottle import response, request, route, static_file
 from .basic_repl import ProgrammaticREPL
 
 try:
@@ -140,7 +141,7 @@ class ExecutionThread(threading.Thread):
             print "========================================================"
         if not hide:
             self.repl.payload_handler.add_payload(
-                {'type': 'cell_results',
+                {'type': 'cell',
                  'output': result,
                  'input': highlighter(code),
                  'raw_input': code},
@@ -205,9 +206,8 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
 
     def __init__(self, base_extjs_path, locals=None):
         # First we do the standard initialization
-        self.extjs_path = os.path.join(base_extjs_path, "ext-resources")
-        self.extjs_theme_path = os.path.join(base_extjs_path, "ext-theme")
-        self.philogl_path = os.path.join(base_extjs_path, "PhiloGL")
+        self.extjs_file = zipfile.ZipFile(os.path.join(
+            base_extjs_path, "ext-4.1.0-gpl.zip"), 'r')
         ProgrammaticREPL.__init__(self, locals)
         # Now, since we want to only preroute functions we know about, and
         # since they have different arguments, and most of all because we only
@@ -216,15 +216,11 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
         # than through metaclasses or other fancy decorating.
         preroute_table = dict(index = ("/", "GET"),
                               _help_html = ("/help.html", "GET"),
-                              _myapi = ("/resources/ext-repl-api.js", "GET"),
-                              _resources = ("/resources/:path#.+#", "GET"),
-                              _philogl = ("/philogl/:path#.+#", "GET"),
-                              _js = ("/js/:path#.+#", "GET"),
-                              _leaflet = ("/leaflet/:path#.+#", "GET"),
-                              _images = ("/images/:path#.+#", "GET"),
-                              _theme = ("/theme/:path#.+#", "GET"),
+                              _myapi = ("/ext-repl-api.js", "GET"),
                               _session_py = ("/session.py", "GET"),
                               _highlighter_css = ("/highlighter.css", "GET"),
+                              _extjs = ("/resources/extjs-4.1.0/:path#.+#", "GET"),
+                              _app = ("/:path#.+#", "GET"),
                               )
         for v, args in preroute_table.items():
             preroute(args[0], method=args[1])(getattr(self, v))
@@ -252,7 +248,7 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
         self.execution_thread.start()
 
     def exception_handler(self, exc):
-        result = {'type': 'cell_results',
+        result = {'type': 'cell',
                   'input': 'ERROR HANDLING IN REASON',
                   'output': traceback.format_exc()}
         return result
@@ -263,22 +259,22 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
         handler.setFormatter(formatter)
         ytLogger.addHandler(handler)
 
-
     def index(self):
-        """Return an HTTP-based Read-Eval-Print-Loop terminal."""
-        # For now this doesn't work!  We will need to move to a better method
-        # for this.  It should use the package data command.
-        vals = open(os.path.join(local_dir, "html/index.html")).read()
-        return vals
+        root = os.path.join(local_dir, "html")
+        return static_file("index.html", root)
 
     def heartbeat(self):
         self.last_heartbeat = time.time()
         if self.debug: print "### Heartbeat ... started: %s" % (time.ctime())
         for i in range(30):
             # Check for stop
+            if self.debug: print "    ###"
             if self.stopped: return {'type':'shutdown'} # No race condition
-            if self.payload_handler.event.wait(0.01): # One second timeout
-                return self.payload_handler.deliver_payloads()
+            if self.payload_handler.event.wait(1): # One second timeout
+                if self.debug: print "    ### Delivering payloads"
+                rv = self.payload_handler.deliver_payloads()
+                if self.debug: print "    ### Got back, returning"
+                return rv
         if self.debug: print "### Heartbeat ... finished: %s" % (time.ctime())
         return []
 
@@ -310,52 +306,30 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
             print "Found a living thread:", t
 
     def _help_html(self):
-        vals = open(os.path.join(local_dir, "html/help.html")).read()
-        return vals
+        root = os.path.join(local_dir, "html")
+        return static_file("help.html", root)
 
-    def _resources(self, path):
-        pp = os.path.join(self.extjs_path, path)
-        if not os.path.exists(pp):
+    def _extjs(self, path):
+        pp = os.path.join("extjs-4.1.0", path)
+        try:
+            f = self.extjs_file.open(pp)
+        except KeyError:
             response.status = 404
             return
-        return open(pp).read()
+        if path[-4:].lower() in (".png", ".gif", ".jpg"):
+            response.headers['Content-Type'] = "image/%s" % (path[-3:].lower())
+        elif path[-4:].lower() == ".css":
+            response.headers['Content-Type'] = "text/css"
+        elif path[-3:].lower() == ".js":
+            response.headers['Content-Type'] = "text/javascript"
+        return f.read()
 
-    def _philogl(self, path):
-        pp = os.path.join(self.philogl_path, path)
-        if not os.path.exists(pp):
-            response.status = 404
-            return
-        return open(pp).read()
-
-    def _theme(self, path):
-        pp = os.path.join(self.extjs_theme_path, path)
-        if not os.path.exists(pp):
-            response.status = 404
-            return
-        return open(pp).read()
-
-    def _js(self, path):
-        pp = os.path.join(local_dir, "html", "js", path)
-        if not os.path.exists(pp):
-            response.status = 404
-            return
-        return open(pp).read()
-
-    def _leaflet(self, path):
-        pp = os.path.join(local_dir, "html", "leaflet", path)
-        if not os.path.exists(pp):
-            response.status = 404
-            return
-        return open(pp).read()
-
-    def _images(self, path):
-        pp = os.path.join(local_dir, "html", "images", path)
-        if not os.path.exists(pp):
-            response.status = 404
-            return
-        return open(pp).read()
+    def _app(self, path):
+        root = os.path.join(local_dir, "html")
+        return static_file(path, root)
 
     def _highlighter_css(self):
+        response.headers['Content-Type'] = "text/css"
         return highlighter_css
 
     def execute(self, code, hide = False):
@@ -363,6 +337,7 @@ class ExtDirectREPL(ProgrammaticREPL, BottleDirectRouter):
                     'code': code,
                     'hide': hide}
             self.execution_thread.queue.put(task)
+            return dict(status = True)
 
     def get_history(self):
         return self.executed_cell_texts[:]
@@ -802,8 +777,10 @@ class ExtDirectParameterFileList(BottleDirectRouter):
                     except ReferenceError:
                         continue
                     objs.append(dict(name=name, type=obj._type_name,
+                                     filename = '', field_list = [],
                                      varname = "%s.h.objects[%s]" % (pf_varname, i)))
-            rv.append( dict(name = str(pf), objects = objs, filename=fn,
+            rv.append( dict(name = str(pf), children = objs, filename=fn,
+                            type = "parameter_file",
                             varname = pf_varname, field_list = fields) )
         return rv
 
@@ -824,7 +801,7 @@ class PayloadLoggingHandler(logging.StreamHandler):
     def emit(self, record):
         msg = self.format(record)
         self.payload_handler.add_payload(
-            {'type':'log_entry',
+            {'type':'logentry',
              'log_entry':msg})
 
 if os.path.exists(os.path.expanduser("~/.yt/favicon.ico")):
