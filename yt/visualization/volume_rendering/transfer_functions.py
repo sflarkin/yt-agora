@@ -61,6 +61,8 @@ class TransferFunction(object):
         self.x_bounds = x_bounds
         self.x = na.linspace(x_bounds[0], x_bounds[1], nbins).astype('float64')
         self.y = na.zeros(nbins, dtype='float64')
+        self.grad_field = -1
+        self.light_source_v = self.light_source_c = na.zeros(3, 'float64')
 
     def add_gaussian(self, location, width, height):
         r"""Add a Gaussian distribution to the transfer function.
@@ -87,7 +89,7 @@ class TransferFunction(object):
         >>> tf.add_gaussian(-9.0, 0.01, 1.0)
         """
         vals = height * na.exp(-(self.x - location)**2.0/width)
-        self.y = na.clip(na.maximum(vals, self.y), 0.0, 1.0)
+        self.y = na.clip(na.maximum(vals, self.y), 0.0, na.inf)
 
     def add_line(self, start, stop):
         r"""Add a line between two points to the transmission function.
@@ -120,7 +122,7 @@ class TransferFunction(object):
         # not satisfy our bounding box arguments
         vals = slope * (self.x - x0) + y0
         vals[~((self.x >= x0) & (self.x <= x1))] = 0.0
-        self.y = na.clip(na.maximum(vals, self.y), 0.0, 1.0)
+        self.y = na.clip(na.maximum(vals, self.y), 0.0, na.inf)
 
     def add_step(self, start, stop, value):
         r"""Adds a step function to the transfer function.
@@ -154,7 +156,7 @@ class TransferFunction(object):
         """
         vals = na.zeros(self.x.shape, 'float64')
         vals[(self.x >= start) & (self.x <= stop)] = value
-        self.y = na.clip(na.maximum(vals, self.y), 0.0, 1.0)
+        self.y = na.clip(na.maximum(vals, self.y), 0.0, na.inf)
 
     def add_filtered_planck(self, wavelength, trans):
         vals = na.zeros(self.x.shape, 'float64')
@@ -239,6 +241,8 @@ class MultiVariateTransferFunction(object):
         self.weight_field_ids = [-1] * 6 # This correlates 
         self.field_table_ids = [0] * 6
         self.weight_table_ids = [-1] * 6
+        self.grad_field = -1
+        self.light_source_v = self.light_source_c = na.zeros(3, 'float64')
 
     def add_field_table(self, table, field_id, weight_field_id = -1,
                         weight_table_id = -1):
@@ -555,6 +559,25 @@ class ColorTransferFunction(MultiVariateTransferFunction):
         self.add_gaussian(v, w, [r,g,b,alpha])
         mylog.debug("Adding gaussian at %s with width %s and colors %s" % (
                 v, w, (r,g,b,alpha)))
+
+    def map_to_colormap(self, mi, ma, scale=1.0, colormap="gist_stern",
+            scale_func=None):
+        rel0 = int(self.nbins*(mi - self.x_bounds[0])/(self.x_bounds[1] -
+            self.x_bounds[0]))
+        rel1 = int(self.nbins*(ma - self.x_bounds[0])/(self.x_bounds[1] -
+            self.x_bounds[0]))
+        tomap = na.linspace(0.,1.,num=rel1-rel0)
+        cmap = get_cmap(colormap)
+        cc = cmap(tomap)*scale
+        if scale_func is None:
+            scale_mult = 1.0
+        else:
+            scale_mult = scale_func(tomap,0.0,1.0)
+        print scale_mult 
+        self.red.y[rel0:rel1]  = cc[:,0]*scale_mult
+        self.green.y[rel0:rel1]= cc[:,1]*scale_mult
+        self.blue.y[rel0:rel1] = cc[:,2]*scale_mult
+        self.alpha.y[rel0:rel1]= cc[:,3]*scale_mult
 
     def add_layers(self, N, w=None, mi=None, ma=None, alpha = None,
                    colormap="gist_stern", col_bounds = None):
