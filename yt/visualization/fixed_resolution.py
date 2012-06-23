@@ -33,8 +33,7 @@ import numpy as na
 import weakref
 
 class FixedResolutionBuffer(object):
-    _exclude_fields = ('pz','pdz','x','y','z')
-
+    _exclude_fields = ('pz','pdz','dx','x','y','z')
     def __init__(self, data_source, bounds, buff_size, antialias = True,
                  periodic = False):
         r"""
