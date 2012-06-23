@@ -1,5 +1,5 @@
 /**********************************************************************
-The Plot Window Widget
+Sample widget class
 
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: Columbia University
@@ -23,29 +23,21 @@ License:
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ***********************************************************************/
 
+Ext.define('Reason.controller.widgets.SampleWidget', {
+    extend: 'Reason.controller.widgets.BaseWidget',
 
+    statics: {
+        widgetName: 'sample_widget',
+        supportsDataObjects: false,
+        supportsParameterFiles: false,
+        displayName: 'Sample Widget',
+        preCreation: function(obj) {
+            return new this({varname:obj.varname});
+        },
+    },
 
-var WidgetProgressBar = function(python_varname, widget_data) {
-    this.id = 'pbar_top';
-
-    Ext.MessageBox.show({
-        title: 'yt is working ...',
-        msg: widget_data.title,
-        progressText: 'Progress',
-        width: 300,
-        progress: true,
-        closable: false,
-    });
-
-    this.accept_results = function(payload) {
-        var i = payload['value'];
-        if (i == -1) {
-            Ext.MessageBox.hide();
-        } else {
-            Ext.MessageBox.updateProgress(i, Math.round(100*i)+'% completed');
-        }
+    applyPayload: function(payload) {
+        return;
     }
 
-}
-
-widget_types['progressbar'] = WidgetProgressBar;
+});
