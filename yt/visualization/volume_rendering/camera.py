@@ -39,7 +39,7 @@ from yt.utilities.orientation import Orientation
 from yt.visualization.image_writer import write_bitmap, write_image
 from yt.data_objects.data_containers import data_object_registry
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
-    ParallelAnalysisInterface, ProcessorPool
+    ParallelAnalysisInterface, ProcessorPool, parallel_objects
 from yt.utilities.amr_kdtree.api import AMRKDTree
 
 from yt.utilities.lib import \
@@ -49,6 +49,10 @@ from yt.utilities.lib import \
     pixelize_healpix, arr_fisheye_vectors
 
 class Camera(ParallelAnalysisInterface):
+    _pylab = None
+    _tf_figure = None
+    _render_figure = None
+
     def __init__(self, center, normal_vector, width,
                  resolution, transfer_function,
                  north_vector = None, steady_north=False,
@@ -199,6 +203,8 @@ class Camera(ParallelAnalysisInterface):
             transfer_function = ProjectionTransferFunction()
         self.transfer_function = transfer_function
         self.log_fields = log_fields
+        if self.log_fields is None:
+            self.log_fields = [self.pf.field_info[f].take_log for f in self.fields]
         self.use_kd = use_kd
         self.l_max = l_max
         self.no_ghost = no_ghost
@@ -217,7 +223,7 @@ class Camera(ParallelAnalysisInterface):
                                            log_fields = log_fields)
         else:
             self.use_kd = isinstance(volume, AMRKDTree)
-        self.volume = volume
+        self.volume = volume        
 
     def _setup_box_properties(self, width, center, unit_vectors):
         self.width = width
@@ -281,8 +287,9 @@ class Camera(ParallelAnalysisInterface):
         self.orienter.switch_orientation(normal_vector = normal_vector,
                                          north_vector = north_vector)
         self._setup_box_properties(width, self.center, self.orienter.unit_vectors)
+        
     def new_image(self):
-        image = na.zeros((self.resolution[0], self.resolution[1], 3), dtype='float64', order='C')
+        image = na.zeros((self.resolution[0], self.resolution[1], 4), dtype='float64', order='C')
         return image
 
     def get_sampler_args(self, image):
@@ -334,13 +341,61 @@ class Camera(ParallelAnalysisInterface):
         self.finalize_image(image)
         return image
 
+    def show_tf(self):
+        if self._pylab is None: 
+            import pylab
+            self._pylab = pylab
+        if self._tf_figure is None:
+            self._tf_figure = self._pylab.figure(2)
+            self.transfer_function.show(ax=self._tf_figure.axes)
+        self._pylab.draw()
+
+    def annotate(self, ax, enhance=True):
+        ax.get_xaxis().set_visible(False)
+        ax.get_xaxis().set_ticks([])
+        ax.get_yaxis().set_visible(False)
+        ax.get_yaxis().set_ticks([])
+        cb = self._pylab.colorbar(ax.images[0], pad=0.0, fraction=0.05, drawedges=True, shrink=0.9)
+        label = self.pf.field_info[self.fields[0]].get_label()
+        if self.log_fields[0]:
+            label = '$\\rm{log}\\/ $' + label
+        self.transfer_function.vert_cbar(ax=cb.ax, label=label)
+
+
+
+    def show(self, im, enhance=True):
+        if self._pylab is None:
+            import pylab
+            self._pylab = pylab
+        if self._render_figure is None:
+            self._render_figure = self._pylab.figure(1)
+        self._render_figure.clf()
+
+        if enhance:
+            nz = im[im > 0.0]
+            nim = im / (nz.mean() + 6.0 * na.std(nz))
+            nim[nim > 1.0] = 1.0
+            nim[nim < 0.0] = 0.0
+            del nz
+        else:
+            nim = im
+        ax = self._pylab.imshow(nim/nim.max(), origin='lower')
+        return ax
+
+    def draw(self):
+        self._pylab.draw()
+    
+    def save_annotated(self, fn, image, enhance=True, dpi=100):
+        ax = self.show(image, enhance=enhance)
+        self.annotate(ax.axes, enhance)
+        self._pylab.savefig(fn, bbox_inches='tight', facecolor='black', dpi=dpi)
+        
     def save_image(self, fn, clip_ratio, image):
         if self.comm.rank is 0 and fn is not None:
             if clip_ratio is not None:
-                write_bitmap(image, fn, clip_ratio * image.std())
+                write_bitmap(image[:,:,:3], fn, clip_ratio * image[:,:,:3].std())
             else:
-                write_bitmap(image, fn)
-
+                write_bitmap(image[:,:,:3], fn)
 
     def initialize_source(self):
         return self.volume.initialize_source()
@@ -589,15 +644,9 @@ data_object_registry["camera"] = Camera
 class InteractiveCamera(Camera):
     frames = []
 
-    def snapshot(self, fn = None, clip_ratio = None):
-        import matplotlib
-        matplotlib.pylab.figure(2)
-        self.transfer_function.show()
-        matplotlib.pylab.draw()
+    def snapshot(self, fn = None, clip_ratio = None, enhance=True):
         im = Camera.snapshot(self, fn, clip_ratio)
-        matplotlib.pylab.figure(1)
-        matplotlib.pylab.imshow(im/im.max())
-        matplotlib.pylab.draw()
+        self.show(im, enhance)
         self.frames.append(im)
         
     def rotation(self, theta, n_steps, rot_vector=None):
@@ -613,6 +662,9 @@ class InteractiveCamera(Camera):
     def clear_frames(self):
         del self.frames
         self.frames = []
+        
+    def save(self,fn):
+        self._pylab.savefig(fn, bbox_inches='tight', facecolor='black')
         
     def save_frames(self, basename, clip_ratio=None):
         for i, frame in enumerate(self.frames):
@@ -965,6 +1017,155 @@ class FisheyeCamera(Camera):
         self.finalize_image(image)
 
         return image
+
+class MosaicCamera(Camera):
+    def __init__(self, center, normal_vector, width,
+                 resolution, transfer_function,
+                 north_vector = None, steady_north=False,
+                 volume = None, fields = None,
+                 log_fields = None,
+                 sub_samples = 5, pf = None,
+                 use_kd=True, l_max=None, no_ghost=True,
+                 tree_type='domain',expand_factor=1.0,
+                 le=None, re=None, nimx=1, nimy=1, procs_per_wg=None,
+                 preload=True, use_light=False):
+
+        ParallelAnalysisInterface.__init__(self)
+
+        self.procs_per_wg = procs_per_wg
+        if pf is not None: self.pf = pf
+        if not iterable(resolution):
+            resolution = (int(resolution/nimx), int(resolution/nimy))
+        self.resolution = resolution
+        self.nimx = nimx
+        self.nimy = nimy
+        self.sub_samples = sub_samples
+        if not iterable(width):
+            width = (width, width, width) # front/back, left/right, top/bottom
+        self.width = (width[0]/nimx, width[1]/nimy, width[2])
+        self.center = center
+        self.steady_north = steady_north
+        self.expand_factor = expand_factor
+        # This seems to be necessary for now.  Not sure what goes wrong when not true.
+        if north_vector is not None: self.steady_north=True
+        self.north_vector = north_vector
+        self.rotation_vector = north_vector
+        self.normal_vector = normal_vector
+        if fields is None: fields = ["Density"]
+        self.fields = fields
+        if transfer_function is None:
+            transfer_function = ProjectionTransferFunction()
+        self.transfer_function = transfer_function
+        self.log_fields = log_fields
+        self.use_kd = use_kd
+        self.l_max = l_max
+        self.no_ghost = no_ghost
+        self.preload = preload
+        
+        self.use_light = use_light
+        self.light_dir = None
+        self.light_rgba = None
+        self.le = le
+        self.re = re
+        
+        width[0] /= self.nimx
+        width[1] /= self.nimy
+        self.orienter = Orientation(normal_vector, north_vector=north_vector, steady_north=steady_north)
+        self.rotation_vector = self.orienter.north_vector
+        # self._setup_box_properties(width, center, self.orienter.unit_vectors)
+        
+        if self.no_ghost:
+            mylog.info('Warning: no_ghost is currently True (default). This may lead to artifacts at grid boundaries.')
+        self.tree_type = tree_type
+        self.volume = volume
+
+        # self.cameras = na.empty(self.nimx*self.nimy)
+
+    def build_volume(self, volume, fields, log_fields, l_max, no_ghost, tree_type, le, re):
+        if volume is None:
+            if self.use_kd:
+                volume = AMRKDTree(self.pf, l_max=l_max, fields=self.fields, 
+                                   no_ghost=no_ghost, tree_type=tree_type, 
+                                   log_fields=log_fields, le=le, re=re)
+            else:
+                volume = HomogenizedVolume(fields, pf=self.pf, log_fields=log_fields)
+        else:
+            self.use_kd = isinstance(volume, AMRKDTree)
+        return volume
+
+    def new_image(self):
+        image = na.zeros((self.resolution[0], self.resolution[1], 4), dtype='float64', order='C')
+        return image
+
+    def _setup_box_properties(self, width, center, unit_vectors):
+        owidth = width
+        self.width = width 
+        self.center = center
+        offi = -self.nimx*0.5 + (self.imi + 0.5)
+        offj = -self.nimy*0.5 + (self.imj + 0.5)
+        mylog.info("Mosaic offset: %f %f" % (offi,offj))
+        global_center = self.center
+        self.center += offi*self.width[0]*self.orienter.unit_vectors[0]
+        self.center += offj*self.width[1]*self.orienter.unit_vectors[1]
+
+        self.box_vectors = na.array([self.orienter.unit_vectors[0]*self.width[0],
+                                     self.orienter.unit_vectors[1]*self.width[1],
+                                     self.orienter.unit_vectors[2]*self.width[2]])
+
+        self.origin = self.center - 0.5*self.width[0]*self.orienter.unit_vectors[0] \
+                                  - 0.5*self.width[1]*self.orienter.unit_vectors[1] \
+                                  - 0.5*self.width[2]*self.orienter.unit_vectors[2]
+        self.back_center = self.center - 0.5*self.width[0]*self.orienter.unit_vectors[2]
+        self.front_center = self.center + 0.5*self.width[0]*self.orienter.unit_vectors[2]
+        self.center = global_center
+        self.width = owidth
+
+    def snapshot(self, fn = None, clip_ratio = None, double_check = False,
+                 num_threads = 0):
+
+        my_storage = {}
+        offx,offy = na.meshgrid(range(self.nimx),range(self.nimy))
+        offxy = zip(offx.ravel(), offy.ravel())
+
+        for sto, xy in parallel_objects(offxy, self.procs_per_wg, storage = my_storage, dynamic=True):
+            self.volume = self.build_volume(self.volume, self.fields, self.log_fields, 
+                                   self.l_max, self.no_ghost, 
+                                   self.tree_type, self.le, self.re)
+            self.initialize_source()
+
+            self.imi, self.imj = xy
+            self._setup_box_properties(self.width, self.center, self.orienter.unit_vectors)
+            image = self.new_image()
+            args = self.get_sampler_args(image)
+            sampler = self.get_sampler(args)
+            image = self._render(double_check, num_threads, image, sampler)
+            my_storage[xy] = image
+        
+        self.save_image(fn, clip_ratio, my_storage)
+        return image
+
+
+    def save_image(self, fn, clip_ratio, im_dict):
+        print fn
+        if '.png' not in fn:
+            fn = fn + '.png'
+        
+        if self.comm.rank == 0:
+            offx,offy = na.meshgrid(range(self.nimx),range(self.nimy))
+            offxy = zip(offx.ravel(), offy.ravel())
+            nx,ny = self.resolution
+            final_image = na.empty((nx*self.nimx, ny*self.nimy, 4),
+                        dtype='float64',order='C')
+            for xy in offxy: 
+                i, j = xy
+                final_image[i*nx:(i+1)*nx, j*ny:(j+1)*ny,:] = im_dict.pop(xy)
+            if clip_ratio is not None:
+                write_bitmap(final_image[:,:,:3], fn, clip_ratio*final_image.std())
+            else:
+                write_bitmap(final_image[:,:,:3], fn)
+        return
+data_object_registry["mosaic_camera"] = MosaicCamera
+
 
 class MosaicFisheyeCamera(Camera):
     def __init__(self, center, radius, fov, resolution, focal_center=None,
