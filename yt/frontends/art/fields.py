@@ -178,7 +178,7 @@ def _temperature(field, data):
     di = dd==0.0
     #dd[di] = -1.0
     tr = dg/dd
-    #tr[na.isnan(tr)] = 0.0 
+    #tr[na.isnan(tr)] = 0.0
     #if data.id==460:
     #    import pdb;pdb.set_trace()
     tr /= data.pf.conversion_factors["GasEnergy"]
@@ -264,7 +264,7 @@ def mass_dm(field, data):
         return tr
     else:
         return tr*0.0
-    
+
 add_field("particle_cell_mass_dm", function=mass_dm,
           validators=[ValidateSpatial(0)])
 
