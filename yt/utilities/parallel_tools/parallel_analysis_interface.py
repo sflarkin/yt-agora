@@ -98,6 +98,8 @@ class ObjectIterator(object):
             gs = getattr(pobj, attr)
         else:
             gs = getattr(pobj._data_source, attr)
+        if len(gs) == 0:
+            raise YTNoDataInObjectError(pobj)
         if hasattr(gs[0], 'proc_num'):
             # This one sort of knows about MPI, but not quite
             self._objs = [g for g in gs if g.proc_num ==
@@ -344,8 +346,10 @@ def parallel_objects(objects, njobs = 0, storage = None, barrier = True,
                      dynamic = False):
     if dynamic:
         from .task_queue import dynamic_parallel_objects
-        dynamic_parallel_objects(objects, njobs=njobs,
-                                 storage=storage)
+        for my_obj in dynamic_parallel_objects(objects, njobs=njobs,
+                                               storage=storage):
+            yield my_obj
+        return
     
     if not parallel_capable:
         njobs = 1
@@ -706,6 +710,10 @@ class Communicator(object):
         rank = self.comm.rank
 
         mask = 1
+
+        buf = qt.tobuffer()
+        print "PROC", rank, buf[0].shape, buf[1].shape, buf[2].shape
+        sys.exit()
 
         args = qt.get_args() # Will always be the same
         tgd = na.array([args[0], args[1]], dtype='int64')
