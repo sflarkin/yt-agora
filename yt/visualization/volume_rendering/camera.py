@@ -49,6 +49,9 @@ from yt.utilities.lib import \
     pixelize_healpix, arr_fisheye_vectors
 
 class Camera(ParallelAnalysisInterface):
+
+    _sampler_object = VolumeRenderSampler
+
     def __init__(self, center, normal_vector, width,
                  resolution, transfer_function,
                  north_vector = None, steady_north=False,
@@ -229,6 +232,9 @@ class Camera(ParallelAnalysisInterface):
         self.back_center =  center - 0.5*width[2]*unit_vectors[2]
         self.front_center = center + 0.5*width[2]*unit_vectors[2]         
 
+    def update_view_from_matrix(self, mat):
+        pass
+
     def look_at(self, new_center, north_vector = None):
         r"""Change the view direction based on a new focal point.
 
@@ -308,7 +314,7 @@ class Camera(ParallelAnalysisInterface):
             sampler = LightSourceRenderSampler(*args, light_dir=temp_dir,
                     light_rgba=self.light_rgba)
         else:
-            sampler = VolumeRenderSampler(*args)
+            sampler = self._sampler_object(*args)
         return sampler
 
     def finalize_image(self, image):
@@ -373,6 +379,8 @@ class Camera(ParallelAnalysisInterface):
         image : array
             An (N,M,3) array of the final returned values, in float64 form.
         """
+        if num_threads is None:
+            num_threads=get_num_threads()
         image = self.new_image()
 
         args = self.get_sampler_args(image)
@@ -589,17 +597,17 @@ data_object_registry["camera"] = Camera
 class InteractiveCamera(Camera):
     frames = []
 
-    def snapshot(self, fn = None, clip_ratio = None):
-        import matplotlib
-        matplotlib.pylab.figure(2)
+    def snapshot(self, fn=None, clip_ratio=None):
+        import matplotlib.pylab as pylab
+        pylab.figure(2)
         self.transfer_function.show()
-        matplotlib.pylab.draw()
+        pylab.draw()
         im = Camera.snapshot(self, fn, clip_ratio)
-        matplotlib.pylab.figure(1)
-        matplotlib.pylab.imshow(im/im.max())
-        matplotlib.pylab.draw()
+        pylab.figure(1)
+        pylab.imshow(im / im.max())
+        pylab.draw()
         self.frames.append(im)
-        
+
     def rotation(self, theta, n_steps, rot_vector=None):
         for frame in Camera.rotation(self, theta, n_steps, rot_vector):
             if frame is not None:
@@ -770,6 +778,8 @@ class HEALpixCamera(Camera):
         image : array
             An (N,M,3) array of the final returned values, in float64 form.
         """
+        if num_threads is None:
+            num_threads=get_num_threads()
         image = self.new_image()
 
         args = self.get_sampler_args(image)
@@ -1609,6 +1619,9 @@ class ProjectionCamera(Camera):
     def snapshot(self, fn = None, clip_ratio = None, double_check = False,
                  num_threads = 0):
 
+        if num_threads is None:
+            num_threads=get_num_threads()
+
         fields = [self.field]
         resolution = self.resolution
 
@@ -1630,7 +1643,7 @@ class ProjectionCamera(Camera):
 data_object_registry["projection_camera"] = ProjectionCamera
 
 def off_axis_projection(pf, center, normal_vector, width, resolution,
-                        field, weight = None, num_threads = 0, 
+                        field, weight = None, 
                         volume = None, no_ghost = False, interpolated = False):
     r"""Project through a parameter file, off-axis, and return the image plane.
 
@@ -1692,7 +1705,7 @@ def off_axis_projection(pf, center, normal_vector, width, resolution,
     projcam = ProjectionCamera(center, normal_vector, width, resolution,
             field, weight=weight, pf=pf, volume=volume,
             no_ghost=no_ghost, interpolated=interpolated)
-    image = projcam.snapshot(num_threads=num_threads)
+    image = projcam.snapshot()
     if weight is not None:
         pf.field_info.pop("temp_weightfield")
     del projcam
