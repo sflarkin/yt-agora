@@ -1,5 +1,5 @@
 """
-API for yt.frontends.ramses
+API for Geometry Handlers
 
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: UCSD
@@ -28,12 +28,8 @@ License:
 
 """
 
-from .data_structures import \
-      RAMSESStaticOutput
+from geometry_handler import \
+    GeometryHandler
 
-from .fields import \
-      RAMSESFieldInfo, \
-      add_ramses_field
-
-from .io import \
-      IOHandlerRAMSES
+from grid_geometry_handler import \
+    GridGeometryHandler
