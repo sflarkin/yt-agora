@@ -1,9 +1,9 @@
 """
-Compatibility module
+Geometry selection routine imports.
 
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: Columbia University
-Homepage: http://yt-project.org/
+Homepage: http://yt.enzotools.org/
 License:
   Copyright (C) 2011 Matthew Turk.  All Rights Reserved.
 
@@ -23,17 +23,19 @@ License:
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-from .CICDeposit import *
-from .ContourFinding import *
-from .DepthFirstOctree import *
-from .fortran_reader import *
-from .freetype_writer import *
-from .Interpolators import *
-from .misc_utilities import *
-from .Octree import *
-from .png_writer import *
-from .PointsInVolume import *
-from .QuadTree import *
-from .RayIntegrators import *
-from .grid_traversal import *
-from .marching_cubes import *
+cimport numpy as np
+
+cdef struct Oct
+
+cdef class SelectorObject:
+    cdef void recursively_select_octs(self, Oct *root,
+                        np.float64_t pos[3], np.float64_t dds[3],
+                        np.ndarray[np.uint8_t, ndim=1] mask,
+                        int level = ?)
+    cdef int select_grid(self, np.float64_t left_edge[3],
+                               np.float64_t right_edge[3]) nogil
+    cdef int select_cell(self, np.float64_t pos[3], np.float64_t dds[3],
+                         int eterm[3]) nogil
+    cdef void set_bounds(self,
+                         np.float64_t left_edge[3], np.float64_t right_edge[3],
+                         np.float64_t dds[3], int ind[3][2], int *check)

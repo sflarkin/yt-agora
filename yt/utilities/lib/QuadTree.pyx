@@ -29,6 +29,7 @@ cimport numpy as np
 # Double up here for def'd functions
 cimport numpy as cnp
 cimport cython
+from fp_utils cimport fmax
 
 from libc.stdlib cimport malloc, free, abs
 from cython.operator cimport dereference as deref, preincrement as inc
@@ -277,6 +278,7 @@ cdef class QuadTree:
         j = <np.int64_t> (pos[1] / self.po2[level])
         return self.root_nodes[i][j]
         
+    
     @cython.boundscheck(False)
     @cython.wraparound(False)
     def add_array_to_tree(self, int level,
@@ -299,17 +301,39 @@ cdef class QuadTree:
 
     @cython.boundscheck(False)
     @cython.wraparound(False)
-    def initialize_grid(self, int level,
-                        cnp.ndarray[np.int64_t, ndim=1] start_index, 
-                        cnp.ndarray[np.int64_t, ndim=1] dims):
-        # We assume that start_index is indices 0 and 1 of ourself
-        cdef int i, j
+    def add_chunk_to_tree(self, 
+            np.ndarray[np.int64_t, ndim=1] pxs,
+            np.ndarray[np.int64_t, ndim=1] pys,
+            np.ndarray[np.int64_t, ndim=1] level,
+            np.ndarray[np.float64_t, ndim=2] pvals,
+            np.ndarray[np.float64_t, ndim=1] pweight_vals):
+        cdef int np = pxs.shape[0]
+        cdef int p
+        cdef cnp.float64_t *vals
+        cdef cnp.float64_t *data = <cnp.float64_t *> pvals.data
         cdef cnp.int64_t pos[2]
-        for i in range(dims[0]):
-            pos[0] = i + start_index[0]
-            for j in range(dims[1]):
-                pos[1] = j + start_index[1]
-                self.add_to_position(level, pos, NULL, 0.0, 1)
+        for p in range(np):
+            vals = data + self.nvals*p
+            pos[0] = pxs[p]
+            pos[1] = pys[p]
+            self.add_to_position(level[p], pos, vals, pweight_vals[p])
+        return
+
+    @cython.boundscheck(False)
+    @cython.wraparound(False)
+    def initialize_chunk(self, 
+            np.ndarray[np.int64_t, ndim=1] pxs,
+            np.ndarray[np.int64_t, ndim=1] pys,
+            np.ndarray[np.int64_t, ndim=1] level):
+        cdef int np = pxs.shape[0]
+        cdef int p
+        cdef cnp.float64_t *vals
+        cdef cnp.int64_t pos[2]
+        for p in range(np):
+            pos[0] = pxs[p]
+            pos[1] = pys[p]
+            self.add_to_position(level[p], pos, NULL, 0.0, 1)
+        return
 
     @cython.boundscheck(False)
     @cython.wraparound(False)
