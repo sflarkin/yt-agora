@@ -554,13 +554,51 @@ class PWViewer(PlotWindow):
             callback.__doc__ = CallbackMaker.__init__.__doc__
             self.__dict__['annotate_'+cbname] = types.MethodType(callback,self)
 
+    _unit = None
+    @invalidate_plot
+    def set_axes_unit(self, unit_name):
+        r"""Set the unit for display on the x and y axes of the image.
+
+        Parameters
+        ----------
+        unit_name : string
+            A unit, available for conversion in the parameter file, that the
+            image extents will be displayed in.  If set to None, any previous
+            units will be reset.
+
+        Raises
+        ------
+        YTUnitNotRecognized
+            If the unit is not known, this will be raised.
+
+        Examples
+        --------
+
+        >>> p = ProjectionPlot(pf, "y", "Density")
+        >>> p.show()
+        >>> p.set_axes_unit("kpc")
+        >>> p.show()
+        >>> p.set_axes_unit(None)
+        >>> p.show()
+        """
+        # blind except because it could be in conversion_factors or units
+        try:
+            self.pf[unit_name]
+        except KeyError: 
+            if unit_name is not None:
+                raise YTUnitNotRecognized(unit_name)
+        self._unit = unit_name
+
     def get_metadata(self, field, strip_mathml = True, return_string = True):
         fval = self._frb[field]
         mi = fval.min()
         ma = fval.max()
         x_width = self.xlim[1] - self.xlim[0]
         y_width = self.ylim[1] - self.ylim[0]
-        unit = get_smallest_appropriate_unit(x_width, self.pf)
+        if self._unit is None:
+            unit = get_smallest_appropriate_unit(x_width, self.pf)
+        else:
+            unit = self._unit
         units = self.get_field_units(field, strip_mathml)
         center = getattr(self._frb.data_source, "center", None)
         if center is None or self._frb.axis == 4:
@@ -667,10 +705,12 @@ class PWViewerMPL(PWViewer):
             self.plots[f].axes.set_xlabel(labels[0])
             self.plots[f].axes.set_ylabel(labels[1])
 
+            field_name = self.data_source.pf.field_info[f].display_name
+            if field_name is None: field_name = f
             if md['units'] == None or md['units'] == '':
-                label = r'$\rm{'+f.encode('string-escape')+r'}$'
+                label = r'$\rm{'+field_name.encode('string-escape')+r'}$'
             else:
-                label = r'$\rm{'+f.encode('string-escape')+r'}\/\/('+md['units']+r')$'
+                label = r'$\rm{'+field_name.encode('string-escape')+r'}\/\/('+md['units']+r')$'
 
             self.plots[f].cb.set_label(label)
 
@@ -805,11 +845,12 @@ class SlicePlot(PWViewerMPL):
              or the axis name itself
         fields : string
              The name of the field(s) to be plotted.
-        center : two or three-element vector of sequence floats, 'c', or 'center'
+        center : two or three-element vector of sequence floats, 'c', or 'center', or 'max'
              The coordinate of the center of the image.  If left blanck,
              the image centers on the location of the maximum density
              cell.  If set to 'c' or 'center', the plot is centered on
-             the middle of the domain.
+             the middle of the domain.  If set to 'max', will be at the point
+             of highest density.
         width : tuple or a float.
              Width can have four different formats to support windows with variable 
              x and y widths.  They are:
@@ -873,11 +914,12 @@ class ProjectionPlot(PWViewerMPL):
              or the axis name itself
         fields : string
             The name of the field(s) to be plotted.
-        center : A two or three-element vector of sequence floats, 'c', or 'center'
-            The coordinate of the center of the image.  If left blanck,
-            the image centers on the location of the maximum density
-            cell.  If set to 'c' or 'center', the plot is centered on
-            the middle of the domain.
+        center : two or three-element vector of sequence floats, 'c', or 'center', or 'max'
+             The coordinate of the center of the image.  If left blanck,
+             the image centers on the location of the maximum density
+             cell.  If set to 'c' or 'center', the plot is centered on
+             the middle of the domain.  If set to 'max', will be at the point
+             of highest density.
         width : tuple or a float.
              Width can have four different formats to support windows with variable 
              x and y widths.  They are:
