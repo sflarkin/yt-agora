@@ -27,7 +27,10 @@ License:
 import base64
 import matplotlib.figure
 from matplotlib.mathtext import MathTextParser
-from matplotlib.pyparsing import ParseFatalException
+try:
+    from matplotlib.pyparsing import ParseFatalException
+except ImportError:
+    from pyparsing import ParseFatalException
 import cStringIO
 import types
 import __builtin__
@@ -809,7 +812,7 @@ class PWViewerMPL(PWViewer):
                 raise RuntimeError("Colormap '%s' does not exist!" % str(cmap))
             self.plots[field].image.set_cmap(cmap)
 
-    def save(self,name=None,mpl_kwargs={}):
+    def save(self, name=None, mpl_kwargs=None):
         """saves the plot to disk.
 
         Parameters
@@ -827,6 +830,7 @@ class PWViewerMPL(PWViewer):
             name = str(self.pf)
         elif name.endswith('.png'):
             return v.save(name)
+        if mpl_kwargs is None: mpl_kwargs = {}
         axis = axis_names[self.data_source.axis]
         weight = None
         if 'Slice' in self.data_source.__class__.__name__:
