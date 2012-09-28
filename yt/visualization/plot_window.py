@@ -27,7 +27,10 @@ License:
 import base64
 import matplotlib.figure
 from matplotlib.mathtext import MathTextParser
-from matplotlib.pyparsing import ParseFatalException
+try:
+    from matplotlib.pyparsing import ParseFatalException
+except ImportError:
+    from pyparsing import ParseFatalException
 import cStringIO
 import types
 import __builtin__
@@ -852,11 +855,15 @@ class PWViewerMPL(PWViewer):
         return names
 
     def _send_zmq(self):
-        from IPython.zmq.pylab.backend_inline import \
-                    send_figure
+        try:
+            # pre-IPython v0.14        
+            from IPython.zmq.pylab.backend_inline import send_figure as display
+        except ImportError:
+            # IPython v0.14+ 
+            from IPython.core.display import display
         for k, v in sorted(self.plots.iteritems()):
             canvas = FigureCanvasAgg(v.figure)
-            send_figure(v.figure)
+            display(v.figure)
 
     def show(self):
         r"""This will send any existing plots to the IPython notebook.
