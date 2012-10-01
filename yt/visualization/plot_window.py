@@ -107,7 +107,10 @@ class CallbackWrapper(object):
         self.pf = frb.pf
         self.xlim = viewer.xlim
         self.ylim = viewer.ylim
-        self._type_name = ''
+        if 'Cutting' in self.data.__class__.__name__:
+            self._type_name = "CuttingPlane"
+        else:
+            self._type_name = ''
 
 class FieldTransform(object):
     def __init__(self, name, func, locator):
@@ -872,11 +875,15 @@ class PWViewerMPL(PWViewer):
         return names
 
     def _send_zmq(self):
-        from IPython.zmq.pylab.backend_inline import \
-                    send_figure
+        try:
+            # pre-IPython v0.14        
+            from IPython.zmq.pylab.backend_inline import send_figure as display
+        except ImportError:
+            # IPython v0.14+ 
+            from IPython.core.display import display
         for k, v in sorted(self.plots.iteritems()):
             canvas = FigureCanvasAgg(v.figure)
-            send_figure(v.figure)
+            display(v.figure)
 
     def show(self):
         r"""This will send any existing plots to the IPython notebook.
