@@ -319,7 +319,6 @@ class Camera(ParallelAnalysisInterface):
                     light_rgba=self.light_rgba, **kwargs)
         else:
             sampler = self._sampler_object(*args, **kwargs)
-        print sampler, kwargs
         return sampler
 
     def finalize_image(self, image):

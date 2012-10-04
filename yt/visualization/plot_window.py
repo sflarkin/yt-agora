@@ -1,4 +1,4 @@
-"""
+""" 
 A plotting mechanism based on the idea of a "window" into the data.
 
 Author: J. S. Oishi <jsoishi@gmail.com>
@@ -309,7 +309,6 @@ class PlotWindow(object):
         nWx, nWy = Wx/factor, Wy/factor
         self.xlim = (centerx - nWx*0.5, centerx + nWx*0.5)
         self.ylim = (centery - nWy*0.5, centery + nWy*0.5)
-                    
 
     @invalidate_data
     def pan(self, deltas):
@@ -487,7 +486,8 @@ class PWViewer(PlotWindow):
         self._colormaps = defaultdict(lambda: 'algae')
         self.setup_callbacks()
         for field in self._frb.data.keys():
-            if self.pf.field_info[field].take_log:
+            finfo = self.data_source._get_field_info(*field)
+            if finfo.take_log:
                 self._field_transform[field] = log_transform
             else:
                 self._field_transform[field] = linear_transform
@@ -676,13 +676,15 @@ class PWViewer(PlotWindow):
     def get_field_units(self, field, strip_mathml = True):
         ds = self._frb.data_source
         pf = self.pf
+        field = self.data_source._determine_fields(field)[0]
+        finfo = self.data_source._get_field_info(*field)
         if ds._type_name in ("slice", "cutting"):
-            units = pf.field_info[field].get_units()
+            units = finfo.get_units()
         elif ds._type_name == "proj" and (ds.weight_field is not None or 
                                         ds.proj_style == "mip"):
-            units = pf.field_info[field].get_units()
+            units = finfo.get_units()
         elif ds._type_name == "proj":
-            units = pf.field_info[field].get_projected_units()
+            units = finfo.get_projected_units()
         else:
             units = ""
         if strip_mathml:
@@ -761,10 +763,11 @@ class PWViewerMPL(PWViewer):
             self.plots[f].axes.set_xlabel(labels[0])
             self.plots[f].axes.set_ylabel(labels[1])
 
-            field_name = self.data_source.pf.field_info[f].display_name
+            ftype, fname = f
+            field_name = self.data_source._get_field_info(ftype, fname).display_name
 
             if field_name is None:
-                field_name = r'$\rm{'+f+r'}$'
+                field_name = r'$\rm{'+fname+r'}$'
             elif field_name.find('$') == -1:
                 field_name = r'$\rm{'+field_name+r'}$'
             
@@ -772,17 +775,13 @@ class PWViewerMPL(PWViewer):
             try:
                 parser.parse(field_name)
             except ParseFatalException, err:
-                raise YTCannotParseFieldDisplayName(f,field_name,str(err))
+                raise YTCannotParseFieldDisplayName(fname,field_name,str(err))
 
             try:
                 parser.parse(r'$'+md['units']+r'$')
             except ParseFatalException, err:
                 raise YTCannotParseUnitDisplayName(f, md['units'],str(err))
 
-            if md['units'] == None or md['units'] == '':
-                label = field_name
-            else:
-                label = field_name+r'$\/\/('+md['units']+r')$'
 
             self.plots[f].cb.set_label(label)
 
@@ -864,12 +863,12 @@ class PWViewerMPL(PWViewer):
                 n = "%s_%s_%s" % (name, type, k)
             if weight:
                 n += "_%s" % (weight)
-            names.append(v.save(n,mpl_kwargs))
+            names.append(v.save(n))
         return names
 
     def _send_zmq(self):
         try:
-            # pre-IPython v0.14        
+            # pre-IPython v0.14
             from IPython.zmq.pylab.backend_inline import send_figure as display
         except ImportError:
             # IPython v0.14+ 
@@ -975,7 +974,8 @@ class SlicePlot(PWViewerMPL):
         """
         axis = fix_axis(axis)
         (bounds,center) = GetBoundsAndCenter(axis, center, width, pf)
-        slc = pf.h.slice(axis, center[axis], fields=fields)
+        slc = pf.h.slice(axis, center[axis])
+        slc.get_data(fields)
         PWViewerMPL.__init__(self, slc, bounds, origin=origin)
         self.set_axes_unit(axes_unit)
 
@@ -1051,13 +1051,13 @@ class ProjectionPlot(PWViewerMPL):
         This is a very simple way of creating a projection plot.
         
         >>> pf = load('galaxy0030/galaxy0030')
-        >>> p = ProjectionPlot(pf,2,'Density','c',(20,'kpc'))
+        >>> p = ProjectionPlot(pf, 'z', 'Density', 'c', (20,'kpc'))
         >>> p.save('sliceplot')
         
         """
         axis = fix_axis(axis)
         (bounds,center) = GetBoundsAndCenter(axis,center,width,pf)
-        proj = pf.h.proj(axis,fields,weight_field=weight_field,max_level=max_level,center=center)
+        proj = pf.h.proj(fields, axis, weight_field=weight_field, center=center)
         PWViewerMPL.__init__(self,proj,bounds,origin=origin)
         self.set_axes_unit(axes_unit)
 
@@ -1364,9 +1364,11 @@ class PWViewerExtJS(PWViewer):
 
     @invalidate_data
     def set_current_field(self, field):
+        field = self.data_source._determine_fields(field)[0]
         self._current_field = field
         self._frb[field]
-        if self.pf.field_info[field].take_log:
+        finfo = self.data_source._get_field_info(*field)
+        if finfo.take_log:
             self._field_transform[field] = log_transform
         else:
             self._field_transform[field] = linear_transform
