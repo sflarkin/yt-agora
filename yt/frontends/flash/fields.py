@@ -5,7 +5,7 @@ Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: UCSD
 Homepage: http://yt-project.org/
 License:
-  Copyright (C) 2010-2011 Matthew Turk, John ZuHone.  All Rights Reserved.
+  Copyright (C) 2010-2012 Matthew Turk, John ZuHone, Anthony Scopatz.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -23,7 +23,6 @@ License:
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import numpy as np
 from yt.data_objects.field_info_container import \
     FieldInfoContainer, \
     NullFunc, \
@@ -37,11 +36,19 @@ from yt.data_objects.field_info_container import \
 import yt.data_objects.universal_fields
 from yt.utilities.physical_constants import \
     kboltz
+import numpy as np
+from yt.utilities.exceptions import *
 KnownFLASHFields = FieldInfoContainer()
 add_flash_field = KnownFLASHFields.add_field
 
 FLASHFieldInfo = FieldInfoContainer.create_with_fallback(FieldInfo)
 add_field = FLASHFieldInfo.add_field
+
+CylindricalFLASHFieldInfo = FieldInfoContainer.create_with_fallback(FLASHFieldInfo)
+add_cyl_field = CylindricalFLASHFieldInfo.add_field
+
+PolarFLASHFieldInfo = FieldInfoContainer.create_with_fallback(FLASHFieldInfo)
+add_pol_field = PolarFLASHFieldInfo.add_field
 
 # Common fields in FLASH: (Thanks to John ZuHone for this list)
 #
@@ -150,15 +157,40 @@ add_flash_field("particle_mass", function=NullFunc, take_log=False,
 add_flash_field("temp", function=NullFunc, take_log=True,
                 convert_function=_get_convert("temp"),
                 units=r"\rm{K}")
+add_flash_field("tion", function=NullFunc, take_log=True,
+                units=r"\rm{K}")
 add_flash_field("tele", function=NullFunc, take_log=True,
-                convert_function=_get_convert("tele"),
+                units = r"\rm{K}")
+add_flash_field("trad", function=NullFunc, take_log=True,
                 units = r"\rm{K}")
 add_flash_field("pres", function=NullFunc, take_log=True,
                 convert_function=_get_convert("pres"),
                 units=r"\rm{erg}\//\/\rm{cm}^{3}")
+add_flash_field("pion", function=NullFunc, take_log=True,
+                display_name="Ion Pressure",
+                units=r"\rm{J}/\rm{cm}^3")
+add_flash_field("pele", function=NullFunc, take_log=True,
+                display_name="Electron Pressure, P_e",
+                units=r"\rm{J}/\rm{cm}^3")
+add_flash_field("prad", function=NullFunc, take_log=True,
+                display_name="Radiation Pressure",
+                units = r"\rm{J}/\rm{cm}^3")
+add_flash_field("eion", function=NullFunc, take_log=True,
+                display_name="Ion Internal Energy",
+                units=r"\rm{J}")
+add_flash_field("eele", function=NullFunc, take_log=True,
+                display_name="Electron Internal Energy",
+                units=r"\rm{J}")
+add_flash_field("erad", function=NullFunc, take_log=True,
+                display_name="Radiation Internal Energy",
+                units=r"\rm{J}")
 add_flash_field("pden", function=NullFunc, take_log=True,
                 convert_function=_get_convert("pden"),
                 units=r"\rm{g}/\rm{cm}^3")
+add_flash_field("depo", function=NullFunc, take_log=True,
+                units = r"\rm{ergs}/\rm{g}")
+add_flash_field("ye", function=NullFunc, take_log=True,
+                units = r"\rm{ergs}/\rm{g}")
 add_flash_field("magx", function=NullFunc, take_log=False,
                 convert_function=_get_convert("magx"),
                 units = r"\mathrm{Gau\ss}")
@@ -188,6 +220,34 @@ add_flash_field("gpol", function=NullFunc, take_log=False,
                 units = r"\rm{ergs\//\/g}")
 add_flash_field("flam", function=NullFunc, take_log=False,
                 convert_function=_get_convert("flam"))
+add_flash_field("absr", function=NullFunc, take_log=False,
+                display_name="Absorption Coefficient")
+add_flash_field("emis", function=NullFunc, take_log=False,
+                display_name="Emissivity")
+add_flash_field("cond", function=NullFunc, take_log=False,
+                display_name="Conductivity")
+add_flash_field("dfcf", function=NullFunc, take_log=False,
+                display_name="Diffusion Equation Scalar")
+add_flash_field("fllm", function=NullFunc, take_log=False,
+                display_name="Flux Limit")
+add_flash_field("pipe", function=NullFunc, take_log=False,
+                display_name="P_i/P_e")
+add_flash_field("tite", function=NullFunc, take_log=False,
+                display_name="T_i/T_e")
+add_flash_field("dbgs", function=NullFunc, take_log=False,
+                display_name="Debug for Shocks")
+add_flash_field("cham", function=NullFunc, take_log=False,
+                display_name="Chamber Material Fraction")
+add_flash_field("targ", function=NullFunc, take_log=False,
+                display_name="Target Material Fraction")
+add_flash_field("sumy", function=NullFunc, take_log=False)
+add_flash_field("mgdc", function=NullFunc, take_log=False,
+                display_name="Emission Minus Absorption Diffusion Terms")
+
+for i in range(1, 1000):
+    add_flash_field("r{0:03}".format(i), function=NullFunc, take_log=False,
+        display_name="Energy Group {0}".format(i))
+
 
 for f,v in translation_dict.items():
     if v not in KnownFLASHFields:
@@ -295,3 +355,111 @@ add_field("DivB", function=_DivB, take_log=False,
           units=r"\rm{Gauss}\/\rm{cm}^{-1}")
 
 
+
+def _unknown_coord(field, data):
+    raise YTCoordinateNotImplemented
+add_cyl_field("dx", function=_unknown_coord)
+add_cyl_field("dy", function=_unknown_coord)
+add_cyl_field("x", function=_unknown_coord)
+add_cyl_field("y", function=_unknown_coord)
+
+def _dr(field, data):
+    return np.ones(data.ActiveDimensions, dtype='float64') * data.dds[0]
+add_cyl_field('dr', function=_dr, display_field=False,
+          validators=[ValidateSpatial(0)])
+
+def _dz(field, data):
+    return np.ones(data.ActiveDimensions, dtype='float64') * data.dds[1]
+add_cyl_field('dz', function=_dz,
+          display_field=False, validators=[ValidateSpatial(0)])
+
+def _dtheta(field, data):
+    return np.ones(data.ActiveDimensions, dtype='float64') * data.dds[2]
+add_cyl_field('dtheta', function=_dtheta,
+          display_field=False, validators=[ValidateSpatial(0)])
+
+def _coordR(field, data):
+    dim = data.ActiveDimensions[0]
+    return (np.ones(data.ActiveDimensions, dtype='float64')
+                   * np.arange(data.ActiveDimensions[0])[:,None,None]
+            +0.5) * data['dr'] + data.LeftEdge[0]
+add_cyl_field('r', function=_coordR, display_field=False,
+          validators=[ValidateSpatial(0)])
+
+def _coordZ(field, data):
+    dim = data.ActiveDimensions[1]
+    return (np.ones(data.ActiveDimensions, dtype='float64')
+                   * np.arange(data.ActiveDimensions[1])[None,:,None]
+            +0.5) * data['dz'] + data.LeftEdge[1]
+add_cyl_field('z', function=_coordZ, display_field=False,
+          validators=[ValidateSpatial(0)])
+
+def _coordTheta(field, data):
+    dim = data.ActiveDimensions[2]
+    return (np.ones(data.ActiveDimensions, dtype='float64')
+                   * np.arange(data.ActiveDimensions[2])[None,None,:]
+            +0.5) * data['dtheta'] + data.LeftEdge[2]
+add_cyl_field('theta', function=_coordTheta, display_field=False,
+          validators=[ValidateSpatial(0)])
+
+def _CylindricalVolume(field, data):
+    return data["dtheta"] * data["r"] * data["dr"] * data["dz"]
+add_cyl_field("CellVolume", function=_CylindricalVolume)
+
+## Polar fields
+
+add_pol_field("dx", function=_unknown_coord)
+add_pol_field("dy", function=_unknown_coord)
+add_pol_field("x", function=_unknown_coord)
+add_pol_field("y", function=_unknown_coord)
+
+def _dr(field, data):
+    return np.ones(data.ActiveDimensions, dtype='float64') * data.dds[0]
+add_pol_field('dr', function=_dr, display_field=False,
+          validators=[ValidateSpatial(0)])
+
+def _dtheta(field, data):
+    return np.ones(data.ActiveDimensions, dtype='float64') * data.dds[1]
+add_pol_field('dtheta', function=_dtheta,
+          display_field=False, validators=[ValidateSpatial(0)])
+
+def _coordR(field, data):
+    dim = data.ActiveDimensions[0]
+    return (np.ones(data.ActiveDimensions, dtype='float64')
+                   * np.arange(data.ActiveDimensions[0])[:,None,None]
+            +0.5) * data['dr'] + data.LeftEdge[0]
+add_pol_field('r', function=_coordR, display_field=False,
+          validators=[ValidateSpatial(0)])
+
+def _coordTheta(field, data):
+    dim = data.ActiveDimensions[2]
+    return (np.ones(data.ActiveDimensions, dtype='float64')
+                   * np.arange(data.ActiveDimensions[1])[None,:,None]
+            +0.5) * data['dtheta'] + data.LeftEdge[1]
+add_pol_field('theta', function=_coordTheta, display_field=False,
+          validators=[ValidateSpatial(0)])
+
+def _CylindricalVolume(field, data):
+    return data["dtheta"] * data["r"] * data["dr"] * data["dz"]
+add_pol_field("CellVolume", function=_CylindricalVolume)
+
+
+## Derived FLASH Fields
+def _nele(field, data):
+    return data['ye'] * data['dens'] * data['sumy'] * 6.022E23
+add_field('nele', function=_nele, take_log=True, units=r"\rm{n}/\rm{cm}^3")
+add_field('edens', function=_nele, take_log=True, units=r"\rm{n}/\rm{cm}^3")
+
+def _nion(field, data):
+    return data['dens'] * data['sumy'] * 6.022E23
+add_field('nion', function=_nion, take_log=True, units=r"\rm{n}/\rm{cm}^3")
+
+
+def _abar(field, data):
+    return 1.0 / data['sumy']
+add_field('abar', function=_abar, take_log=False)
+
+
+def _velo(field, data):
+    return (data['velx']**2 + data['vely']**2 + data['velz']**2)**0.5
+add_field ('velo', function=_velo, take_log=True, units=r"\rm{cm}/\rm{s}")
