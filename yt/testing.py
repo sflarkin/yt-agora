@@ -28,6 +28,9 @@ from numpy.testing import assert_array_equal, assert_almost_equal, \
     assert_approx_equal, assert_array_almost_equal, assert_equal, \
     assert_string_equal
 
+def assert_rel_equal(a1, a2, decimels):
+    return assert_almost_equal(a1/a2, 1.0, decimels)
+
 def amrspace(extent, levels=7, cells=8):
     """Creates two numpy arrays representing the left and right bounds of 
     an AMR grid as well as an array for the AMR level of each cell.
@@ -129,7 +132,8 @@ def amrspace(extent, levels=7, cells=8):
 
     return left, right, level
 
-def fake_random_pf(ndims, peak_value = 1.0, fields = ("Density",), negative = False):
+def fake_random_pf(ndims, peak_value = 1.0, fields = ("Density",),
+                   negative = False, nprocs = 1):
     from yt.frontends.stream.api import load_uniform_grid
     if not iterable(ndims):
         ndims = [ndims, ndims, ndims]
@@ -141,5 +145,5 @@ def fake_random_pf(ndims, peak_value = 1.0, fields = ("Density",), negative = Fa
         offset = 0.0
     data = dict((field, (np.random.random(ndims) - offset) * peak_value)
                  for field in fields)
-    ug = load_uniform_grid(data, ndims, 1.0)
+    ug = load_uniform_grid(data, ndims, 1.0, nprocs = nprocs)
     return ug
