@@ -32,4 +32,5 @@ syntax: glob
 *.pyc
 .*.swp
 *.so
+.idea/*
 tests/results/*
