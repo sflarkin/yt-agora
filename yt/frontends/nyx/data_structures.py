@@ -39,7 +39,7 @@ import numpy as np
 
 from yt.funcs import *
 from yt.data_objects.grid_patch import AMRGridPatch
-from yt.data_objects.hierarchy import AMRHierarchy
+from yt.geometry.grid_geometry_handler import GridGeometryHandler
 from yt.data_objects.static_output import StaticOutput
 from yt.data_objects.field_info_container import \
     FieldInfoContainer, NullFunc
@@ -110,7 +110,7 @@ class NyxGrid(AMRGridPatch):
     def __repr__(self):
         return "NyxGrid_%04i" % (self.id)
 
-class NyxHierarchy(AMRHierarchy):
+class NyxHierarchy(GridGeometryHandler):
     grid = NyxGrid
 
     def __init__(self, pf, data_style="nyx_native"):
@@ -127,7 +127,7 @@ class NyxHierarchy(AMRHierarchy):
         self.read_particle_header()
         self.__cache_endianness(self.levels[-1].grids[-1])
 
-        AMRHierarchy.__init__(self, pf, self.data_style)
+        GridGeometryHandler.__init__(self, pf, self.data_style)
         self._setup_data_io()
         self._setup_field_list()
         self._populate_hierarchy()
@@ -404,7 +404,7 @@ class NyxHierarchy(AMRHierarchy):
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
         dd["field_indexes"] = self.field_indexes
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
     def _get_grid_children(self, grid):
@@ -465,7 +465,7 @@ class NyxHierarchy(AMRHierarchy):
 
     def _initialize_state_variables(self):
         """
-        Override not to re-initialize num_grids in AMRHierarchy.__init__
+        Override not to re-initialize num_grids in GridGeometryHandler.__init__
 
         """
         self._parallel_locking = False
