@@ -42,7 +42,7 @@ from yt.funcs import *
 
 import yt.utilities.lib as amr_utils
 
-EnzoFieldInfo = FieldInfoContainer.create_with_fallback(FieldInfo)
+EnzoFieldInfo = FieldInfoContainer.create_with_fallback(FieldInfo, "EFI")
 add_field = EnzoFieldInfo.add_field
 
 KnownEnzoFields = FieldInfoContainer()
@@ -535,7 +535,7 @@ for pf in ["creation_time", "dynamical_time", "metallicity_fraction"]:
                             ValidateDataField(pf)],
               particle_type=True)
 add_field("particle_mass", function=particle_func("particle_mass"),
-          validators=[ValidateSpatial(0)], particle_type=True)
+          particle_type=True)
 
 def _ParticleAge(field, data):
     current_time = data.pf.current_time
