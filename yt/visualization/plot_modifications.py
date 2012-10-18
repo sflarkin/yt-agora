@@ -1,4 +1,4 @@
-"""
+""" 
 Callbacks to add additional functionality on to plots.
 
 Author: Matthew Turk <matthewturk@gmail.com>
@@ -7,9 +7,12 @@ Author: J. S. Oishi <jsoishi@astro.berkeley.edu>
 Affiliation: UC Berkeley
 Author: Stephen Skory <s@skory.us>
 Affiliation: UC San Diego
+Author: Anthony Scopatz <scopatz@gmail.com>
+Affiliation: The University of Chicago
 Homepage: http://yt-project.org/
 License:
-  Copyright (C) 2008-2011 Matthew Turk, JS Oishi, Stephen Skory.  All Rights Reserved.
+  Copyright (C) 2008-2012 Matthew Turk, JS Oishi, Stephen Skory, Anthony Scopatz.  
+  All Rights Reserved.
 
   This file is part of yt.
 
@@ -80,11 +83,11 @@ class PlotCallback(object):
     def pixel_scale(self,plot):
         x0, x1 = plot.xlim
         xx0, xx1 = plot._axes.get_xlim()
-        dx = (xx1 - xx0)/(x1 - x0)
+        dx = (xx0 - xx1)/(x1 - x0)
         
         y0, y1 = plot.ylim
         yy0, yy1 = plot._axes.get_ylim()
-        dy = (yy1 - yy0)/(y1 - y0)
+        dy = (yy0 - yy1)/(y1 - y0)
 
         return (dx,dy)
 
@@ -212,7 +215,7 @@ class ContourCallback(PlotCallback):
     _type_name = "contour"
     def __init__(self, field, ncont=5, factor=4, clim=None,
                  plot_args = None):
-        """
+        """ 
         annotate_contour(self, field, ncont=5, factor=4, take_log=False, clim=None,
                          plot_args = None):
 
@@ -288,7 +291,7 @@ class ContourCallback(PlotCallback):
             self.clim = (np.log10(self.clim[0]), np.log10(self.clim[1]))
         
         if self.clim is not None: 
-            self.ncont = np.linspace(self.clim[0], self.clim[1], ncont)
+            self.ncont = np.linspace(self.clim[0], self.clim[1], self.ncont)
         
         plot._axes.contour(xi,yi,zi,self.ncont, **self.plot_args)
         plot._axes.set_xlim(xx0,xx1)
@@ -297,31 +300,30 @@ class ContourCallback(PlotCallback):
 
 class GridBoundaryCallback(PlotCallback):
     _type_name = "grids"
-    def __init__(self, alpha=1.0, min_pix=1, min_pix_ids=20, draw_ids=False, periodic=True):
-        """
-        annotate_grids(alpha=1.0, min_pix=1, draw_ids=False, periodic=True)
+    def __init__(self, alpha=1.0, min_pix=1, annotate=False, periodic=True):
+        """ 
+        annotate_grids(alpha=1.0, min_pix=1, annotate=False, periodic=True)
 
         Adds grid boundaries to a plot, optionally with *alpha*-blending.
         Cuttoff for display is at *min_pix* wide.
-        *draw_ids* puts the grid id in the corner of the grid.  (Not so great in projections...)
-        Grids must be wider than *min_pix_ids* otherwise the ID will not be drawn.
+        *annotate* puts the grid id in the corner of the grid.  (Not so great in projections...)
         """
         PlotCallback.__init__(self)
         self.alpha = alpha
         self.min_pix = min_pix
-        self.min_pix_ids = min_pix_ids
-        self.draw_ids = draw_ids # put grid numbers in the corner.
+        self.annotate = annotate # put grid numbers in the corner.
         self.periodic = periodic
 
     def __call__(self, plot):
         x0, x1 = plot.xlim
         y0, y1 = plot.ylim
+        width, height = plot.image._A.shape
         xx0, xx1 = plot._axes.get_xlim()
         yy0, yy1 = plot._axes.get_ylim()
         xi = x_dict[plot.data.axis]
         yi = y_dict[plot.data.axis]
-        (dx, dy) = self.pixel_scale(plot)
-        (xpix, ypix) = plot.image._A.shape
+        dx = width / (x1-x0)
+        dy = height / (y1-y0)
         px_index = x_dict[plot.data.axis]
         py_index = y_dict[plot.data.axis]
         dom = plot.data.pf.domain_right_edge - plot.data.pf.domain_left_edge
@@ -329,74 +331,62 @@ class GridBoundaryCallback(PlotCallback):
             pxs, pys = np.mgrid[-1:1:3j,-1:1:3j]
         else:
             pxs, pys = np.mgrid[0:0:1j,0:0:1j]
-        GLE = plot.data.grid_left_edge
-        GRE = plot.data.grid_right_edge
+        GLE = plot.data.pf.h.grid_left_edge
+        GRE = plot.data.pf.h.grid_right_edge
         for px_off, py_off in zip(pxs.ravel(), pys.ravel()):
             pxo = px_off * dom[px_index]
             pyo = py_off * dom[py_index]
-            left_edge_x = (GLE[:,px_index]+pxo-x0)*dx + xx0
-            left_edge_y = (GLE[:,py_index]+pyo-y0)*dy + yy0
-            right_edge_x = (GRE[:,px_index]+pxo-x0)*dx + xx0
-            right_edge_y = (GRE[:,py_index]+pyo-y0)*dy + yy0
-            visible =  ( xpix * (right_edge_x - left_edge_x) / (xx1 - xx0) > self.min_pix ) & \
-                       ( ypix * (right_edge_y - left_edge_y) / (yy1 - yy0) > self.min_pix )
-            if visible.nonzero()[0].size == 0: continue
+            left_edge_px = (GLE[:,px_index]+pxo-x0)*dx
+            left_edge_py = (GLE[:,py_index]+pyo-y0)*dy
+            right_edge_px = (GRE[:,px_index]+pxo-x0)*dx
+            right_edge_py = (GRE[:,py_index]+pyo-y0)*dy
             verts = np.array(
-                [(left_edge_x, left_edge_x, right_edge_x, right_edge_x),
-                 (left_edge_y, right_edge_y, right_edge_y, left_edge_y)])
+                [(left_edge_px, left_edge_px, right_edge_px, right_edge_px),
+                 (left_edge_py, right_edge_py, right_edge_py, left_edge_py)])
+            visible =  (right_edge_px - left_edge_px > self.min_pix) & \
+                       (right_edge_px - left_edge_px > self.min_pix)
             verts=verts.transpose()[visible,:,:]
+            if verts.size == 0: continue
             edgecolors = (0.0,0.0,0.0,self.alpha)
+            verts[:,:,0]= (xx1-xx0)*(verts[:,:,0]/width) + xx0
+            verts[:,:,1]= (yy1-yy0)*(verts[:,:,1]/height) + yy0
             grid_collection = matplotlib.collections.PolyCollection(
                 verts, facecolors="none",
                 edgecolors=edgecolors)
             plot._axes.hold(True)
             plot._axes.add_collection(grid_collection)
-            if self.draw_ids:
-                visible_ids =  ( xpix * (right_edge_x - left_edge_x) / (xx1 - xx0) > self.min_pix_ids ) & \
-                               ( ypix * (right_edge_y - left_edge_y) / (yy1 - yy0) > self.min_pix_ids )
-                active_ids = np.unique(plot.data['GridIndices'])
-                for i in np.where(visible_ids)[0]:
-                    plot._axes.text(
-                        left_edge_x[i] + (2 * (xx1 - xx0) / xpix),
-                        left_edge_y[i] + (2 * (yy1 - yy0) / ypix),
-                        "%d" % active_ids[i], clip_on=True)
+            if self.annotate:
+                ids = [g.id for g in plot.data._grids]
+                for n in range(len(left_edge_px)):
+                    plot._axes.text(left_edge_px[n]+2,left_edge_py[n]+2,ids[n])
             plot._axes.hold(False)
 
 class StreamlineCallback(PlotCallback):
     _type_name = "streamlines"
-    def __init__(self, field_x, field_y, factor=6.0, nx=16, ny=16,
-                 xstart=(0,1), ystart=(0,1), nsample=256,
-                 start_at_xedge=False, start_at_yedge=False,
-                 plot_args=None):
+    def __init__(self, field_x, field_y, factor = 16,
+                 density = 1, arrowsize = 1, arrowstyle = None,
+                 color = None, normalize = False):
         """
-        annotate_streamlines(field_x, field_y, factor=6.0, nx=16, ny=16,
-                             xstart=(0,1), ystart=(0,1), nsample=256,
-                             start_at_xedge=False, start_at_yedge=False,
-                             plot_args=None):
+        annotate_streamlines(field_x, field_y, factor = 16, density = 1,
+                             arrowsize = 1, arrowstyle = None,
+                             color = None, normalize = False):
 
         Add streamlines to any plot, using the *field_x* and *field_y*
-        from the associated data, using *nx* and *ny* starting points
-        that are bounded by *xstart* and *ystart*.  To begin
-        streamlines from the left edge of the plot, set
-        *start_at_xedge* to True; for the bottom edge, use
-        *start_at_yedge*.  A line with the qmean vector magnitude will
-        cover 1.0/*factor* of the image.
+        from the associated data, skipping every *factor* datapoints like
+        'quiver'. *density* is the index of the amount of the streamlines.
         """
         PlotCallback.__init__(self)
         self.field_x = field_x
         self.field_y = field_y
-        self.xstart = xstart
-        self.ystart = ystart
-        self.nsample = nsample
+        self.bv_x = self.bv_y = 0
         self.factor = factor
-        if start_at_xedge:
-            self.data_size = (1,ny)
-        elif start_at_yedge:
-            self.data_size = (nx,1)
-        else:
-            self.data_size = (nx,ny)
-        if plot_args is None: plot_args = {'color':'k', 'linestyle':'-'}
-        self.plot_args = plot_args
+        self.dens = density
+        self.arrowsize = arrowsize
+        if arrowstyle is None : arrowstyle='-|>'
+        self.arrowstyle = arrowstyle
+        if color is None : color = "#000000"
+        self.color = color
+        self.normalize = normalize
         
     def __call__(self, plot):
         x0, x1 = plot.xlim
@@ -404,43 +394,31 @@ class StreamlineCallback(PlotCallback):
         xx0, xx1 = plot._axes.get_xlim()
         yy0, yy1 = plot._axes.get_ylim()
         plot._axes.hold(True)
-        nx = plot.image._A.shape[0]
-        ny = plot.image._A.shape[1]
+        nx = plot.image._A.shape[0] / self.factor
+        ny = plot.image._A.shape[1] / self.factor
         pixX = _MPL.Pixelize(plot.data['px'],
                              plot.data['py'],
                              plot.data['pdx'],
                              plot.data['pdy'],
-                             plot.data[self.field_x],
+                             plot.data[self.field_x] - self.bv_x,
                              int(nx), int(ny),
-                           (x0, x1, y0, y1),)
+                           (x0, x1, y0, y1),).transpose()
         pixY = _MPL.Pixelize(plot.data['px'],
                              plot.data['py'],
                              plot.data['pdx'],
                              plot.data['pdy'],
-                             plot.data[self.field_y],
+                             plot.data[self.field_y] - self.bv_y,
                              int(nx), int(ny),
-                           (x0, x1, y0, y1),)
-        r0 = np.mgrid[self.xstart[0]*nx:self.xstart[1]*nx:self.data_size[0]*1j,
-                      self.ystart[0]*ny:self.ystart[1]*ny:self.data_size[1]*1j]
-        lines = np.zeros((self.nsample, 2, self.data_size[0], self.data_size[1]))
-        lines[0,:,:,:] = r0
-        mag = np.sqrt(pixX**2 + pixY**2)
-        scale = np.sqrt(nx*ny) / (self.factor * mag.mean())
-        dt = 1.0 / (self.nsample-1)
-        for i in range(1,self.nsample):
-            xt = lines[i-1,0,:,:]
-            yt = lines[i-1,1,:,:]
-            ix = np.maximum(np.minimum((xt).astype('int'), nx-1), 0)
-            iy = np.maximum(np.minimum((yt).astype('int'), ny-1), 0)
-            lines[i,0,:,:] = xt + dt * pixX[ix,iy] * scale
-            lines[i,1,:,:] = yt + dt * pixY[ix,iy] * scale
-        # scale into data units
-        lines[:,0,:,:] = lines[:,0,:,:] * (xx1 - xx0) / nx + xx0
-        lines[:,1,:,:] = lines[:,1,:,:] * (yy1 - yy0) / ny + yy0
-        for i in range(self.data_size[0]):
-            for j in range(self.data_size[1]):
-                plot._axes.plot(lines[:,0,i,j], lines[:,1,i,j],
-                                **self.plot_args)
+                           (x0, x1, y0, y1),).transpose()
+        X,Y = (na.linspace(xx0,xx1,nx,endpoint=True),
+                          na.linspace(yy0,yy1,ny,endpoint=True))
+        if self.normalize:
+            nn = na.sqrt(pixX**2 + pixY**2)
+            pixX /= nn
+            pixY /= nn
+        plot._axes.streamplot(X,Y, pixX, pixY, density=self.dens,
+                              arrowsize=self.arrowsize, arrowstyle=self.arrowstyle,
+                              color=self.color, norm=self.normalize)
         plot._axes.set_xlim(xx0,xx1)
         plot._axes.set_ylim(yy0,yy1)
         plot._axes.hold(False)
@@ -655,8 +633,8 @@ class CuttingQuiverCallback(PlotCallback):
                                plot.data[self.field_y],
                                int(nx), int(ny),
                                (x0, x1, y0, y1),).transpose()
-        X,Y = np.meshgrid(np.linspace(xx0,xx1,nx,endpoint=True),
-                          np.linspace(yy0,yy1,ny,endpoint=True))
+        X = np.mgrid[0:plot.image._A.shape[0]-1:nx*1j]# + 0.5*factor
+        Y = np.mgrid[0:plot.image._A.shape[1]-1:ny*1j]# + 0.5*factor
         plot._axes.quiver(X,Y, pixX, pixY)
         plot._axes.set_xlim(xx0,xx1)
         plot._axes.set_ylim(yy0,yy1)
@@ -1124,3 +1102,152 @@ class TitleCallback(PlotCallback):
     def __call__(self,plot):
         plot._axes.set_title(self.title)
 
+
+class FlashRayDataCallback(PlotCallback):
+    _type_name = "flash_ray_data"
+    def __init__(self, cmap_name='bone', sample=None):
+        """ 
+        annotate_flash_ray_data(cmap_name='bone', sample=None)
+
+        Adds ray trace data to the plot.  *cmap_name* is the name of the color map 
+        ('bone', 'jet', 'hot', etc).  *sample* dictates the amount of down sampling 
+        to do to prevent all of the rays from being  plotted.  This may be None 
+        (plot all rays, default), an integer (step size), or a slice object.
+        """
+        self.cmap_name = cmap_name
+        self.sample = sample if isinstance(sample, slice) else slice(None, None, sample)
+
+    def __call__(self, plot):
+        ray_data = plot.data.pf._handle["RayData"][:]
+        idx = ray_data[:,0].argsort(kind="mergesort")
+        ray_data = ray_data[idx]
+
+        tags = ray_data[:,0]
+        coords = ray_data[:,1:3]
+        power = ray_data[:,4]
+        power /= power.max()
+        cx, cy = self.convert_to_plot(plot, coords.T)
+        coords[:,0], coords[:,1] = cx, cy
+        splitidx = np.argwhere(0 < (tags[1:] - tags[:-1])) + 1
+        coords = np.split(coords, splitidx.flat)[self.sample]
+        power = np.split(power, splitidx.flat)[self.sample]
+        cmap = matplotlib.cm.get_cmap(self.cmap_name)
+
+        plot._axes.hold(True)
+        colors = [cmap(p.max()) for p in power]
+        lc = matplotlib.collections.LineCollection(coords, colors=colors)
+        plot._axes.add_collection(lc)
+        plot._axes.hold(False)
+
+
+class TimestampCallback(PlotCallback):
+    _type_name = "timestamp"
+    _time_conv = {
+          'as': 1e-18,
+          'attosec': 1e-18,
+          'attosecond': 1e-18,
+          'attoseconds': 1e-18,
+          'fs': 1e-15,
+          'femtosec': 1e-15,
+          'femtosecond': 1e-15,
+          'femtoseconds': 1e-15,
+          'ps': 1e-12,
+          'picosec': 1e-12,
+          'picosecond': 1e-12,
+          'picoseconds': 1e-12,
+          'ns': 1e-9,
+          'nanosec': 1e-9,
+          'nanosecond':1e-9,
+          'nanoseconds' : 1e-9,
+          'us': 1e-6,
+          'microsec': 1e-6,
+          'microsecond': 1e-6,
+          'microseconds': 1e-6,
+          'ms': 1e-3,
+          'millisec': 1e-3,
+          'millisecond': 1e-3,
+          'milliseconds': 1e-3,
+          's': 1.0,
+          'sec': 1.0,
+          'second':1.0,
+          'seconds': 1.0,
+          'm': 60.0,
+          'min': 60.0,
+          'minute': 60.0,
+          'minutes': 60.0,
+          'h': 3600.0,
+          'hour': 3600.0,
+          'hours': 3600.0,
+          'd': 86400.0,
+          'day': 86400.0,
+          'days': 86400.0,
+          'y': 86400.0*365.25,
+          'year': 86400.0*365.25,
+          'years': 86400.0*365.25,
+          'ev': 1e-9 * 7.6e-8 / 6.03,
+          'kev': 1e-12 * 7.6e-8 / 6.03,
+          'mev': 1e-15 * 7.6e-8 / 6.03,
+          }
+
+    def __init__(self, x, y, units=None, format="{time:.3G} {units}", **kwargs):
+        """ 
+        annotate_timestamp(x, y, units=None, format="{time:.3G} {units}", **kwargs)
+
+        Adds the current time to the plot at point given by *x* and *y*.  If *units* 
+        is given ('s', 'ms', 'ns', etc), it will covert the time to this basis.  If 
+        *units* is None, it will attempt to figure out the correct value by which to 
+        scale.  The *format* keyword is a template string that will be evaluated and 
+        displayed on the plot.  All other *kwargs* will be passed to the text() 
+        method on the plot axes.  See matplotlib's text() functions for more 
+        information.
+        """
+        self.x = x
+        self.y = y
+        self.format = format
+        self.units = units
+        self.kwargs = {'color': 'w'}
+        self.kwargs.update(kwargs)
+
+    def __call__(self, plot):
+        if self.units is None:
+            t = plot.data.pf.current_time
+            scale_keys = ['as', 'fs', 'ps', 'ns', 'us', 'ms', 's']
+            self.units = 's'
+            for k in scale_keys:
+                if t < self._time_conv[k]:
+                    break
+                self.units = k
+        t = plot.data.pf.current_time / self._time_conv[self.units.lower()]
+        if self.units == 'us':
+            self.units = '$\\mu s$'
+        s = self.format.format(time=t, units=self.units)
+        plot._axes.hold(True)
+        plot._axes.text(self.x, self.y, s, **self.kwargs)
+        plot._axes.hold(False)
+
+
+class MaterialBoundaryCallback(ContourCallback):
+    _type_name = "material_boundary"
+    def __init__(self, field='targ', ncont=1, factor=4, clim=(0.9, 1.0), **kwargs):
+        """ 
+        annotate_material_boundary(self, field='targ', ncont=1, factor=4, 
+                                   clim=(0.9, 1.0), **kwargs):
+
+        Add the limiting contours of *field* to the plot.  Nominally, *field* is 
+        the target material but may be any other field present in the hierarchy.
+        The number of contours generated is given by *ncount*, *factor* governs 
+        the number of points used in the interpolation, and *clim* gives the 
+        (upper, lower) limits for contouring.  For this to truly be the boundary
+        *clim* should be close to the edge.  For example the default is (0.9, 1.0)
+        for 'targ' which is defined on the range [0.0, 1.0].  All other *kwargs* 
+        will be passed to the contour() method on the plot axes.  See matplotlib
+        for more information.
+        """
+        plot_args = {'colors': 'w'}
+        plot_args.update(kwargs)
+        super(MaterialBoundaryCallback, self).__init__(field=field, ncont=ncont, 
+                                                       factor=factor, clim=clim,
+                                                       plot_args=plot_args)
+
+    def __call__(self, plot):
+        super(MaterialBoundaryCallback, self).__call__(plot)

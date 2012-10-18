@@ -587,8 +587,7 @@ class HaloProfiler(ParallelAnalysisInterface):
             try:
                 profile = BinnedProfile1D(sphere, self.n_profile_bins, "RadiusMpc",
                                                 r_min, halo['r_max'],
-                                                log_space=True, lazy_reader=True,
-                                                end_collect=True)
+                                                log_space=True, end_collect=True)
             except EmptyProfileData:
                 mylog.error("Caught EmptyProfileData exception, returning None for this halo.")
                 return None
@@ -606,6 +605,7 @@ class HaloProfiler(ParallelAnalysisInterface):
 
         if newProfile:
             mylog.info("Writing halo %d" % halo['id'])
+            if os.path.exists(filename): os.remove(filename)
             if filename.endswith('.h5'):
                 profile.write_out_h5(filename)
             else:
@@ -674,15 +674,14 @@ class HaloProfiler(ParallelAnalysisInterface):
                 elif self.velocity_center[1] == 'sphere':
                     mylog.info('Calculating sphere bulk velocity.')
                     sphere.set_field_parameter('bulk_velocity',
-                                               sphere.quantities['BulkVelocity'](lazy_reader=True,
-                                                                                 preload=False))
+                                               sphere.quantities['BulkVelocity']()
                 else:
                     mylog.error("Invalid parameter: velocity_center.")
                     return None
             elif self.velocity_center[0] == 'max':
                 mylog.info('Setting bulk velocity with value at max %s.' % self.velocity_center[1])
-                max_val, maxi, mx, my, mz, mg = sphere.quantities['MaxLocation'](self.velocity_center[1],
-                                                                                 lazy_reader=True)
+                max_val, maxi, mx, my, mz, mg = sphere.quantities['MaxLocation'](self.velocity_center[1])
+                                                                                 
                 max_grid = self.pf.h.grids[mg]
                 max_cell = np.unravel_index(maxi, max_grid.ActiveDimensions)
                 sphere.set_field_parameter('bulk_velocity', [max_grid['x-velocity'][max_cell],
@@ -717,7 +716,9 @@ class HaloProfiler(ParallelAnalysisInterface):
             Default=True.
         njobs : int
             The number of jobs over which to split the projections.  Set
-            to -1 so that each halo is done by a single processor.
+            to -1 so that each halo is done by a single processor.  Halo 
+            projections do not currently work in parallel, so this must 
+            be set to -1.
             Default: -1.
         dynamic : bool
             If True, distribute halos using a task queue.  If False,
@@ -731,6 +732,12 @@ class HaloProfiler(ParallelAnalysisInterface):
 
         """
 
+        # Halo projections cannot run in parallel because they are done by 
+        # giving a data source to the projection object.
+        if njobs > 0:
+            mylog.warn("Halo projections cannot use more than one processor per halo, setting njobs to -1.")
+            njobs = -1
+        
         # Get list of halos for projecting.
         if halo_list == 'filtered':
             halo_projection_list = self.filtered_halos
@@ -804,7 +811,7 @@ class HaloProfiler(ParallelAnalysisInterface):
                 y_axis = coords[1]
 
                 for hp in self.projection_fields:
-                    projections.append(self.pf.h.proj(w, hp['field'],
+                    projections.append(self.pf.h.proj(hp['field'], w,
                                                       weight_field=hp['weight_field'],
                                                       source=region, center=halo['center'],
                                                       serialize=False))

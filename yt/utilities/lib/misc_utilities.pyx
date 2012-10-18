@@ -26,6 +26,7 @@ License:
 import numpy as np
 cimport numpy as np
 cimport cython
+cimport libc.math as math
 
 cdef extern from "stdlib.h":
     # NOTE that size_t might not be int
@@ -145,6 +146,67 @@ def get_color_bounds(np.ndarray[np.float64_t, ndim=1] px,
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
+def kdtree_get_choices(np.ndarray[np.float64_t, ndim=3] data,
+                       np.ndarray[np.float64_t, ndim=1] l_corner,
+                       np.ndarray[np.float64_t, ndim=1] r_corner):
+    cdef int i, j, k, dim, n_unique, best_dim, n_best, n_grids, addit, my_split
+    n_grids = data.shape[0]
+    cdef np.float64_t **uniquedims, *uniques, split
+    uniquedims = <np.float64_t **> alloca(3 * sizeof(np.float64_t*))
+    for i in range(3):
+        uniquedims[i] = <np.float64_t *> \
+                alloca(2*n_grids * sizeof(np.float64_t))
+    my_max = 0
+    best_dim = -1
+    for dim in range(3):
+        n_unique = 0
+        uniques = uniquedims[dim]
+        for i in range(n_grids):
+            # Check for disqualification
+            for j in range(2):
+                #print "Checking against", i,j,dim,data[i,j,dim]
+                if not (l_corner[dim] < data[i, j, dim] and
+                        data[i, j, dim] < r_corner[dim]):
+                    #print "Skipping ", data[i,j,dim]
+                    continue
+                skipit = 0
+                # Add our left ...
+                for k in range(n_unique):
+                    if uniques[k] == data[i, j, dim]:
+                        skipit = 1
+                        #print "Identified", uniques[k], data[i,j,dim], n_unique
+                        break
+                if skipit == 0:
+                    uniques[n_unique] = data[i, j, dim]
+                    n_unique += 1
+        if n_unique > my_max:
+            best_dim = dim
+            my_max = n_unique
+            my_split = (n_unique-1)/2
+    # I recognize how lame this is.
+    cdef np.ndarray[np.float64_t, ndim=1] tarr = np.empty(my_max, dtype='float64')
+    for i in range(my_max):
+        #print "Setting tarr: ", i, uniquedims[best_dim][i]
+        tarr[i] = uniquedims[best_dim][i]
+    tarr.sort()
+    split = tarr[my_split]
+    cdef np.ndarray[np.uint8_t, ndim=1] less_ids = np.empty(n_grids, dtype='uint8')
+    cdef np.ndarray[np.uint8_t, ndim=1] greater_ids = np.empty(n_grids, dtype='uint8')
+    for i in range(n_grids):
+        if data[i, 0, best_dim] < split:
+            less_ids[i] = 1
+        else:
+            less_ids[i] = 0
+        if data[i, 1, best_dim] > split:
+            greater_ids[i] = 1
+        else:
+            greater_ids[i] = 0
+    # Return out unique values
+    return best_dim, split, less_ids.view("bool"), greater_ids.view("bool")
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
 def get_box_grids_level(np.ndarray[np.float64_t, ndim=1] left_edge,
                         np.ndarray[np.float64_t, ndim=1] right_edge,
                         int level,
@@ -230,9 +292,58 @@ def find_values_at_point(np.ndarray[np.float64_t, ndim=1] point,
         return rv
     raise KeyError
 
+@cython.cdivision(True)
+def pixelize_cylinder(np.ndarray[np.float64_t, ndim=1] radius,
+                      np.ndarray[np.float64_t, ndim=1] dradius,
+                      np.ndarray[np.float64_t, ndim=1] theta,
+                      np.ndarray[np.float64_t, ndim=1] dtheta,
+                      int buff_size,
+                      np.ndarray[np.float64_t, ndim=1] field,
+                      np.float64_t rmax=-1.0) :
+
+    cdef np.ndarray[np.float64_t, ndim=2] img
+    cdef np.float64_t x, y, dx, dy, r0, theta0
+    cdef np.float64_t r_i, theta_i, dr_i, dtheta_i, dthetamin
+    cdef int i, pi, pj
+    
+    if rmax < 0.0 :
+        imax = radius.argmax()
+        rmax = radius[imax] + dradius[imax]
+          
+    img = np.zeros((buff_size, buff_size))
+    extents = [-rmax, rmax] * 2
+    dx = (extents[1] - extents[0]) / img.shape[0]
+    dy = (extents[3] - extents[2]) / img.shape[1]
+      
+    dthetamin = dx / rmax
+      
+    for i in range(radius.shape[0]):
+
+        r0 = radius[i]
+        theta0 = theta[i]
+        dr_i = dradius[i]
+        dtheta_i = dtheta[i]
+
+        theta_i = theta0 - dtheta_i
+        while theta_i < theta0 + dtheta_i:
+            r_i = r0 - dr_i
+            while r_i < r0 + dr_i:
+                if rmax <= r_i:
+                    r_i += 0.5*dx 
+                    continue
+                x = r_i * math.cos(theta_i)
+                y = r_i * math.sin(theta_i)
+                pi = <int>((x + rmax)/dx)
+                pj = <int>((y + rmax)/dy)
+                img[pi, pj] = field[i]
+                r_i += 0.5*dx 
+            theta_i += dthetamin
+
+    return img
+
+@cython.cdivision(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
-@cython.cdivision(True)
 def obtain_rvec(data):
     # This is just to let the pointers exist and whatnot.  We can't cdef them
     # inside conditionals.
@@ -276,61 +387,44 @@ def obtain_rvec(data):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-def kdtree_get_choices(np.ndarray[np.float64_t, ndim=3] data,
-                       np.ndarray[np.float64_t, ndim=1] l_corner,
-                       np.ndarray[np.float64_t, ndim=1] r_corner):
-    cdef int i, j, k, dim, n_unique, best_dim, n_best, n_grids, addit, my_split
-    n_grids = data.shape[0]
-    cdef np.float64_t **uniquedims, *uniques, split
-    uniquedims = <np.float64_t **> alloca(3 * sizeof(np.float64_t*))
-    for i in range(3):
-        uniquedims[i] = <np.float64_t *> \
-                alloca(2*n_grids * sizeof(np.float64_t))
-    my_max = 0
-    best_dim = -1
-    for dim in range(3):
-        n_unique = 0
-        uniques = uniquedims[dim]
-        for i in range(n_grids):
-            # Check for disqualification
-            for j in range(2):
-                #print "Checking against", i,j,dim,data[i,j,dim]
-                if not (l_corner[dim] < data[i, j, dim] and
-                        data[i, j, dim] < r_corner[dim]):
-                    #print "Skipping ", data[i,j,dim]
-                    continue
-                skipit = 0
-                # Add our left ...
-                for k in range(n_unique):
-                    if uniques[k] == data[i, j, dim]:
-                        skipit = 1
-                        #print "Identified", uniques[k], data[i,j,dim], n_unique
-                        break
-                if skipit == 0:
-                    uniques[n_unique] = data[i, j, dim]
-                    n_unique += 1
-        if n_unique > my_max:
-            best_dim = dim
-            my_max = n_unique
-            my_split = (n_unique-1)/2
-    # I recognize how lame this is.
-    cdef np.ndarray[np.float64_t, ndim=1] tarr = np.empty(my_max, dtype='float64')
-    for i in range(my_max):
-        #print "Setting tarr: ", i, uniquedims[best_dim][i]
-        tarr[i] = uniquedims[best_dim][i]
-    tarr.sort()
-    split = tarr[my_split]
-    cdef np.ndarray[np.uint8_t, ndim=1] less_ids = np.empty(n_grids, dtype='uint8')
-    cdef np.ndarray[np.uint8_t, ndim=1] greater_ids = np.empty(n_grids, dtype='uint8')
-    for i in range(n_grids):
-        if data[i, 0, best_dim] < split:
-            less_ids[i] = 1
-        else:
-            less_ids[i] = 0
-        if data[i, 1, best_dim] > split:
-            greater_ids[i] = 1
-        else:
-            greater_ids[i] = 0
-    # Return out unique values
-    return best_dim, split, less_ids.view("bool"), greater_ids.view("bool")
-
+def obtain_rv_vec(data):
+    # This is just to let the pointers exist and whatnot.  We can't cdef them
+    # inside conditionals.
+    cdef np.ndarray[np.float64_t, ndim=1] vxf
+    cdef np.ndarray[np.float64_t, ndim=1] vyf
+    cdef np.ndarray[np.float64_t, ndim=1] vzf
+    cdef np.ndarray[np.float64_t, ndim=2] rvf
+    cdef np.ndarray[np.float64_t, ndim=3] vxg
+    cdef np.ndarray[np.float64_t, ndim=3] vyg
+    cdef np.ndarray[np.float64_t, ndim=3] vzg
+    cdef np.ndarray[np.float64_t, ndim=4] rvg
+    cdef np.float64_t bv[3]
+    cdef int i, j, k
+    bulk_velocity = data.get_field_parameter("bulk_velocity")
+    if bulk_velocity == None:
+        bulk_velocity = np.zeros(3)
+    bv[0] = bulk_velocity[0]; bv[1] = bulk_velocity[1]; bv[2] = bulk_velocity[2]
+    if len(data['x-velocity'].shape) == 1:
+        # One dimensional data
+        vxf = data['x-velocity'].astype("float64")
+        vyf = data['y-velocity'].astype("float64")
+        vzf = data['z-velocity'].astype("float64")
+        rvf = np.empty((3, vxf.shape[0]), 'float64')
+        for i in range(vxf.shape[0]):
+            rvf[0, i] = vxf[i] - bv[0]
+            rvf[1, i] = vyf[i] - bv[1]
+            rvf[2, i] = vzf[i] - bv[2]
+        return rvf
+    else:
+        # Three dimensional data
+        vxg = data['x-velocity'].astype("float64")
+        vyg = data['y-velocity'].astype("float64")
+        vzg = data['z-velocity'].astype("float64")
+        rvg = np.empty((3, vxg.shape[0], vxg.shape[1], vxg.shape[2]), 'float64')
+        for i in range(vxg.shape[0]):
+            for j in range(vxg.shape[1]):
+                for k in range(vxg.shape[2]):
+                    rvg[0,i,j,k] = vxg[i,j,k] - bv[0]
+                    rvg[1,i,j,k] = vyg[i,j,k] - bv[1]
+                    rvg[2,i,j,k] = vzg[i,j,k] - bv[2]
+        return rvg
