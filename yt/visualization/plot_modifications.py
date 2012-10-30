@@ -375,12 +375,10 @@ class GridBoundaryCallback(PlotCallback):
 class StreamlineCallback(PlotCallback):
     _type_name = "streamlines"
     def __init__(self, field_x, field_y, factor = 16,
-                 density = 1, arrowsize = 1, arrowstyle = None,
-                 color = None, normalize = False):
+                 density = 1, plot_args=None):
         """
-        annotate_streamlines(field_x, field_y, factor = 16, density = 1,
-                             arrowsize = 1, arrowstyle = None,
-                             color = None, normalize = False):
+        annotate_streamlines(field_x, field_y, factor = 16,
+                             density = 1, plot_args=None):
 
         Add streamlines to any plot, using the *field_x* and *field_y*
         from the associated data, skipping every *factor* datapoints like
@@ -392,12 +390,8 @@ class StreamlineCallback(PlotCallback):
         self.bv_x = self.bv_y = 0
         self.factor = factor
         self.dens = density
-        self.arrowsize = arrowsize
-        if arrowstyle is None : arrowstyle='-|>'
-        self.arrowstyle = arrowstyle
-        if color is None : color = "#000000"
-        self.color = color
-        self.normalize = normalize
+        if plot_args is None: plot_args = {}
+        self.plot_args = plot_args
         
     def __call__(self, plot):
         x0, x1 = plot.xlim
@@ -421,15 +415,10 @@ class StreamlineCallback(PlotCallback):
                              plot.data[self.field_y] - self.bv_y,
                              int(nx), int(ny),
                            (x0, x1, y0, y1),).transpose()
-        X,Y = (na.linspace(xx0,xx1,nx,endpoint=True),
-                          na.linspace(yy0,yy1,ny,endpoint=True))
-        if self.normalize:
-            nn = na.sqrt(pixX**2 + pixY**2)
-            pixX /= nn
-            pixY /= nn
-        plot._axes.streamplot(X,Y, pixX, pixY, density=self.dens,
-                              arrowsize=self.arrowsize, arrowstyle=self.arrowstyle,
-                              color=self.color, norm=self.normalize)
+        X,Y = (np.linspace(xx0,xx1,nx,endpoint=True),
+                          np.linspace(yy0,yy1,ny,endpoint=True))
+        plot._axes.streamplot(X,Y, pixX, pixY, density = self.dens,
+                              **self.plot_args)
         plot._axes.set_xlim(xx0,xx1)
         plot._axes.set_ylim(yy0,yy1)
         plot._axes.hold(False)
@@ -743,13 +732,18 @@ class MarkerAnnotateCallback(PlotCallback):
         self.plot_args = plot_args
 
     def __call__(self, plot):
-        if len(self.pos) == 3:
+        xx0, xx1 = plot._axes.get_xlim()
+        yy0, yy1 = plot._axes.get_ylim()
+        if np.array(self.pos).shape == (3,):
             pos = (self.pos[x_dict[plot.data.axis]],
                    self.pos[y_dict[plot.data.axis]])
-        else: pos = self.pos
+        elif np.array(self.pos).shape == (2,):
+            pos = self.pos
         x,y = self.convert_to_plot(plot, pos)
         plot._axes.hold(True)
-        plot._axes.plot((x,),(y,),self.marker, **self.plot_args)
+        plot._axes.scatter(x,y, marker = self.marker, **self.plot_args)
+        plot._axes.set_xlim(xx0,xx1)
+        plot._axes.set_ylim(yy0,yy1)
         plot._axes.hold(False)
 
 class SphereCallback(PlotCallback):
