@@ -68,6 +68,21 @@ class YTNoDataInObjectError(YTException):
             s += "  It may lie on a grid face.  Try offsetting slightly."
         return s
 
+class YTFieldNotFound(YTException):
+    def __init__(self, fname, pf):
+        self.fname = fname
+        self.pf = pf
+
+    def __str__(self):
+        return "Could not find field '%s' in %s." % (self.fname, self.pf)
+
+class YTFieldTypeNotFound(YTException):
+    def __init__(self, fname):
+        self.fname = fname
+
+    def __str__(self):
+        return "Could not find field '%s'." % (self.fname)
+
 class YTSimulationNotIdentified(YTException):
     def __init__(self, sim_type):
         YTException.__init__(self)
@@ -134,6 +149,17 @@ class YTNotDeclaredInsideNotebook(YTException):
         return "You have not declared yourself to be inside the IPython" + \
                "Notebook.  Do so with this command:\n\n" + \
                "ytcfg['yt','ipython_notebook'] = 'True'"
+
+class YTGeometryNotSupported(YTException):
+    def __init__(self, geom):
+        self.geom = geom
+
+    def __str__(self):
+        return "We don't currently support %s geometry" % self.geom
+
+class YTCoordinateNotImplemented(YTException):
+    def __str__(self):
+        return "This coordinate is not implemented for this geometry type."
 
 class YTUnitNotRecognized(YTException):
     def __init__(self, unit):

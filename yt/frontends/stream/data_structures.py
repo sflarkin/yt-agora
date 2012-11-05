@@ -31,8 +31,8 @@ from yt.funcs import *
 from yt.config import ytcfg
 from yt.data_objects.grid_patch import \
     AMRGridPatch
-from yt.data_objects.hierarchy import \
-    AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+    GridGeometryHandler
 from yt.data_objects.static_output import \
     StaticOutput
 from yt.utilities.logger import ytLogger as mylog
@@ -118,7 +118,7 @@ class StreamHandler(object):
     def get_fields(self):
         return self.fields.all_fields
 
-class StreamHierarchy(AMRHierarchy):
+class StreamHierarchy(GridGeometryHandler):
 
     grid = StreamGrid
 
@@ -129,31 +129,10 @@ class StreamHierarchy(AMRHierarchy):
         self.stream_handler = pf.stream_handler
         self.float_type = "float64"
         self.directory = os.getcwd()
-        AMRHierarchy.__init__(self, pf, data_style)
-
-    def _initialize_data_storage(self):
-        pass
+        GridGeometryHandler.__init__(self, pf, data_style)
 
     def _count_grids(self):
         self.num_grids = self.stream_handler.num_grids
-
-    def _setup_unknown_fields(self):
-        for field in self.field_list:
-            if field in self.parameter_file.field_info: continue
-            mylog.info("Adding %s to list of fields", field)
-            cf = None
-            if self.parameter_file.has_key(field):
-                def external_wrapper(f):
-                    def _convert_function(data):
-                        return data.convert(f)
-                    return _convert_function
-                cf = external_wrapper(field)
-            # Note that we call add_field on the field_info directly.  This
-            # will allow the same field detection mechanism to work for 1D, 2D
-            # and 3D fields.
-            self.pf.field_info.add_field(
-                    field, lambda a, b: None,
-                    convert_function=cf, take_log=False)
 
     def _parse_hierarchy(self):
         self.grid_dimensions = self.stream_handler.dimensions
@@ -208,33 +187,15 @@ class StreamHierarchy(AMRHierarchy):
                 child._parent_id = i
 
     def _initialize_grid_arrays(self):
-        AMRHierarchy._initialize_grid_arrays(self)
+        GridGeometryHandler._initialize_grid_arrays(self)
         self.grid_procs = np.zeros((self.num_grids,1),'int32')
-
-    def save_data(self, *args, **kwargs):
-        pass
-
-    def _detect_fields(self):
-        self.field_list = list(set(self.stream_handler.get_fields()))
-
-    def _setup_derived_fields(self):
-        self.derived_field_list = []
-        for field in self.parameter_file.field_info:
-            try:
-                fd = self.parameter_file.field_info[field].get_dependencies(
-                            pf = self.parameter_file)
-            except:
-                continue
-            available = np.all([f in self.field_list for f in fd.requested])
-            if available: self.derived_field_list.append(field)
-        for field in self.field_list:
-            if field not in self.derived_field_list:
-                self.derived_field_list.append(field)
 
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
-        self.object_types.sort()
+        GridGeometryHandler._setup_classes(self, dd)
+
+    def _detect_fields(self):
+        self.field_list = list(set(self.stream_handler.get_fields()))
 
     def _populate_grid_objects(self):
         for g in self.grids:
@@ -253,7 +214,7 @@ class StreamStaticOutput(StaticOutput):
     _fieldinfo_known = KnownStreamFields
     _data_style = 'stream'
 
-    def __init__(self, stream_handler):
+    def __init__(self, stream_handler, storage_filename = None):
         #if parameter_override is None: parameter_override = {}
         #self._parameter_override = parameter_override
         #if conversion_override is None: conversion_override = {}
@@ -261,6 +222,7 @@ class StreamStaticOutput(StaticOutput):
 
         self.stream_handler = stream_handler
         StaticOutput.__init__(self, "InMemoryParameterFile", self._data_style)
+        self.storage_filename = storage_filename
 
         self.units = {}
         self.time_units = {}
