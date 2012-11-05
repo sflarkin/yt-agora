@@ -518,7 +518,8 @@ class PWViewer(PlotWindow):
         self._colormaps = defaultdict(lambda: 'algae')
         self.setup_callbacks()
         for field in self._frb.data.keys():
-            if self.pf.field_info[field].take_log:
+            finfo = self.data_source._get_field_info(*field)
+            if finfo.take_log:
                 self._field_transform[field] = log_transform
             else:
                 self._field_transform[field] = linear_transform
@@ -707,13 +708,15 @@ class PWViewer(PlotWindow):
     def get_field_units(self, field, strip_mathml = True):
         ds = self._frb.data_source
         pf = self.pf
+        field = self.data_source._determine_fields(field)[0]
+        finfo = self.data_source._get_field_info(*field)
         if ds._type_name in ("slice", "cutting"):
-            units = pf.field_info[field].get_units()
+            units = finfo.get_units()
         elif ds._type_name == "proj" and (ds.weight_field is not None or 
                                         ds.proj_style == "mip"):
-            units = pf.field_info[field].get_units()
+            units = finfo.get_units()
         elif ds._type_name == "proj":
-            units = pf.field_info[field].get_projected_units()
+            units = finfo.get_projected_units()
         else:
             units = ""
         if strip_mathml:
@@ -736,6 +739,62 @@ class PWViewerMPL(PWViewer):
             self._plot_type = kwargs.pop("plot_type")
         PWViewer.__init__(self, *args, **kwargs)
 
+    def _setup_origin(self):
+        origin = self.origin
+        axis_index = self.data_source.axis
+        if isinstance(origin, basestring):
+            origin = tuple(origin.split('-'))[:3]
+        if 1 == len(origin):
+            origin = ('lower', 'left') + origin
+        elif 2 == len(origin) and origin[0] in set(['left','right','center']):
+            o0map = {'left': 'lower', 'right': 'upper', 'center': 'center'}
+            origin = (o0map[origin[0]],) + origin
+        elif 2 == len(origin) and origin[0] in set(['lower','upper','center']):
+            origin = (origin[0], 'center', origin[-1])
+        assert origin[-1] in ['window', 'domain']
+
+        if origin[2] == 'window':
+            xllim, xrlim = self.xlim
+            yllim, yrlim = self.ylim
+        elif origin[2] == 'domain':
+            xllim = self.pf.domain_left_edge[x_dict[axis_index]]
+            xrlim = self.pf.domain_right_edge[x_dict[axis_index]]
+            yllim = self.pf.domain_left_edge[y_dict[axis_index]]
+            yrlim = self.pf.domain_right_edge[y_dict[axis_index]]
+        else:
+            mylog.warn("origin = {0}".format(origin))
+            msg = ('origin keyword "{0}" not recognized, must declare "domain" '
+                   'or "center" as the last term in origin.').format(self.origin)
+            raise RuntimeError(msg)
+
+        if origin[0] == 'lower':
+            yc = yllim
+        elif origin[0] == 'upper':
+            yc = yrlim
+        elif origin[0] == 'center':
+            yc = (yllim + yrlim)/2.0
+        else:
+            mylog.warn("origin = {0}".format(origin))
+            msg = ('origin keyword "{0}" not recognized, must declare "lower" '
+                   '"upper" or "center" as the first term in origin.')
+            msg = msg.format(self.origin)
+            raise RuntimeError(msg)
+
+        if origin[1] == 'left':
+            xc = xllim
+        elif origin[1] == 'right':
+            xc = xrlim
+        elif origin[1] == 'center':
+            xc = (xllim + xrlim)/2.0
+        else:
+            mylog.warn("origin = {0}".format(origin))
+            msg = ('origin keyword "{0}" not recognized, must declare "left" '
+                   '"right" or "center" as the second term in origin.')
+            msg = msg.format(self.origin)
+            raise RuntimeError(msg)
+
+        return xc, yc
+
     def _setup_plots(self):
         if self._current_field is not None:
             fields = [self._current_field]
@@ -746,20 +805,7 @@ class PWViewerMPL(PWViewer):
             md = self.get_metadata(f, strip_mathml = False, return_string = False)
             axis_index = self.data_source.axis
 
-            if self.origin == 'center-window':
-                xc = (self.xlim[0]+self.xlim[1])/2
-                yc = (self.ylim[0]+self.ylim[1])/2
-            elif self.origin == 'center-domain':
-                xc = (self.pf.domain_left_edge[x_dict[axis_index]]+
-                      self.pf.domain_right_edge[x_dict[axis_index]])/2
-                yc = (self.pf.domain_left_edge[y_dict[axis_index]]+
-                      self.pf.domain_right_edge[y_dict[axis_index]])/2
-            elif self.origin == 'left-domain':
-                xc = self.pf.domain_left_edge[x_dict[axis_index]]
-                yc = self.pf.domain_left_edge[y_dict[axis_index]]
-            else:
-                raise RuntimeError(
-                    'origin keyword: \"%(k)s\" not recognized' % {'k': self.origin})
+            xc, yc = self._setup_origin()
 
             extent = [self.xlim[i] - xc for i in (0,1)]
             extent.extend([self.ylim[i] - yc for i in (0,1)])
@@ -801,10 +847,11 @@ class PWViewerMPL(PWViewer):
             self.plots[f].axes.set_xlabel(labels[0])
             self.plots[f].axes.set_ylabel(labels[1])
 
-            field_name = self.data_source.pf.field_info[f].display_name
+            ftype, fname = f
+            field_name = self.data_source._get_field_info(ftype, fname).display_name
 
             if field_name is None:
-                field_name = r'$\rm{'+f+r'}$'
+                field_name = r'$\rm{'+fname+r'}$'
             elif field_name.find('$') == -1:
                 field_name = r'$\rm{'+field_name+r'}$'
             
@@ -812,9 +859,9 @@ class PWViewerMPL(PWViewer):
             try:
                 parser.parse(field_name)
             except ParseFatalException, err:
-                raise YTCannotParseFieldDisplayName(f,field_name,str(err))
+                raise YTCannotParseFieldDisplayName(fname,field_name,str(err))
 
-            if md['units'] == None or md['units'] == '':
+            if md['units'] is None or md['units'] == '':
                 label = field_name
             else:
                 try:
@@ -901,6 +948,8 @@ class PWViewerMPL(PWViewer):
         if 'Cutting' in self.data_source.__class__.__name__:
             type = 'OffAxisSlice'
         for k, v in self.plots.iteritems():
+            if isinstance(k, types.TupleType):
+                k = k[1]
             if axis:
                 n = "%s_%s_%s_%s" % (name, type, axis, k)
             else:
@@ -908,12 +957,12 @@ class PWViewerMPL(PWViewer):
                 n = "%s_%s_%s" % (name, type, k)
             if weight:
                 n += "_%s" % (weight)
-            names.append(v.save(n,mpl_kwargs))
+            names.append(v.save(n, mpl_kwargs))
         return names
 
     def _send_zmq(self):
         try:
-            # pre-IPython v0.14        
+            # pre-IPython v0.14
             from IPython.zmq.pylab.backend_inline import send_figure as display
         except ImportError:
             # IPython v0.14+ 
@@ -944,6 +993,14 @@ class PWViewerMPL(PWViewer):
             self._send_zmq()
         else:
             raise YTNotInsideNotebook
+
+    def show_or_save(self, name=None):
+        """Will attempt to show the plot in in an IPython notebook.  Failing that, the 
+        plot will be saved to disk."""
+        try:
+            self.show()
+        except YTNotInsideNotebook:
+            self.save(name=name)
 
 class SlicePlot(PWViewerMPL):
     _plot_type = 'Slice'
@@ -1000,12 +1057,32 @@ class SlicePlot(PWViewerMPL):
             Defaults to None, which automatically picks an appropriate unit.
             If axes_unit is '1', 'u', or 'unitary', it will not display the 
             units, and only show the axes name.
-        origin : string
-             The location of the origin of the plot coordinate system.
-             Currently, can be set to three options: 'left-domain', corresponding
-             to the bottom-left hand corner of the simulation domain, 'center-domain',
-             corresponding the center of the simulation domain, or 'center-window' for 
-             the center of the plot window.
+        origin : string or length 1, 2, or 3 sequence of strings
+             The location of the origin of the plot coordinate system.  This is 
+             represented by '-' separated string or a tuple of strings.  In the
+             first index the y-location is given by 'lower', 'upper', or 'center'.
+             The second index is the x-location, given as 'left', 'right', or 
+             'center'.  Finally, the whether the origin is applied in 'domain' space
+             or plot 'window' space is given. For example, both 'upper-right-domain'
+             and ['upper', 'right', 'domain'] both place the origin in the upper
+             right hand corner of domain space. If x or y are not given, a value is 
+             inffered.  For instance, 'left-domain' corresponds to the lower-left 
+             hand corner of the simulation domain, 'center-domain' corresponds to the 
+             center of the simulation domain, or 'center-window' for the center of 
+             the plot window.  Further examples:
+
+             ==================================     ============================
+             format                                 example                
+             ==================================     ============================
+             '{space}'                              'domain'
+             '{xloc}-{space}'                       'left-window'
+             '{yloc}-{space}'                       'upper-domain'
+             '{yloc}-{xloc}-{space}'                'lower-right-window'
+             ('{space}',)                           ('window',)
+             ('{xloc}', '{space}')                  ('right', 'domain')
+             ('{yloc}', '{space}')                  ('lower', 'window')
+             ('{yloc}', '{xloc}', '{space}')        ('lower', 'right', 'window')
+             ==================================     ============================
              
         Examples
         --------
@@ -1023,7 +1100,8 @@ class SlicePlot(PWViewerMPL):
         pf = self.pf = ts[0]
         axis = fix_axis(axis)
         (bounds, center) = GetBoundsAndCenter(axis, center, width, pf)
-        slc = pf.h.slice(axis, center[axis], fields=fields)
+        slc = pf.h.slice(axis, center[axis])
+        slc.get_data(fields)
         PWViewerMPL.__init__(self, slc, bounds, origin=origin)
         self.set_axes_unit(axes_unit)
 
@@ -1082,12 +1160,33 @@ class ProjectionPlot(PWViewerMPL):
             Defaults to None, which automatically picks an appropriate unit.
             If axes_unit is '1', 'u', or 'unitary', it will not display the 
             units, and only show the axes name.
-        origin : A string
-            The location of the origin of the plot coordinate system.
-            Currently, can be set to three options: 'left-domain', corresponding
-            to the bottom-left hand corner of the simulation domain, 'center-domain',
-            corresponding the center of the simulation domain, or 'center-window' for 
-            the center of the plot window.
+        origin : string or length 1, 2, or 3 sequence of strings
+             The location of the origin of the plot coordinate system.  This is 
+             represented by '-' separated string or a tuple of strings.  In the
+             first index the y-location is given by 'lower', 'upper', or 'center'.
+             The second index is the x-location, given as 'left', 'right', or 
+             'center'.  Finally, the whether the origin is applied in 'domain' space
+             or plot 'window' space is given. For example, both 'upper-right-domain'
+             and ['upper', 'right', 'domain'] both place the origin in the upper
+             right hand corner of domain space. If x or y are not given, a value is 
+             inffered.  For instance, 'left-domain' corresponds to the lower-left 
+             hand corner of the simulation domain, 'center-domain' corresponds to the 
+             center of the simulation domain, or 'center-window' for the center of 
+             the plot window.Further examples:
+
+             ==================================     ============================
+             format                                 example
+             ==================================     ============================ 
+             '{space}'                              'domain'
+             '{xloc}-{space}'                       'left-window'
+             '{yloc}-{space}'                       'upper-domain'
+             '{yloc}-{xloc}-{space}'                'lower-right-window'
+             ('{space}',)                           ('window',)
+             ('{xloc}', '{space}')                  ('right', 'domain')
+             ('{yloc}', '{space}')                  ('lower', 'window')
+             ('{yloc}', '{xloc}', '{space}')        ('lower', 'right', 'window')
+             ==================================     ============================
+             
         weight_field : string
             The name of the weighting field.  Set to None for no weight.
         max_level: int
@@ -1099,7 +1198,7 @@ class ProjectionPlot(PWViewerMPL):
         This is a very simple way of creating a projection plot.
         
         >>> pf = load('galaxy0030/galaxy0030')
-        >>> p = ProjectionPlot(pf,2,'Density','c',(20,'kpc'))
+        >>> p = ProjectionPlot(pf, 'z', 'Density', 'c', (20,'kpc'))
         >>> p.save('sliceplot')
         
         """
@@ -1108,7 +1207,7 @@ class ProjectionPlot(PWViewerMPL):
         pf = self.pf = ts[0]
         axis = fix_axis(axis)
         (bounds, center) = GetBoundsAndCenter(axis, center, width, pf)
-        proj = pf.h.proj(axis,fields,weight_field=weight_field,max_level=max_level,center=center)
+        proj = pf.h.proj(fields, axis, weight_field=weight_field, center=center)
         PWViewerMPL.__init__(self,proj,bounds,origin=origin)
         self.set_axes_unit(axes_unit)
 
@@ -1416,9 +1515,11 @@ class PWViewerExtJS(PWViewer):
 
     @invalidate_data
     def set_current_field(self, field):
+        field = self.data_source._determine_fields(field)[0]
         self._current_field = field
         self._frb[field]
-        if self.pf.field_info[field].take_log:
+        finfo = self.data_source._get_field_info(*field)
+        if finfo.take_log:
             self._field_transform[field] = log_transform
         else:
             self._field_transform[field] = linear_transform
@@ -1529,3 +1630,4 @@ class WindowPlotMPL(PlotMPL):
                                       norm = norm, vmin = self.zmin, 
                                       vmax = self.zmax, cmap = cmap)
         self.image.axes.ticklabel_format(scilimits=(-4,3))
+
