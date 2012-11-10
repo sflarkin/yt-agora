@@ -53,7 +53,7 @@ import yt.geometry.selection_routines
 def force_array(item, shape):
     try:
         sh = item.shape
-        return item
+        return item.copy()
     except AttributeError:
         if item:
             return np.ones(shape, dtype='bool')
@@ -666,7 +666,7 @@ class YTSelectionContainer3D(YTSelectionContainer):
         as the points in `this` data object with the given *indices*.
         """
         fp = self.field_parameters.copy()
-        return YTSelectedIndicesBase(self, indices, **fp)
+        return YTSelectedIndicesBase(self, indices, field_parameters = fp)
 
     def extract_isocontours(self, field, value, filename = None,
                             rescale = False, sample_values = None):
@@ -976,7 +976,7 @@ class YTSelectedIndicesBase(YTSelectionContainer3D):
         cen = kwargs.pop("center", None)
         if cen is None: cen = base_region.get_field_parameter("center")
         YTSelectionContainer3D.__init__(self, center=cen,
-                            fields=None, pf=base_region.pf, **kwargs)
+                            pf=base_region.pf, **kwargs)
         self._base_region = base_region # We don't weakly reference because
                                         # It is not cyclic
         if isinstance(indices, types.DictType):
@@ -1084,6 +1084,7 @@ class YTSelectedIndicesBase(YTSelectionContainer3D):
 
 
 class YTValueCutExtractionBase(YTSelectionContainer3D):
+    _type_name = "cut_region"
     """
     In-line extracted regions accept a base region and a set of field_cuts to
     determine which points in a grid should be included.
@@ -1091,7 +1092,7 @@ class YTValueCutExtractionBase(YTSelectionContainer3D):
     def __init__(self, base_region, field_cuts, **kwargs):
         cen = base_region.get_field_parameter("center")
         YTSelectionContainer3D.__init__(self, center=cen,
-                            fields=None, pf=base_region.pf, **kwargs)
+                            pf=base_region.pf, **kwargs)
         self._base_region = base_region # We don't weakly reference because
                                         # It is not cyclic
         self._field_cuts = ensure_list(field_cuts)[:]
