@@ -358,18 +358,18 @@ class GeometryHandler(ParallelAnalysisInterface):
         return fields_to_return, fields_to_generate
 
 
-    def _chunk(self, dobj, chunking_style, ngz = 0):
+    def _chunk(self, dobj, chunking_style, ngz = 0, **kwargs):
         # A chunk is either None or (grids, size)
         if dobj._current_chunk is None:
             self._identify_base_chunk(dobj)
         if ngz != 0 and chunking_style != "spatial":
             raise NotImplementedError
         if chunking_style == "all":
-            return self._chunk_all(dobj)
+            return self._chunk_all(dobj, **kwargs)
         elif chunking_style == "spatial":
-            return self._chunk_spatial(dobj, ngz)
+            return self._chunk_spatial(dobj, ngz, **kwargs)
         elif chunking_style == "io":
-            return self._chunk_io(dobj)
+            return self._chunk_io(dobj, **kwargs)
         else:
             raise NotImplementedError
 
@@ -447,3 +447,27 @@ class YTDataChunk(object):
             ind += c.size
         return ci
 
+    _tcoords = None
+    @property
+    def tcoords(self):
+        if self._tcoords is None:
+            self.dtcoords
+        return self._tcoords
+
+    _dtcoords = None
+    @property
+    def dtcoords(self):
+        if self._dtcoords is not None: return self._dtcoords
+        ct = np.empty(self.data_size, dtype='float64')
+        cdt = np.empty(self.data_size, dtype='float64')
+        self._tcoords = ct
+        self._dtcoords = cdt
+        if self.data_size == 0: return self._dtcoords
+        ind = 0
+        for obj in self.objs:
+            gdt, gt = obj.tcoords(self.dobj)
+            if gt.shape == 0: continue
+            ct[ind:ind+gt.size] = gt
+            cdt[ind:ind+gdt.size] = gdt
+            ind += gt.size
+        return cdt
