@@ -36,6 +36,7 @@ from yt.config import ytcfg
 from yt.mods import *
 from yt.data_objects.static_output import StaticOutput
 import cPickle
+import shelve
 
 from yt.utilities.logger import disable_stream_logging
 from yt.utilities.command_line import get_yt_version
@@ -48,6 +49,7 @@ _url_path = "http://yt-answer-tests.s3-website-us-east-1.amazonaws.com/%s_%s"
 
 class AnswerTesting(Plugin):
     name = "answer-testing"
+    _my_version = None
 
     def options(self, parser, env=os.environ):
         super(AnswerTesting, self).options(parser, env=env)
@@ -61,57 +63,82 @@ class AnswerTesting(Plugin):
             help="The name we'll call this set of tests")
         parser.add_option("--answer-store", dest="store_results",
             default=False, action="store_true")
+        parser.add_option("--local-store", dest="store_local_results",
+            default=False, action="store_true", help="Store/Load local results?")
+
+    @property
+    def my_version(self, version=None):
+        if self._my_version is not None:
+            return self._my_version
+        if version is None:
+            try:
+                version = get_yt_version()
+            except:
+                version = "UNKNOWN%s" % (time.time())
+        self._my_version = version
+        return self._my_version
 
     def configure(self, options, conf):
         super(AnswerTesting, self).configure(options, conf)
         if not self.enabled:
             return
         disable_stream_logging()
-        try:
-            my_hash = get_yt_version()
-        except:
-            my_hash = "UNKNOWN%s" % (time.time())
-        if options.this_name is None: options.this_name = my_hash
+        if options.this_name is None: 
+            options.this_name = self.my_version
         from yt.config import ytcfg
         ytcfg["yt","__withintesting"] = "True"
         AnswerTestingTest.result_storage = \
             self.result_storage = defaultdict(dict)
         if options.compare_name == "SKIP":
             options.compare_name = None
-        if options.compare_name is not None:
-            # Now we grab from our S3 store
-            if options.compare_name == "latest":
-                options.compare_name = _latest
-            AnswerTestingTest.reference_storage = \
-                AnswerTestOpener(options.compare_name)
-        self.answer_name = options.this_name
+        elif options.compare_name == "latest":
+            options.compare_name = _latest
+
+        # Local/Cloud storage 
+        if options.store_local_results:
+            storage_class = AnswerTestLocalStorage
+            # Fix up filename for local storage 
+            if options.compare_name is not None:
+                options.compare_name = "%s/%s/%s" % \
+                    (options.output_dir, options.compare_name, 
+                     options.compare_name)
+            if options.this_name is not None:
+                name_dir_path = "%s/%s" % \
+                    (os.path.realpath(options.output_dir), 
+                    options.this_name)
+                if not os.path.isdir(name_dir_path):
+                    os.mkdir(name_dir_path)
+                options.this_name= "%s/%s" % \
+                        (name_dir_path, options.this_name)
+        else:
+            storage_class = AnswerTestCloudStorage
+
+        # Initialize answer/reference storage
+        AnswerTestingTest.reference_storage = self.storage = \
+                storage_class(options.compare_name, options.this_name)
+
         self.store_results = options.store_results
+        self.store_local_results = options.store_local_results
         global run_big_data
         run_big_data = options.big_data
 
-    def finalize(self, result):
-        # This is where we dump our result storage up to Amazon, if we are able
-        # to.
+    def finalize(self, result=None):
         if self.store_results is False: return
-        import boto
-        from boto.s3.key import Key
-        c = boto.connect_s3()
-        bucket = c.get_bucket("yt-answer-tests")
-        for pf_name in self.result_storage:
-            rs = cPickle.dumps(self.result_storage[pf_name])
-            tk = bucket.get_key("%s_%s" % (self.answer_name, pf_name)) 
-            if tk is not None: tk.delete()
-            k = Key(bucket)
-            k.key = "%s_%s" % (self.answer_name, pf_name)
-            k.set_contents_from_string(rs)
-            k.set_acl("public-read")
+        self.storage.dump(self.result_storage)        
 
-class AnswerTestOpener(object):
-    def __init__(self, reference_name):
+class AnswerTestStorage(object):
+    def __init__(self, reference_name=None, answer_name=None):
         self.reference_name = reference_name
+        self.answer_name = answer_name
         self.cache = {}
+    def dump(self, result_storage, result):
+        raise NotImplementedError 
+    def get(self, pf_name, default=None):
+        raise NotImplementedError 
 
+class AnswerTestCloudStorage(AnswerTestStorage):
     def get(self, pf_name, default = None):
+        if self.reference_name is None: return default
         if pf_name in self.cache: return self.cache[pf_name]
         url = _url_path % (self.reference_name, pf_name)
         try:
@@ -126,6 +153,47 @@ class AnswerTestOpener(object):
         self.cache[pf_name] = rv
         return rv
 
+    def dump(self, result_storage):
+        if self.answer_name is None: return
+        # This is where we dump our result storage up to Amazon, if we are able
+        # to.
+        import boto
+        from boto.s3.key import Key
+        c = boto.connect_s3()
+        bucket = c.get_bucket("yt-answer-tests")
+        for pf_name in result_storage:
+            rs = cPickle.dumps(result_storage[pf_name])
+            tk = bucket.get_key("%s_%s" % (self.answer_name, pf_name)) 
+            if tk is not None: tk.delete()
+            k = Key(bucket)
+            k.key = "%s_%s" % (self.answer_name, pf_name)
+            k.set_contents_from_string(rs)
+            k.set_acl("public-read")
+
+class AnswerTestLocalStorage(AnswerTestStorage):
+    def dump(self, result_storage):
+        if self.answer_name is None: return
+        # Store data using shelve
+        ds = shelve.open(self.answer_name, protocol=-1)
+        for pf_name in result_storage:
+            answer_name = "%s" % pf_name
+            if name in ds:
+                mylog.info("Overwriting %s", answer_name)
+            ds[answer_name] = result_storage[pf_name]
+        ds.close()
+
+    def get(self, pf_name, default=None):
+        if self.reference_name is None: return default
+        # Read data using shelve
+        answer_name = "%s" % pf_name
+        ds = shelve.open(self.reference_name, protocol=-1)
+        try:
+            result = ds[answer_name]
+        except KeyError:
+            result = default
+        ds.close()
+        return result
+
 @contextlib.contextmanager
 def temp_cwd(cwd):
     oldcwd = os.getcwd()
@@ -135,6 +203,8 @@ def temp_cwd(cwd):
 
 def can_run_pf(pf_fn):
     path = ytcfg.get("yt", "test_data_dir")
+    if not os.path.isdir(path):
+        return False
     if isinstance(pf_fn, StaticOutput):
         return AnswerTestingTest.result_storage is not None
     with temp_cwd(path):
@@ -146,6 +216,8 @@ def can_run_pf(pf_fn):
 
 def data_dir_load(pf_fn):
     path = ytcfg.get("yt", "test_data_dir")
+    if not os.path.isdir(path):
+        return False
     if isinstance(pf_fn, StaticOutput): return pf_fn
     with temp_cwd(path):
         pf = load(pf_fn)
@@ -164,15 +236,16 @@ def sim_dir_load(sim_fn, path = None, sim_type = "Enzo",
 
 class AnswerTestingTest(object):
     reference_storage = None
+    result_storage = None
     prefix = ""
     def __init__(self, pf_fn):
         self.pf = data_dir_load(pf_fn)
 
     def __call__(self):
         nv = self.run()
-        if self.reference_storage is not None:
+        if self.reference_storage.reference_name is not None:
             dd = self.reference_storage.get(self.storage_name)
-            if dd is None: raise YTNoOldAnswer()
+            if dd is None: raise YTNoOldAnswer(self.storage_name)
             ov = dd[self.description]
             self.compare(nv, ov)
         else:
@@ -234,10 +307,12 @@ class FieldValuesTest(AnswerTestingTest):
     _type_name = "FieldValues"
     _attrs = ("field", )
 
-    def __init__(self, pf_fn, field, obj_type = None):
+    def __init__(self, pf_fn, field, obj_type = None,
+                 decimals = None):
         super(FieldValuesTest, self).__init__(pf_fn)
         self.obj_type = obj_type
         self.field = field
+        self.decimals = decimals
 
     def run(self):
         obj = self.create_obj(self.pf, self.obj_type)
@@ -247,19 +322,50 @@ class FieldValuesTest(AnswerTestingTest):
         return np.array([avg, mi, ma])
 
     def compare(self, new_result, old_result):
-        assert_equal(new_result, old_result)
+        err_msg = "Field values for %s not equal." % self.field
+        if self.decimals is None:
+            assert_equal(new_result, old_result, 
+                         err_msg=err_msg, verbose=True)
+        else:
+            assert_allclose(new_result, old_result, 10.**(-self.decimals),
+                             err_msg=err_msg, verbose=True)
 
+class AllFieldValuesTest(AnswerTestingTest):
+    _type_name = "AllFieldValues"
+    _attrs = ("field", )
+
+    def __init__(self, pf_fn, field, obj_type = None,
+                 decimals = None):
+        super(AllFieldValuesTest, self).__init__(pf_fn)
+        self.obj_type = obj_type
+        self.field = field
+        self.decimals = decimals
+
+    def run(self):
+        obj = self.create_obj(self.pf, self.obj_type)
+        return obj[self.field]
+
+    def compare(self, new_result, old_result):
+        err_msg = "All field values for %s not equal." % self.field
+        if self.decimals is None:
+            assert_equal(new_result, old_result, 
+                         err_msg=err_msg, verbose=True)
+        else:
+            assert_rel_equal(new_result, old_result, self.decimals,
+                             err_msg=err_msg, verbose=True)
+            
 class ProjectionValuesTest(AnswerTestingTest):
     _type_name = "ProjectionValues"
     _attrs = ("field", "axis", "weight_field")
 
     def __init__(self, pf_fn, axis, field, weight_field = None,
-                 obj_type = None):
+                 obj_type = None, decimals = None):
         super(ProjectionValuesTest, self).__init__(pf_fn)
         self.axis = axis
         self.field = field
         self.weight_field = field
         self.obj_type = obj_type
+        self.decimals = decimals
 
     def run(self):
         if self.obj_type is not None:
@@ -276,7 +382,14 @@ class ProjectionValuesTest(AnswerTestingTest):
         for k in new_result:
             assert (k in old_result)
         for k in new_result:
-            assert_equal(new_result[k], old_result[k])
+            err_msg = "%s values of %s (%s weighted) projection (axis %s) not equal." % \
+              (k, self.field, self.weight_field, self.axis)
+            if self.decimals is None:
+                assert_equal(new_result[k], old_result[k],
+                             err_msg=err_msg)
+            else:
+                assert_allclose(new_result[k], old_result[k], 
+                                 10.**-(self.decimals), err_msg=err_msg)
 
 class PixelizedProjectionValuesTest(AnswerTestingTest):
     _type_name = "PixelizedProjectionValues"
@@ -347,9 +460,13 @@ class VerifySimulationSameTest(AnswerTestingTest):
         return result
 
     def compare(self, new_result, old_result):
-        assert_equal(len(new_result), len(old_result))
+        assert_equal(len(new_result), len(old_result),
+                     err_msg="Number of outputs not equal.",
+                     verbose=True)
         for i in range(len(new_result)):
-            assert_equal(new_result[i], old_result[i])
+            assert_equal(new_result[i], old_result[i],
+                         err_msg="Output times not equal.",
+                         verbose=True)
         
 class GridHierarchyTest(AnswerTestingTest):
     _type_name = "GridHierarchy"
@@ -392,25 +509,6 @@ class ParentageRelationshipsTest(AnswerTestingTest):
         for newc, oldc in zip(new_result["children"], old_result["children"]):
             assert(newp == oldp)
 
-def requires_outputlog(path = ".", prefix = ""):
-    def ffalse(func):
-        return lambda: None
-    def ftrue(func):
-        @wraps(func)
-        def fyielder(*args, **kwargs):
-            with temp_cwd(path):
-                for t in func(*args, **kwargs):
-                    if isinstance(t, AnswerTestingTest):
-                        t.prefix = prefix
-                    yield t
-        return fyielder
-    if os.path.exists("OutputLog"):
-        return ftrue
-    with temp_cwd(path):
-        if os.path.exists("OutputLog"):
-            return ftrue
-    return ffalse
-
 def requires_pf(pf_fn, big_data = False):
     def ffalse(func):
         return lambda: None
@@ -452,60 +550,3 @@ def big_patch_amr(pf_fn, fields):
                     yield PixelizedProjectionValuesTest(
                         pf_fn, axis, field, weight_field,
                         ds)
-
-def standard_small_simulation(pf_fn, fields):
-    if not can_run_pf(pf_fn): return
-    dso = [None]
-    yield GridHierarchyTest(pf_fn)
-    yield ParentageRelationshipsTest(pf_fn)
-    for field in fields:
-        yield GridValuesTest(pf_fn, field)
-        for axis in [0, 1, 2]:
-            for ds in dso:
-                for weight_field in [None, "Density"]:
-                    yield ProjectionValuesTest(
-                        pf_fn, axis, field, weight_field,
-                        ds)
-                yield FieldValuesTest(
-                        pf_fn, field, ds)
-                    
-class ShockTubeTest(object):
-    def __init__(self, data_file, solution_file, fields, 
-                 left_edges, right_edges, rtol, atol):
-        self.solution_file = solution_file
-        self.data_file = data_file
-        self.fields = fields
-        self.left_edges = left_edges
-        self.right_edges = right_edges
-        self.rtol = rtol
-        self.atol = atol
-
-    def __call__(self):
-        # Read in the pf
-        pf = load(self.data_file)  
-        exact = self.get_analytical_solution() 
-
-        ad = pf.h.all_data()
-        position = ad['x']
-        for k in self.fields:
-            field = ad[k]
-            for xmin, xmax in zip(self.left_edges, self.right_edges):
-                mask = (position >= xmin)*(position <= xmax)
-                exact_field = np.interp(position[mask], exact['pos'], exact[k]) 
-                # yield test vs analytical solution 
-                yield assert_allclose, field[mask], exact_field, \
-                    self.rtol, self.atol
-
-    def get_analytical_solution(self):
-        # Reads in from file 
-        pos, dens, vel, pres, inte = \
-                np.loadtxt(self.solution_file, unpack=True)
-        exact = {}
-        exact['pos'] = pos
-        exact['Density'] = dens
-        exact['x-velocity'] = vel
-        exact['Pressure'] = pres
-        exact['ThermalEnergy'] = inte
-        return exact
-
-
