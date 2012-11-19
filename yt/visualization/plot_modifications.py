@@ -1,4 +1,4 @@
-"""
+""" 
 Callbacks to add additional functionality on to plots.
 
 Author: Matthew Turk <matthewturk@gmail.com>
@@ -11,7 +11,8 @@ Author: Anthony Scopatz <scopatz@gmail.com>
 Affiliation: The University of Chicago
 Homepage: http://yt-project.org/
 License:
-  Copyright (C) 2008-2011 Matthew Turk, JS Oishi, Stephen Skory.  All Rights Reserved.
+  Copyright (C) 2008-2012 Matthew Turk, JS Oishi, Stephen Skory, Anthony Scopatz.  
+  All Rights Reserved.
 
   This file is part of yt.
 
@@ -82,11 +83,11 @@ class PlotCallback(object):
     def pixel_scale(self,plot):
         x0, x1 = plot.xlim
         xx0, xx1 = plot._axes.get_xlim()
-        dx = (xx1 - xx0)/(x1 - x0)
+        dx = (xx0 - xx1)/(x1 - x0)
         
         y0, y1 = plot.ylim
         yy0, yy1 = plot._axes.get_ylim()
-        dy = (yy1 - yy0)/(y1 - y0)
+        dy = (yy0 - yy1)/(y1 - y0)
 
         return (dx,dy)
 
@@ -307,31 +308,30 @@ class ContourCallback(PlotCallback):
 
 class GridBoundaryCallback(PlotCallback):
     _type_name = "grids"
-    def __init__(self, alpha=1.0, min_pix=1, min_pix_ids=20, draw_ids=False, periodic=True):
-        """
-        annotate_grids(alpha=1.0, min_pix=1, draw_ids=False, periodic=True)
+    def __init__(self, alpha=1.0, min_pix=1, annotate=False, periodic=True):
+        """ 
+        annotate_grids(alpha=1.0, min_pix=1, annotate=False, periodic=True)
 
         Adds grid boundaries to a plot, optionally with *alpha*-blending.
         Cuttoff for display is at *min_pix* wide.
-        *draw_ids* puts the grid id in the corner of the grid.  (Not so great in projections...)
-        Grids must be wider than *min_pix_ids* otherwise the ID will not be drawn.
+        *annotate* puts the grid id in the corner of the grid.  (Not so great in projections...)
         """
         PlotCallback.__init__(self)
         self.alpha = alpha
         self.min_pix = min_pix
-        self.min_pix_ids = min_pix_ids
-        self.draw_ids = draw_ids # put grid numbers in the corner.
+        self.annotate = annotate # put grid numbers in the corner.
         self.periodic = periodic
 
     def __call__(self, plot):
         x0, x1 = plot.xlim
         y0, y1 = plot.ylim
+        width, height = plot.image._A.shape
         xx0, xx1 = plot._axes.get_xlim()
         yy0, yy1 = plot._axes.get_ylim()
         xi = x_dict[plot.data.axis]
         yi = y_dict[plot.data.axis]
-        (dx, dy) = self.pixel_scale(plot)
-        (xpix, ypix) = plot.image._A.shape
+        dx = width / (x1-x0)
+        dy = height / (y1-y0)
         px_index = x_dict[plot.data.axis]
         py_index = y_dict[plot.data.axis]
         dom = plot.data.pf.domain_right_edge - plot.data.pf.domain_left_edge
@@ -339,37 +339,34 @@ class GridBoundaryCallback(PlotCallback):
             pxs, pys = np.mgrid[-1:1:3j,-1:1:3j]
         else:
             pxs, pys = np.mgrid[0:0:1j,0:0:1j]
-        GLE = plot.data.grid_left_edge
-        GRE = plot.data.grid_right_edge
+        GLE = plot.data.pf.h.grid_left_edge
+        GRE = plot.data.pf.h.grid_right_edge
         for px_off, py_off in zip(pxs.ravel(), pys.ravel()):
             pxo = px_off * dom[px_index]
             pyo = py_off * dom[py_index]
-            left_edge_x = (GLE[:,px_index]+pxo-x0)*dx + xx0
-            left_edge_y = (GLE[:,py_index]+pyo-y0)*dy + yy0
-            right_edge_x = (GRE[:,px_index]+pxo-x0)*dx + xx0
-            right_edge_y = (GRE[:,py_index]+pyo-y0)*dy + yy0
-            visible =  ( xpix * (right_edge_x - left_edge_x) / (xx1 - xx0) > self.min_pix ) & \
-                       ( ypix * (right_edge_y - left_edge_y) / (yy1 - yy0) > self.min_pix )
-            if visible.nonzero()[0].size == 0: continue
+            left_edge_px = (GLE[:,px_index]+pxo-x0)*dx
+            left_edge_py = (GLE[:,py_index]+pyo-y0)*dy
+            right_edge_px = (GRE[:,px_index]+pxo-x0)*dx
+            right_edge_py = (GRE[:,py_index]+pyo-y0)*dy
             verts = np.array(
-                [(left_edge_x, left_edge_x, right_edge_x, right_edge_x),
-                 (left_edge_y, right_edge_y, right_edge_y, left_edge_y)])
+                [(left_edge_px, left_edge_px, right_edge_px, right_edge_px),
+                 (left_edge_py, right_edge_py, right_edge_py, left_edge_py)])
+            visible =  (right_edge_px - left_edge_px > self.min_pix) & \
+                       (right_edge_px - left_edge_px > self.min_pix)
             verts=verts.transpose()[visible,:,:]
+            if verts.size == 0: continue
             edgecolors = (0.0,0.0,0.0,self.alpha)
+            verts[:,:,0]= (xx1-xx0)*(verts[:,:,0]/width) + xx0
+            verts[:,:,1]= (yy1-yy0)*(verts[:,:,1]/height) + yy0
             grid_collection = matplotlib.collections.PolyCollection(
                 verts, facecolors="none",
                 edgecolors=edgecolors)
             plot._axes.hold(True)
             plot._axes.add_collection(grid_collection)
-            if self.draw_ids:
-                visible_ids =  ( xpix * (right_edge_x - left_edge_x) / (xx1 - xx0) > self.min_pix_ids ) & \
-                               ( ypix * (right_edge_y - left_edge_y) / (yy1 - yy0) > self.min_pix_ids )
-                active_ids = np.unique(plot.data['GridIndices'])
-                for i in np.where(visible_ids)[0]:
-                    plot._axes.text(
-                        left_edge_x[i] + (2 * (xx1 - xx0) / xpix),
-                        left_edge_y[i] + (2 * (yy1 - yy0) / ypix),
-                        "%d" % active_ids[i], clip_on=True)
+            if self.annotate:
+                ids = [g.id for g in plot.data._grids]
+                for n in range(len(left_edge_px)):
+                    plot._axes.text(left_edge_px[n]+2,left_edge_py[n]+2,ids[n])
             plot._axes.hold(False)
 
 class StreamlineCallback(PlotCallback):
@@ -1248,7 +1245,7 @@ class MaterialBoundaryCallback(ContourCallback):
         """
         plot_args = {'colors': 'w'}
         plot_args.update(kwargs)
-        super(MaterialBoundaryCallback, self).__init__(field=field, ncont=ncont,
+        super(MaterialBoundaryCallback, self).__init__(field=field, ncont=ncont, 
                                                        factor=factor, clim=clim,
                                                        plot_args=plot_args)
 
