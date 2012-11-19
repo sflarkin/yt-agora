@@ -534,7 +534,8 @@ class PWViewer(PlotWindow):
         self._colormaps = defaultdict(lambda: 'algae')
         self.setup_callbacks()
         for field in self._frb.data.keys():
-            if self.pf.field_info[field].take_log:
+            finfo = self.data_source.pf._get_field_info(*field)
+            if finfo.take_log:
                 self._field_transform[field] = log_transform
             else:
                 self._field_transform[field] = linear_transform
@@ -727,13 +728,15 @@ class PWViewer(PlotWindow):
     def get_field_units(self, field, strip_mathml = True):
         ds = self._frb.data_source
         pf = self.pf
+        field = self.data_source._determine_fields(field)[0]
+        finfo = self.data_source.pf._get_field_info(*field)
         if ds._type_name in ("slice", "cutting"):
-            units = pf.field_info[field].get_units()
+            units = finfo.get_units()
         elif ds._type_name == "proj" and (ds.weight_field is not None or 
                                         ds.proj_style == "mip"):
-            units = pf.field_info[field].get_units()
+            units = finfo.get_units()
         elif ds._type_name == "proj":
-            units = pf.field_info[field].get_projected_units()
+            units = finfo.get_projected_units()
         else:
             units = ""
         if strip_mathml:
@@ -829,11 +832,11 @@ class PWViewerMPL(PWViewer):
             self.plots[f].axes.set_ylabel(labels[1],fontsize=self.fontsize)
 
             self.plots[f].axes.tick_params(labelsize=self.fontsize)
-
-            field_name = self.data_source.pf.field_info[f].display_name
+            ftype, fname = f
+            field_name = self.data_source.pf._get_field_info(ftype, fname).display_name
 
             if field_name is None:
-                field_name = r'$\rm{'+f+r'}$'
+                field_name = r'$\rm{'+fname+r'}$'
             elif field_name.find('$') == -1:
                 field_name = r'$\rm{'+field_name+r'}$'
             
@@ -841,7 +844,7 @@ class PWViewerMPL(PWViewer):
             try:
                 parser.parse(field_name)
             except ParseFatalException, err:
-                raise YTCannotParseFieldDisplayName(f,field_name,str(err))
+                raise YTCannotParseFieldDisplayName(fname,field_name,str(err))
 
             if md['colorbar_unit'] is None or md['colorbar_unit'] == '':
                 label = field_name
@@ -887,7 +890,7 @@ class PWViewerMPL(PWViewer):
         if field == 'all':
             fields = self.plots.keys()
         else:
-            fields = [field]
+            fields = self.data_source._determine_fields([field])
 
         for field in fields:
             self._colorbar_valid = False
@@ -932,6 +935,8 @@ class PWViewerMPL(PWViewer):
         if 'Cutting' in self.data_source.__class__.__name__:
             type = 'OffAxisSlice'
         for k, v in self.plots.iteritems():
+            if isinstance(k, types.TupleType):
+                k = k[1]
             if axis:
                 n = "%s_%s_%s_%s" % (name, type, axis, k)
             else:
@@ -939,12 +944,12 @@ class PWViewerMPL(PWViewer):
                 n = "%s_%s_%s" % (name, type, k)
             if weight:
                 n += "_%s" % (weight)
-            names.append(v.save(n,mpl_kwargs))
+            names.append(v.save(n, mpl_kwargs))
         return names
 
     def _send_zmq(self):
         try:
-            # pre-IPython v0.14        
+            # pre-IPython v0.14
             from IPython.zmq.pylab.backend_inline import send_figure as display
         except ImportError:
             # IPython v0.14+ 
@@ -975,6 +980,14 @@ class PWViewerMPL(PWViewer):
             self._send_zmq()
         else:
             raise YTNotInsideNotebook
+
+    def show_or_save(self, name=None):
+        """Will attempt to show the plot in in an IPython notebook.  Failing that, the 
+        plot will be saved to disk."""
+        try:
+            self.show()
+        except YTNotInsideNotebook:
+            self.save(name=name)
 
 class SlicePlot(PWViewerMPL):
     _plot_type = 'Slice'
@@ -1059,7 +1072,8 @@ class SlicePlot(PWViewerMPL):
         (bounds, center, units) = GetWindowParameters(axis, center, width, pf)
         if axes_unit is None and units != ('1', '1'):
             axes_unit = units
-        slc = pf.h.slice(axis, center[axis], fields=fields)
+        slc = pf.h.slice(axis, center[axis])
+        slc.get_data(fields)
         PWViewerMPL.__init__(self, slc, bounds, origin=origin)
         self.set_axes_unit(axes_unit)
 
@@ -1138,7 +1152,7 @@ class ProjectionPlot(PWViewerMPL):
         This is a very simple way of creating a projection plot.
         
         >>> pf = load('galaxy0030/galaxy0030')
-        >>> p = ProjectionPlot(pf,2,'Density','c',(20,'kpc'))
+        >>> p = ProjectionPlot(pf, 'z', 'Density', 'c', (20,'kpc'))
         >>> p.save('sliceplot')
         
         """
@@ -1149,7 +1163,7 @@ class ProjectionPlot(PWViewerMPL):
         (bounds, center, units) = GetWindowParameters(axis, center, width, pf)
         if axes_unit is None  and units != ('1', '1'):
             axes_unit = units
-        proj = pf.h.proj(axis,fields,weight_field=weight_field,max_level=max_level,center=center)
+        proj = pf.h.proj(fields, axis, weight_field=weight_field,max_level=max_level,center=center)
         PWViewerMPL.__init__(self,proj,bounds,origin=origin)
         self.set_axes_unit(axes_unit)
 
@@ -1201,7 +1215,8 @@ class OffAxisSlicePlot(PWViewerMPL):
         (bounds, center_rot, units) = GetObliqueWindowParameters(normal,center,width,pf)
         if axes_unit is None and units != ('1', '1'):
             axes_unit = units
-        cutting = pf.h.cutting(normal, center, fields=fields, north_vector=north_vector)
+        cutting = pf.h.cutting(normal, center)
+        cutting.get_data(fields)
         # Hard-coding the origin keyword since the other two options
         # aren't well-defined for off-axis data objects
         PWViewerMPL.__init__(self,cutting,bounds,origin='center-window',periodic=False,oblique=True)
@@ -1234,8 +1249,8 @@ class OffAxisProjectionPlot(PWViewerMPL):
     _plot_type = 'OffAxisProjection'
     _frb_generator = OffAxisProjectionFixedResolutionBuffer
 
-    def __init__(self, pf, normal, fields, center='c', width=None, 
-                 depth=(1, '1'), axes_unit=None, weight_field=None, 
+    def __init__(self, pf, normal, fields, center='c', width=(1,'unitary'), 
+                 depth=(1,'1'), axes_unit=None, weight_field=None, 
                  max_level=None, north_vector=None, volume=None, no_ghost=False, 
                  le=None, re=None, interpolated=False, fontsize=15):
         r"""Creates an off axis projection plot from a parameter file
@@ -1461,9 +1476,11 @@ class PWViewerExtJS(PWViewer):
 
     @invalidate_data
     def set_current_field(self, field):
+        field = self.data_source._determine_fields(field)[0]
         self._current_field = field
         self._frb[field]
-        if self.pf.field_info[field].take_log:
+        finfo = self.data_source.pf._get_field_info(*field)
+        if finfo.take_log:
             self._field_transform[field] = log_transform
         else:
             self._field_transform[field] = linear_transform
