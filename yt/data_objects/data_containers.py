@@ -5,7 +5,7 @@ Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
 Author: Britton Smith <Britton.Smith@colorado.edu>
 Affiliation: University of Colorado at Boulder
-Author: Geoffrey So <gsiisg@gmail.com> (AMREllipsoidBase)
+Author: Geoffrey So <gsiisg@gmail.com>
 Affiliation: UCSD Physics/CASS
 Homepage: http://yt-project.org/
 License:
@@ -71,7 +71,7 @@ from .field_info_container import \
 def force_array(item, shape):
     try:
         sh = item.shape
-        return item
+        return item.copy()
     except AttributeError:
         if item:
             return np.ones(shape, dtype='bool')
@@ -237,6 +237,7 @@ class AMRData(object):
     def __set_default_field_parameters(self):
         self.set_field_parameter("center",np.zeros(3,dtype='float64'))
         self.set_field_parameter("bulk_velocity",np.zeros(3,dtype='float64'))
+        self.set_field_parameter("normal",np.array([0,0,1],dtype='float64'))
 
     def _set_center(self, center):
         if center is None:
@@ -708,7 +709,7 @@ class AMRStreamlineBase(AMR1DData):
     _type_name = "streamline"
     _con_args = ('positions')
     sort_by = 't'
-    def __init__(self, positions, fields=None, pf=None, **kwargs):
+    def __init__(self, positions, length = 1.0, fields=None, pf=None, **kwargs):
         """
         This is a streamline, which is a set of points defined as
         being parallel to some vector field.
@@ -724,6 +725,8 @@ class AMRStreamlineBase(AMR1DData):
         ----------
         positions : array-like
             List of streamline positions
+        length : float
+            The magnitude of the distance; dts will be divided by this
         fields : list of strings, optional
             If you want the object to pre-retrieve a set of fields, supply them
             here.  This is not necessary.
@@ -748,7 +751,9 @@ class AMRStreamlineBase(AMR1DData):
         self.dts = np.empty_like(positions[:,0])
         self.dts[:-1] = np.sqrt(np.sum((self.positions[1:]-
                                         self.positions[:-1])**2,axis=1))
-        self.dts[-1] = self.dts[-1]
+        self.dts[-1] = self.dts[-2]
+        self.length = length
+        self.dts /= length
         self.ts = np.add.accumulate(self.dts)
         self._set_center(self.positions[0])
         self.set_field_parameter('center', self.positions[0])
@@ -767,31 +772,30 @@ class AMRStreamlineBase(AMR1DData):
 
     @restore_grid_state
     def _get_data_from_grid(self, grid, field):
-        mask = np.logical_and(self._get_cut_mask(grid),
-                              grid.child_mask)
-        if field == 'dts': return self._dts[grid.id][mask]
-        if field == 't': return self._ts[grid.id][mask]
-        return grid[field][mask]
+        # No child masking here; it happens inside the mask cut
+        mask = self._get_cut_mask(grid) 
+        if field == 'dts': return self._dts[grid.id]
+        if field == 't': return self._ts[grid.id]
+        return grid[field].flat[mask]
         
     @cache_mask
     def _get_cut_mask(self, grid):
-        mask = np.zeros(grid.ActiveDimensions, dtype='int')
-        dts = np.zeros(grid.ActiveDimensions, dtype='float64')
-        ts = np.zeros(grid.ActiveDimensions, dtype='float64')
         #pdb.set_trace()
         points_in_grid = np.all(self.positions > grid.LeftEdge, axis=1) & \
                          np.all(self.positions <= grid.RightEdge, axis=1) 
         pids = np.where(points_in_grid)[0]
-        for i, pos in zip(pids, self.positions[points_in_grid]):
+        mask = np.zeros(points_in_grid.sum(), dtype='int')
+        dts = np.zeros(points_in_grid.sum(), dtype='float64')
+        ts = np.zeros(points_in_grid.sum(), dtype='float64')
+        for mi, (i, pos) in enumerate(zip(pids, self.positions[points_in_grid])):
             if not points_in_grid[i]: continue
             ci = ((pos - grid.LeftEdge)/grid.dds).astype('int')
+            if grid.child_mask[ci[0], ci[1], ci[2]] == 0: continue
             for j in range(3):
                 ci[j] = min(ci[j], grid.ActiveDimensions[j]-1)
-            if mask[ci[0], ci[1], ci[2]]:
-                continue
-            mask[ci[0], ci[1], ci[2]] = 1
-            dts[ci[0], ci[1], ci[2]] = self.dts[i]
-            ts[ci[0], ci[1], ci[2]] = self.ts[i]
+            mask[mi] = np.ravel_multi_index(ci, grid.ActiveDimensions)
+            dts[mi] = self.dts[i]
+            ts[mi] = self.ts[i]
         self._dts[grid.id] = dts
         self._ts[grid.id] = ts
         return mask
@@ -3501,10 +3505,7 @@ class AMRSphereBase(AMR3DData):
         for gi, g in enumerate(grids): self._grids[gi] = g
 
     def _is_fully_enclosed(self, grid):
-        r = np.abs(grid._corners - self.center)
-        r = np.minimum(r, np.abs(self.DW[None,:]-r))
-        corner_radius = np.sqrt((r**2.0).sum(axis=1))
-        return np.all(corner_radius <= self.radius)
+        return False
 
     @restore_grid_state # Pains me not to decorate with cache_mask here
     def _get_cut_mask(self, grid, field=None):
@@ -3530,17 +3531,45 @@ class AMREllipsoidBase(AMR3DData):
                  pf=None, **kwargs):
         """
         By providing a *center*,*A*,*B*,*C*,*e0*,*tilt* we
-        can define a ellipsoid of any proportion.  Only cells whose centers are
-        within the ellipsoid will be selected.
+        can define a ellipsoid of any proportion.  Only cells whose
+        centers are within the ellipsoid will be selected.
+
+        Parameters
+        ----------
+        center : array_like
+            The center of the ellipsoid.
+        A : float
+            The magnitude of the largest semi-major axis of the ellipsoid.
+        B : float
+            The magnitude of the medium semi-major axis of the ellipsoid.
+        C : float
+            The magnitude of the smallest semi-major axis of the ellipsoid.
+        e0 : array_like (automatically normalized)
+            the direction of the largest semi-major axis of the ellipsoid
+        tilt : float
+            After the rotation about the z-axis to allign e0 to x in the x-y
+            plane, and then rotating about the y-axis to align e0 completely
+            to the x-axis, tilt is the angle in radians remaining to
+            rotate about the x-axis to align both e1 to the y-axis and e2 to
+            the z-axis.
+        Examples
+        --------
+        >>> pf = load("DD####/DD####")
+        >>> c = [0.5,0.5,0.5]
+        >>> ell = pf.h.ellipsoid(c, 0.1, 0.1, 0.1, np.array([0.1, 0.1, 0.1]), 0.2)
         """
+
         AMR3DData.__init__(self, np.array(center), fields, pf, **kwargs)
+        # make sure the magnitudes of semi-major axes are in order
+        if A<B or B<C:
+            raise YTEllipsoidOrdering(pf, A, B, C)
         # make sure the smallest side is not smaller than dx
         if C < self.hierarchy.get_smallest_dx():
             raise YTSphereTooSmall(pf, C, self.hierarchy.get_smallest_dx())
         self._A = A
         self._B = B
         self._C = C
-        self._e0 = e0
+        self._e0 = e0 = e0 / (e0**2.0).sum()**0.5
         self._tilt = tilt
         
         # find the t1 angle needed to rotate about z axis to align e0 to x
@@ -3858,10 +3887,21 @@ class AMRSmoothedCoveringGridBase(AMRCoveringGridBase):
         self._get_list_of_grids()
         # We don't generate coordinates here.
         if field == None:
-            fields_to_get = self.fields[:]
+            fields = self.fields[:]
         else:
-            fields_to_get = ensure_list(field)
-        fields_to_get = [f for f in fields_to_get if f not in self.field_data]
+            fields = ensure_list(field)
+        fields_to_get = []
+        for field in fields:
+            if self.field_data.has_key(field): continue
+            if field not in self.hierarchy.field_list:
+                try:
+                    #print "Generating", field
+                    self._generate_field(field)
+                    continue
+                except NeedsOriginalGrid, ngt_exception:
+                    pass
+            fields_to_get.append(field)
+        if len(fields_to_get) == 0: return
         # Note that, thanks to some trickery, we have different dimensions
         # on the field than one might think from looking at the dx and the
         # L/R edges.

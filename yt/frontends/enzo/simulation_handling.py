@@ -37,7 +37,7 @@ from yt.utilities.cosmology import \
 from yt.utilities.definitions import \
     sec_conversion
 from yt.utilities.exceptions import \
-    AmbiguousOutputs, \
+    InvalidSimulationTimeSeries, \
     MissingParameter, \
     NoStoppingCondition
 
@@ -183,8 +183,7 @@ class EnzoSimulation(SimulationTimeSeries):
         if (initial_redshift is not None or \
             final_redshift is not None) and \
             not self.cosmological_simulation:
-            mylog.error('An initial or final redshift has been given for a noncosmological simulation.')
-            return
+            raise InvalidSimulationTimeSeries('An initial or final redshift has been given for a noncosmological simulation.')
 
         if time_data and redshift_data:
             my_all_outputs = self.all_outputs
@@ -193,7 +192,11 @@ class EnzoSimulation(SimulationTimeSeries):
         elif redshift_data:
             my_all_outputs = self.all_redshift_outputs
         else:
-            mylog.error('Both time_data and redshift_data are False.')
+            raise InvalidSimulationTimeSeries('Both time_data and redshift_data are False.')
+
+        if not my_all_outputs:
+            TimeSeriesData.__init__(self, outputs=[], parallel=parallel)
+            mylog.info("%d outputs loaded into time series." % 0)
             return
 
         # Apply selection criteria to the set.
@@ -215,6 +218,7 @@ class EnzoSimulation(SimulationTimeSeries):
                 final_cycle = self.parameters['StopCycle']
             else:
                 final_cycle = min(final_cycle, self.parameters['StopCycle'])
+
             my_outputs = my_all_outputs[int(ceil(float(initial_cycle) /
                                                  self.parameters['CycleSkipDataDump'])):
                                         (final_cycle /  self.parameters['CycleSkipDataDump'])+1]
@@ -241,9 +245,13 @@ class EnzoSimulation(SimulationTimeSeries):
             if my_initial_time == my_times[my_indices[0] - 1]: my_indices[0] -= 1
             my_outputs = my_all_outputs[my_indices[0]:my_indices[1]]
 
-        TimeSeriesData.__init__(self, outputs=[output['filename'] for output in my_outputs],
-                                parallel=parallel)
-        mylog.info("%d outputs loaded into time series." % len(my_outputs))
+        init_outputs = []
+        for output in my_outputs:
+            if os.path.exists(output['filename']):
+                init_outputs.append(output['filename'])
+            
+        TimeSeriesData.__init__(self, outputs=init_outputs, parallel=parallel)
+        mylog.info("%d outputs loaded into time series." % len(init_outputs))
 
     def _parse_parameter_file(self):
         """
@@ -478,7 +486,7 @@ class EnzoSimulation(SimulationTimeSeries):
         self.parameters['TopGridRank'] = 3
         self.parameters['DomainLeftEdge'] = np.zeros(self.parameters['TopGridRank'])
         self.parameters['DomainRightEdge'] = np.ones(self.parameters['TopGridRank'])
-        self.parameters['Refineby'] = 2 # technically not the enzo default
+        self.parameters['RefineBy'] = 2 # technically not the enzo default
         self.parameters['StopCycle'] = 100000
         self.parameters['dtDataDump'] = 0.
         self.parameters['CycleSkipDataDump'] = 0.
@@ -585,6 +593,8 @@ class EnzoSimulation(SimulationTimeSeries):
         if outputs is None:
             outputs = self.all_outputs
         my_outputs = []
+        if not outputs:
+            return my_outputs
         for value in values:
             outputs.sort(key=lambda obj:np.fabs(value - obj[key]))
             if (tolerance is None or np.abs(value - outputs[0][key]) <= tolerance) \
