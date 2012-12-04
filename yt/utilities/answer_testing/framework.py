@@ -166,13 +166,22 @@ class AnswerTestCloudStorage(AnswerTestStorage):
         url = _url_path % (self.reference_name, pf_name)
         try:
             resp = urllib2.urlopen(url)
-            # This is dangerous, but we have a controlled S3 environment
-            data = resp.read()
-            rv = cPickle.loads(data)
         except urllib2.HTTPError as ex:
             raise YTNoOldAnswer(url)
-            mylog.warning("Missing %s (%s)", url, ex)
-            rv = default
+        else:
+            for this_try in range(3):
+                try:
+                    data = resp.read()
+                except:
+                    time.sleep(0.01)
+                else:
+                    # We were succesful
+                    break
+            else:
+                # Raise error if all tries were unsuccessful
+                raise YTCloudError(url)
+            # This is dangerous, but we have a controlled S3 environment
+            rv = cPickle.loads(data)
         self.cache[pf_name] = rv
         return rv
 
@@ -268,7 +277,8 @@ class AnswerTestingTest(object):
         nv = self.run()
         if self.reference_storage.reference_name is not None:
             dd = self.reference_storage.get(self.storage_name)
-            if dd is None: raise YTNoOldAnswer(self.storage_name)
+            if dd is None or self.description not in dd: 
+                raise YTNoOldAnswer("%s : %s" % (self.storage_name , self.description))
             ov = dd[self.description]
             self.compare(nv, ov)
         else:
@@ -395,18 +405,23 @@ class ProjectionValuesTest(AnswerTestingTest):
             obj = self.create_obj(self.pf, self.obj_type)
         else:
             obj = None
+        if self.pf.domain_dimensions[self.axis] == 1: return None
         proj = self.pf.h.proj(self.axis, self.field,
                               weight_field=self.weight_field,
                               data_source = obj)
         return proj.field_data
 
     def compare(self, new_result, old_result):
+        if new_result is None:
+            return
         assert(len(new_result) == len(old_result))
         for k in new_result:
             assert (k in old_result)
         for k in new_result:
             err_msg = "%s values of %s (%s weighted) projection (axis %s) not equal." % \
               (k, self.field, self.weight_field, self.axis)
+            if k == 'weight_field' and self.weight_field is None:
+                continue
             if self.decimals is None:
                 assert_equal(new_result[k], old_result[k],
                              err_msg=err_msg)
