@@ -208,3 +208,19 @@ class YTTooManyVertices(YTException):
         s = "There are too many vertices (%s) to upload to Sketchfab. " % (self.nv)
         s += "Your model has been saved as %s .  You should upload manually." % (self.fn)
         return s
+
+class YTEmptyProfileData(Exception):
+    pass
+
+class YTDuplicateFieldInProfile(Exception):
+    def __init__(self, field, new_spec, old_spec):
+        self.field = field
+        self.new_spec = new_spec
+        self.old_spec = old_spec
+
+    def __str__(self):
+        r = """Field %s already exists with field spec:
+               %s
+               But being asked to add it with:
+               %s""" % (self.field, self.old_spec, self.new_spec)
+        return r
