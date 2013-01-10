@@ -215,3 +215,10 @@ class YTFieldNotParseable(YTException):
 
     def __str__(self):
         return "Cannot identify field %s" % self.field
+
+class YTDataSelectorNotImplemented(YTException):
+    def __init__(self, class_name):
+        self.class_name = class_name
+
+    def __str__(self):
+        return "Data selector '%s' not implemented." % (self.class_name)
