@@ -174,10 +174,10 @@ class PhasePlotter(object):
                  weight="CellMassMsun", accumulation=False,
                  x_bins=128, x_log=True, x_bounds=None,
                  y_bins=128, y_log=True, y_bounds=None,
-                 lazy_reader=True, fractional=False):
+                 fractional=False):
         r"""From an existing object, create a 2D, binned profile.
 
-        This function will accept an existing `AMRData` source and from that,
+        This function will accept an existing `YTDataContainer` source and from that,
         it will generate a `Binned2DProfile`, based on the specified options.
         This is useful if you have extracted a region, or if you wish to bin
         some set of massages data -- or even if you wish to bin anything other
@@ -187,8 +187,8 @@ class PhasePlotter(object):
 
         Parameters
         ----------
-        data_source : `yt.data_objects.api.AMRData`
-            This is a data source respecting the `AMRData` protocol (i.e., it
+        data_source : `yt.data_objects.api.YTDataContainer`
+            This is a data source respecting the `YTDataContainer` protocol (i.e., it
             has grids and so forth) that will be used as input to the profile
             generation.
         fields : list of strings
@@ -225,11 +225,6 @@ class PhasePlotter(object):
             If specified, the boundary values for the binning.  If unspecified,
             the min/max from the data_source will be used.  (Non-zero min/max
             in case of log-spacing.)
-        lazy_reader : boolean, optional
-            If this is false, all of the data will be read into memory before
-            any processing occurs.  It defaults to true, and grids are binned
-            on a one-by-one basis.  Note that parallel computation requires
-            this to be true.
         fractional : boolean
             If true, the plot will be normalized to the sum of all the binned
             values.
@@ -257,20 +252,17 @@ class PhasePlotter(object):
         """
         if x_bounds is None:
             x_min, x_max = data_source.quantities["Extrema"](
-                                    field_x, non_zero = x_log,
-                                    lazy_reader=lazy_reader)[0]
+                                    field_x, non_zero = x_log)[0]
         else:
             x_min, x_max = x_bounds
         if y_bounds is None:
             y_min, y_max = data_source.quantities["Extrema"](
-                                    field_y, non_zero = y_log,
-                                    lazy_reader=lazy_reader)[0]
+                                    field_y, non_zero = y_log)[0]
         else:
             y_min, y_max = y_bounds
         profile = BinnedProfile2D(data_source,
                                   x_bins, field_x, x_min, x_max, x_log,
-                                  y_bins, field_y, y_min, y_max, y_log,
-                                  lazy_reader)
+                                  y_bins, field_y, y_min, y_max, y_log)
         # This is a fallback, in case we forget.
         if field_z.startswith("CellMass") or \
            field_z.startswith("CellVolume"):
@@ -391,16 +383,14 @@ class ProfilePlotter(object):
     def __init__(self, data_source, field_x, field_y, 
                  weight="CellMassMsun", accumulation=False,
                  x_bins=128, x_log=True, x_bounds=None,
-                 lazy_reader=True, fractional=False):
+                 fractional=False):
         if x_bounds is None:
             x_min, x_max = data_source.quantities["Extrema"](
-                                    field_x, non_zero = x_log,
-                                    lazy_reader=lazy_reader)[0]
+                                    field_x, non_zero = x_log)[0]
         else:
             x_min, x_max = x_bounds
         profile = BinnedProfile1D(data_source,
-                                  x_bins, field_x, x_min, x_max, x_log,
-                                  lazy_reader)
+                                  x_bins, field_x, x_min, x_max, x_log)
         # This is a fallback, in case we forget.
         if field_y.startswith("CellMass") or \
            field_y.startswith("CellVolume"):
