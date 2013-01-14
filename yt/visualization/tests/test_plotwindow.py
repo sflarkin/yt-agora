@@ -81,16 +81,16 @@ def test_plotwindow():
     for fname in test_flnms:
         for dim in [0, 1, 2]:
             obj = SlicePlot(test_pf, dim, 'Density')
-            assert_fname(obj.save(fname)[0])
+            yield assert_fname, obj.save(fname)[0]
 
             obj = ProjectionPlot(test_pf, dim, 'Density')
-            assert_fname(obj.save(fname)[0])
+            yield assert_fname, obj.save(fname)[0]
 
         obj = OffAxisSlicePlot(test_pf, normal, 'Density')
-        assert_fname(obj.save(fname)[0])
+        yield assert_fname, obj.save(fname)[0]
 
         obj = OffAxisProjectionPlot(test_pf, normal, 'Density')
-        assert_fname(obj.save(fname)[0])
+        yield assert_fname, obj.save(fname)[0]
 
     os.chdir(curdir)
     # clean up
