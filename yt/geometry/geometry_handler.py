@@ -1,5 +1,5 @@
-"""
-AMR hierarchy container class
+""" 
+Geometry container base class.
 
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
@@ -23,30 +23,27 @@ License:
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import h5py
-import numpy as np
-import string, re, gc, time, cPickle, pdb
+import os
+import cPickle
 import weakref
-
-from itertools import chain, izip
-from new import classobj
+import h5py
+from exceptions import IOError, TypeError
+from types import ClassType
+import numpy as np
+import abc
 
 from yt.funcs import *
-
-from yt.arraytypes import blankRecordArray
 from yt.config import ytcfg
-from yt.data_objects.field_info_container import NullFunc
-from yt.utilities.definitions import MAXLEVEL
-from yt.utilities.physical_constants import sec_per_year
+from yt.data_objects.data_containers import \
+    data_object_registry
+from yt.data_objects.field_info_container import \
+    NullFunc
 from yt.utilities.io_handler import io_registry
+from yt.utilities.logger import ytLogger as mylog
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelAnalysisInterface, parallel_splitter
-from object_finding_mixin import ObjectFindingMixin
 
-from .data_containers import data_object_registry
-
-class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
-    float_type = 'float64'
+class GeometryHandler(ParallelAnalysisInterface):
 
     def __init__(self, pf, data_style):
         ParallelAnalysisInterface.__init__(self)
@@ -58,21 +55,12 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
         mylog.debug("Initializing data storage.")
         self._initialize_data_storage()
 
-        mylog.debug("Counting grids.")
-        self._count_grids()
-
         # Must be defined in subclass
         mylog.debug("Setting up classes.")
         self._setup_classes()
 
-        mylog.debug("Counting grids.")
-        self._initialize_grid_arrays()
-
-        mylog.debug("Parsing hierarchy.")
-        self._parse_hierarchy()
-
-        mylog.debug("Constructing grid objects.")
-        self._populate_grid_objects()
+        mylog.debug("Setting up domain geometry.")
+        self._setup_geometry()
 
         mylog.debug("Initializing data grid data IO")
         self._setup_data_io()
@@ -86,26 +74,9 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
         mylog.debug("Setting up derived fields")
         self._setup_derived_fields()
 
-        mylog.debug("Re-examining hierarchy")
-        self._initialize_level_stats()
-
     def __del__(self):
         if self._data_file is not None:
             self._data_file.close()
-
-    def _get_parameters(self):
-        return self.parameter_file.parameters
-    parameters=property(_get_parameters)
-
-    def select_grids(self, level):
-        """
-        Returns an array of grids at *level*.
-        """
-        return self.grids[self.grid_levels.flat == level]
-
-    def get_levels(self):
-        for level in range(self.max_level+1):
-            yield self.select_grids(level)
 
     def _initialize_state_variables(self):
         self._parallel_locking = False
@@ -113,14 +84,6 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
         self._data_mode = None
         self._max_locations = {}
         self.num_grids = None
-
-    def _initialize_grid_arrays(self):
-        mylog.debug("Allocating arrays for %s grids", self.num_grids)
-        self.grid_dimensions = np.ones((self.num_grids,3), 'int32')
-        self.grid_left_edge = np.zeros((self.num_grids,3), self.float_type)
-        self.grid_right_edge = np.ones((self.num_grids,3), self.float_type)
-        self.grid_levels = np.zeros((self.num_grids,1), 'int32')
-        self.grid_particle_count = np.zeros((self.num_grids,1), 'int32')
 
     def _setup_classes(self, dd):
         # Called by subclass
@@ -141,17 +104,22 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
             mylog.warning("Dimensionality less than 3: reverting to"
                         + " overlap_proj")
             self.proj = self.overlap_proj
-
         self.object_types.sort()
 
     def _setup_unknown_fields(self):
         known_fields = self.parameter_file._fieldinfo_known
+        mylog.debug("Checking %s", self.field_list)
         for field in self.field_list:
             # By allowing a backup, we don't mandate that it's found in our
             # current field info.  This means we'll instead simply override
             # it.
             ff = self.parameter_file.field_info.pop(field, None)
             if field not in known_fields:
+                if isinstance(field, types.TupleType) and \
+                   field[0] in self.parameter_file.particle_types:
+                    particle_type = True
+                else:
+                    particle_type = False
                 rootloginfo("Adding unknown field %s to list of fields", field)
                 cf = None
                 if self.parameter_file.has_key(field):
@@ -164,7 +132,7 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
                 # will allow the same field detection mechanism to work for 1D, 2D
                 # and 3D fields.
                 self.pf.field_info.add_field(
-                        field, NullFunc,
+                        field, NullFunc, particle_type = particle_type,
                         convert_function=cf, take_log=False, units=r"Unknown")
             else:
                 mylog.debug("Adding known field %s to list of fields", field)
@@ -176,6 +144,7 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
             try:
                 fd = self.parameter_file.field_info[field].get_dependencies(
                             pf = self.parameter_file)
+                self.parameter_file.field_dependencies[field] = fd
             except:
                 continue
             available = np.all([f in self.field_list for f in fd.requested])
@@ -185,26 +154,12 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
                 self.derived_field_list.append(field)
 
     # Now all the object related stuff
-
     def all_data(self, find_max=False):
         pf = self.parameter_file
         if find_max: c = self.find_max("Density")[1]
         else: c = (pf.domain_right_edge + pf.domain_left_edge)/2.0
-        return self.region(c, 
+        return self.region(c,
             pf.domain_left_edge, pf.domain_right_edge)
-
-    def clear_all_data(self):
-        """
-        This routine clears all the data currently being held onto by the grids
-        and the data io handler.
-        """
-        for g in self.grids: g.clear_data()
-        self.io.queue.clear()
-
-    def _get_data_reader_dict(self):
-        dd = { 'pf' : self.parameter_file, # Already weak
-               'hierarchy': weakref.proxy(self) }
-        return dd
 
     def _initialize_data_storage(self):
         if not ytcfg.getboolean('yt','serialize'): return
@@ -251,6 +206,7 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
         f.close()
 
     def _setup_data_io(self):
+        if getattr(self, "io", None) is not None: return
         self.io = io_registry[self.data_style]()
 
     def _save_data(self, array, node, name, set_attr=None, force=False, passthrough = False):
@@ -284,13 +240,18 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
         del self._data_file
         self._data_file = h5py.File(self.__data_filename, self._data_mode)
 
+    save_data = parallel_splitter(_save_data, _reload_data_file)
+
+    def _get_data_reader_dict(self):
+        dd = { 'pf' : self.parameter_file, # Already weak
+               'hierarchy': weakref.proxy(self) }
+        return dd
+
     def _reset_save_data(self,round_robin=False):
         if round_robin:
             self.save_data = self._save_data
         else:
             self.save_data = parallel_splitter(self._save_data, self._reload_data_file)
-    
-    save_data = parallel_splitter(_save_data, _reload_data_file)
 
     def save_object(self, obj, name):
         """
@@ -333,9 +294,9 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
             return None
 
         full_name = "%s/%s" % (node, name)
-        if len(self._data_file[full_name].shape) > 0:
+        try:
             return self._data_file[full_name][:]
-        else:
+        except TypeError:
             return self._data_file[full_name]
 
     def _close_data_file(self):
@@ -344,100 +305,177 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
             del self._data_file
             self._data_file = None
 
-    def get_smallest_dx(self):
-        """
-        Returns (in code units) the smallest cell size in the simulation.
-        """
-        return self.select_grids(self.grid_levels.max())[0].dds[0]
-
     def _add_object_class(self, name, class_name, base, dd):
         self.object_types.append(name)
-        obj = classobj(class_name, (base,), dd)
+        obj = type(class_name, (base,), dd)
         setattr(self, name, obj)
 
-    def _initialize_level_stats(self):
-        # Now some statistics:
-        #   0 = number of grids
-        #   1 = number of cells
-        #   2 = blank
-        desc = {'names': ['numgrids','numcells','level'],
-                'formats':['Int64']*3}
-        self.level_stats = blankRecordArray(desc, MAXLEVEL)
-        self.level_stats['level'] = [i for i in range(MAXLEVEL)]
-        self.level_stats['numgrids'] = [0 for i in range(MAXLEVEL)]
-        self.level_stats['numcells'] = [0 for i in range(MAXLEVEL)]
-        for level in xrange(self.max_level+1):
-            self.level_stats[level]['numgrids'] = np.sum(self.grid_levels == level)
-            li = (self.grid_levels[:,0] == level)
-            self.level_stats[level]['numcells'] = self.grid_dimensions[li,:].prod(axis=1).sum()
+    def _split_fields(self, fields):
+        # This will split fields into either generated or read fields
+        fields_to_read, fields_to_generate = [], []
+        for ftype, fname in fields:
+            if fname in self.field_list or (ftype, fname) in self.field_list:
+                fields_to_read.append((ftype, fname))
+            else:
+                fields_to_generate.append((ftype, fname))
+        return fields_to_read, fields_to_generate
+
+    def _read_particle_fields(self, fields, dobj, chunk = None):
+        if len(fields) == 0: return {}, []
+        selector = dobj.selector
+        if chunk is None:
+            self._identify_base_chunk(dobj)
+        fields_to_return = {}
+        fields_to_read, fields_to_generate = self._split_fields(fields)
+        if len(fields_to_read) == 0:
+            return {}, fields_to_generate
+        fields_to_return = self.io._read_particle_selection(
+                    self._chunk_io(dobj), selector,
+                    fields_to_read)
+        for field in fields_to_read:
+            ftype, fname = field
+            finfo = self.pf._get_field_info(*field)
+            conv_factor = finfo._convert_function(self)
+            np.multiply(fields_to_return[field], conv_factor,
+                        fields_to_return[field])
+        return fields_to_return, fields_to_generate
+
+    def _read_fluid_fields(self, fields, dobj, chunk = None):
+        if len(fields) == 0: return {}, []
+        selector = dobj.selector
+        if chunk is None:
+            self._identify_base_chunk(dobj)
+            chunk_size = dobj.size
+        else:
+            chunk_size = chunk.data_size
+        fields_to_return = {}
+        fields_to_read, fields_to_generate = self._split_fields(fields)
+        if len(fields_to_read) == 0:
+            return {}, fields_to_generate
+        fields_to_return = self.io._read_fluid_selection(self._chunk_io(dobj),
+                                                   selector,
+                                                   fields_to_read,
+                                                   chunk_size)
+        for field in fields_to_read:
+            ftype, fname = field
+            conv_factor = self.pf.field_info[fname]._convert_function(self)
+            np.multiply(fields_to_return[field], conv_factor,
+                        fields_to_return[field])
+        #mylog.debug("Don't know how to read %s", fields_to_generate)
+        return fields_to_return, fields_to_generate
+
+
+    def _chunk(self, dobj, chunking_style, ngz = 0, **kwargs):
+        # A chunk is either None or (grids, size)
+        if dobj._current_chunk is None:
+            self._identify_base_chunk(dobj)
+        if ngz != 0 and chunking_style != "spatial":
+            raise NotImplementedError
+        if chunking_style == "all":
+            return self._chunk_all(dobj, **kwargs)
+        elif chunking_style == "spatial":
+            return self._chunk_spatial(dobj, ngz, **kwargs)
+        elif chunking_style == "io":
+            return self._chunk_io(dobj, **kwargs)
+        else:
+            raise NotImplementedError
+
+class YTDataChunk(object):
+
+    def __init__(self, dobj, chunk_type, objs, data_size, field_type = None):
+        self.dobj = dobj
+        self.chunk_type = chunk_type
+        self.objs = objs
+        self._data_size = data_size
+        self._field_type = field_type
 
     @property
-    def grid_corners(self):
-        return np.array([
-          [self.grid_left_edge[:,0], self.grid_left_edge[:,1], self.grid_left_edge[:,2]],
-          [self.grid_right_edge[:,0], self.grid_left_edge[:,1], self.grid_left_edge[:,2]],
-          [self.grid_right_edge[:,0], self.grid_right_edge[:,1], self.grid_left_edge[:,2]],
-          [self.grid_left_edge[:,0], self.grid_right_edge[:,1], self.grid_left_edge[:,2]],
-          [self.grid_left_edge[:,0], self.grid_left_edge[:,1], self.grid_right_edge[:,2]],
-          [self.grid_right_edge[:,0], self.grid_left_edge[:,1], self.grid_right_edge[:,2]],
-          [self.grid_right_edge[:,0], self.grid_right_edge[:,1], self.grid_right_edge[:,2]],
-          [self.grid_left_edge[:,0], self.grid_right_edge[:,1], self.grid_right_edge[:,2]],
-        ], dtype='float64')
+    def data_size(self):
+        if callable(self._data_size):
+            self._data_size = self._data_size(self.dobj, self.objs)
+        return self._data_size
 
-    def print_stats(self):
-        """
-        Prints out (stdout) relevant information about the simulation
-        """
-        header = "%3s\t%6s\t%14s\t%14s" % ("level","# grids", "# cells",
-                                           "# cells^3")
-        print header
-        print "%s" % (len(header.expandtabs())*"-")
-        for level in xrange(MAXLEVEL):
-            if (self.level_stats['numgrids'][level]) == 0:
-                break
-            print "% 3i\t% 6i\t% 14i\t% 14i" % \
-                  (level, self.level_stats['numgrids'][level],
-                   self.level_stats['numcells'][level],
-                   self.level_stats['numcells'][level]**(1./3))
-            dx = self.select_grids(level)[0].dds[0]
-        print "-" * 46
-        print "   \t% 6i\t% 14i" % (self.level_stats['numgrids'].sum(), self.level_stats['numcells'].sum())
-        print "\n"
-        try:
-            print "z = %0.8f" % (self["CosmologyCurrentRedshift"])
-        except:
-            pass
-        t_s = self.pf.current_time * self.pf["Time"]
-        print "t = %0.8e = %0.8e s = %0.8e years" % \
-            (self.pf.current_time, \
-             t_s, t_s / sec_per_year )
-        print "\nSmallest Cell:"
-        u=[]
-        for item in self.parameter_file.units.items():
-            u.append((item[1],item[0]))
-        u.sort()
-        for unit in u:
-            print "\tWidth: %0.3e %s" % (dx*unit[0], unit[1])
+    _fcoords = None
+    @property
+    def fcoords(self):
+        if self._fcoords is not None: return self._fcoords
+        ci = np.empty((self.data_size, 3), dtype='float64')
+        self._fcoords = ci
+        if self.data_size == 0: return self._fcoords
+        ind = 0
+        for obj in self.objs:
+            c = obj.fcoords(self.dobj)
+            if c.shape[0] == 0: continue
+            ci[ind:ind+c.shape[0], :] = c
+            ind += c.shape[0]
+        return self._fcoords
 
+    _icoords = None
+    @property
+    def icoords(self):
+        if self._icoords is not None: return self._icoords
+        ci = np.empty((self.data_size, 3), dtype='int64')
+        self._icoords = ci
+        if self.data_size == 0: return self._icoords
+        ind = 0
+        for obj in self.objs:
+            c = obj.icoords(self.dobj)
+            if c.shape[0] == 0: continue
+            ci[ind:ind+c.shape[0], :] = c
+            ind += c.shape[0]
+        return ci
 
-scanf_regex = {}
-scanf_regex['e'] = r"[-+]?\d+\.?\d*?|\.\d+[eE][-+]?\d+?"
-scanf_regex['g'] = scanf_regex['e']
-scanf_regex['f'] = scanf_regex['e']
-scanf_regex['F'] = scanf_regex['e']
-#scanf_regex['g'] = r"[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?"
-#scanf_regex['f'] = r"[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?"
-#scanf_regex['F'] = r"[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?"
-scanf_regex['i'] = r"[-+]?(0[xX][\dA-Fa-f]+|0[0-7]*|\d+)"
-scanf_regex['d'] = r"[-+]?\d+"
-scanf_regex['s'] = r"\S+"
+    _fwidth = None
+    @property
+    def fwidth(self):
+        if self._fwidth is not None: return self._fwidth
+        ci = np.empty((self.data_size, 3), dtype='float64')
+        self._fwidth = ci
+        if self.data_size == 0: return self._fwidth
+        ind = 0
+        for obj in self.objs:
+            c = obj.fwidth(self.dobj)
+            if c.shape[0] == 0: continue
+            ci[ind:ind+c.shape[0], :] = c
+            ind += c.shape[0]
+        return ci
 
-def constructRegularExpressions(param, toReadTypes):
-    re_e=r"[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?"
-    re_i=r"[-+]?(0[xX][\dA-Fa-f]+|0[0-7]*|\d+)"
-    rs = "^%s\s*=\s*" % (param)
-    for t in toReadTypes:
-        rs += "(%s)\s*" % (scanf_regex[t])
-    rs +="$"
-    return re.compile(rs,re.M)
+    _ires = None
+    @property
+    def ires(self):
+        if self._ires is not None: return self._ires
+        ci = np.empty(self.data_size, dtype='int64')
+        self._ires = ci
+        if self.data_size == 0: return self._ires
+        ind = 0
+        for obj in self.objs:
+            c = obj.ires(self.dobj)
+            if c.shape == 0: continue
+            ci[ind:ind+c.size] = c
+            ind += c.size
+        return ci
 
+    _tcoords = None
+    @property
+    def tcoords(self):
+        if self._tcoords is None:
+            self.dtcoords
+        return self._tcoords
+
+    _dtcoords = None
+    @property
+    def dtcoords(self):
+        if self._dtcoords is not None: return self._dtcoords
+        ct = np.empty(self.data_size, dtype='float64')
+        cdt = np.empty(self.data_size, dtype='float64')
+        self._tcoords = ct
+        self._dtcoords = cdt
+        if self.data_size == 0: return self._dtcoords
+        ind = 0
+        for obj in self.objs:
+            gdt, gt = obj.tcoords(self.dobj)
+            if gt.shape == 0: continue
+            ct[ind:ind+gt.size] = gt
+            cdt[ind:ind+gdt.size] = gdt
+            ind += gt.size
+        return cdt
