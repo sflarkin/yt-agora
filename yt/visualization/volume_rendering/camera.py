@@ -34,7 +34,12 @@ from .transfer_functions import ProjectionTransferFunction
 
 from yt.utilities.lib import \
     arr_vec2pix_nest, arr_pix2vec_nest, \
-    arr_ang2pix_nest, arr_fisheye_vectors
+    arr_ang2pix_nest, arr_fisheye_vectors, lines, \
+    PartitionedGrid, ProjectionSampler, VolumeRenderSampler, \
+    LightSourceRenderSampler, InterpolatedProjectionSampler, \
+    arr_vec2pix_nest, arr_pix2vec_nest, arr_ang2pix_nest, \
+    pixelize_healpix, arr_fisheye_vectors, rotate_vectors
+
 from yt.utilities.math_utils import get_rotation_matrix
 from yt.utilities.orientation import Orientation
 from yt.data_objects.api import ImageArray
@@ -43,12 +48,20 @@ from yt.data_objects.data_containers import data_object_registry
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelAnalysisInterface, ProcessorPool
 from yt.utilities.amr_kdtree.api import AMRKDTree
+from .blenders import  enhance
+from numpy import pi
 
-from yt.utilities.lib import \
-    PartitionedGrid, ProjectionSampler, VolumeRenderSampler, \
-    LightSourceRenderSampler, InterpolatedProjectionSampler, \
-    arr_vec2pix_nest, arr_pix2vec_nest, arr_ang2pix_nest, \
-    pixelize_healpix, arr_fisheye_vectors
+def get_corners(le, re):
+    return np.array([
+      [le[0], le[1], le[2]],
+      [re[0], le[1], le[2]],
+      [re[0], re[1], le[2]],
+      [le[0], re[1], le[2]],
+      [le[0], le[1], re[2]],
+      [re[0], le[1], re[2]],
+      [re[0], re[1], re[2]],
+      [le[0], re[1], re[2]],
+    ], dtype='float64')
 
 class Camera(ParallelAnalysisInterface):
 
@@ -238,6 +251,76 @@ class Camera(ParallelAnalysisInterface):
 
     def update_view_from_matrix(self, mat):
         pass
+
+    def project_to_plane(self, pos, res=None):
+        if res is None: 
+            res = self.resolution
+        dx = np.dot(pos - self.origin, self.orienter.unit_vectors[1])
+        dy = np.dot(pos - self.origin, self.orienter.unit_vectors[0])
+        dz = np.dot(pos - self.center, self.orienter.unit_vectors[2])
+        # Transpose into image coords.
+        py = (res[0]*(dx/self.width[0])).astype('int')
+        px = (res[1]*(dy/self.width[1])).astype('int')
+        return px, py, dz
+
+    def add_grids(self, im, alpha=0.2, cmap='algae'):
+        corners = self.pf.h.grid_corners
+        levels = self.pf.h.grid_levels[:,0]
+        colors = apply_colormap(levels*1.0,
+                                color_bounds=[0,self.pf.h.max_level],
+                                cmap_name=cmap)[0,:,:]*1.0/255.
+        colors[:,3] = alpha
+
+                
+        order  = [0, 1, 1, 2, 2, 3, 3, 0]
+        order += [4, 5, 5, 6, 6, 7, 7, 4]
+        order += [0, 4, 1, 5, 2, 6, 3, 7]
+        
+        vertices = np.empty([corners.shape[2]*2*12,3])
+        for i in xrange(3):
+            vertices[:,i] = corners[order,i,:].ravel(order='F')
+
+        px, py, dz = self.project_to_plane(vertices, res=im.shape[:2])
+       
+        lines(im, px, py, colors, 24)
+
+    def draw_line(self, im, x0, x1, color=np.array([1.0,1.0,1.0,1.0])):
+        dx0 = ((x0-self.origin)*self.orienter.unit_vectors[1]).sum()
+        dx1 = ((x1-self.origin)*self.orienter.unit_vectors[1]).sum()
+        dy0 = ((x0-self.origin)*self.orienter.unit_vectors[0]).sum()
+        dy1 = ((x1-self.origin)*self.orienter.unit_vectors[0]).sum()
+        py0 = int(self.resolution[0]*(dx0/self.width[0]))
+        py1 = int(self.resolution[0]*(dx1/self.width[0]))
+        px0 = int(self.resolution[1]*(dy0/self.width[1]))
+        px1 = int(self.resolution[1]*(dy1/self.width[1]))
+        lines(im, np.array([px0,px1]), np.array([py0,py1]), color=np.array([color,color]))
+
+    def draw_grids(self,im, alpha=0.1):
+        ma = im.max()
+        if ma > 0.0: 
+            enhance(im)
+        self.add_grids(im, alpha=alpha, cmap='algae')
+
+    def draw_domain(self,im,alpha=0.5):
+        ma = im.max()
+        if ma > 0.0: 
+            enhance(im)
+        self.draw_box(im, self.pf.domain_left_edge, self.pf.domain_right_edge,
+                        color=np.array([1.0,1.0,1.0,alpha]))
+
+    def draw_box(self, im, le, re, color=np.array([1.0,1.0,1.0,1.0])):
+        corners = get_corners(le,re)
+        order  = [0, 1, 1, 2, 2, 3, 3, 0]
+        order += [4, 5, 5, 6, 6, 7, 7, 4]
+        order += [0, 4, 1, 5, 2, 6, 3, 7]
+        
+        vertices = np.empty([24,3])
+        for i in xrange(3):
+            vertices[:,i] = corners[order,i,:].ravel(order='F')
+
+        px, py, dz = self.project_to_plane(vertices, res=im.shape[:2])
+       
+        lines(im, px, py, color.reshape(1,4), 24)
 
     def look_at(self, new_center, north_vector = None):
         r"""Change the view direction based on a new focal point.
