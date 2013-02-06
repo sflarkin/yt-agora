@@ -261,7 +261,7 @@ function host_specific
         echo " to avoid conflicts with other command-line programs "
         echo " (like eog and evince, for example)."
     fi
-    if [$INST_SCIPY -eq 1]
+    if [ $INST_SCIPY -eq 1 ]
     then
 	echo
 	echo "Looks like you've requested that the install script build SciPy."
@@ -334,7 +334,7 @@ get_willwont ${INST_PYX}
 echo "be installing PyX"
 
 printf "%-15s = %s so I " "INST_SCIPY" "${INST_SCIPY}"
-get_willwont ${INST_PYX}
+get_willwont ${INST_SCIPY}
 echo "be installing scipy"
 
 printf "%-15s = %s so I " "INST_0MQ" "${INST_0MQ}"
