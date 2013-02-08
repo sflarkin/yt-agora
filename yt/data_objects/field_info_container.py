@@ -127,24 +127,34 @@ class FieldInfoContainer(dict): # Resistance has utility
 
     def __missing__(self, key):
         if self.fallback is None:
-            raise KeyError("No field named %s" % key)
+            raise KeyError("No field named %s" % (key,))
         return self.fallback[key]
 
+    name = ""
+
     @classmethod
-    def create_with_fallback(cls, fallback):
+    def create_with_fallback(cls, fallback, name = ""):
         obj = cls()
         obj.fallback = fallback
+        obj.name = name
         return obj
 
     def __contains__(self, key):
         if dict.__contains__(self, key): return True
         if self.fallback is None: return False
-        return self.fallback.has_key(key)
+        return key in self.fallback
 
     def __iter__(self):
-        for f in dict.__iter__(self): yield f
-        if self.fallback:
+        for f in dict.__iter__(self):
+            yield f
+        if self.fallback is not None:
             for f in self.fallback: yield f
+
+    def keys(self):
+        keys = dict.keys(self)
+        if self.fallback:
+            keys += self.fallback.keys()
+        return keys
 
 def TranslationFunc(field_name):
     def _TranslationFunc(field, data):
@@ -155,6 +165,7 @@ def NullFunc(field, data):
     return
 
 FieldInfo = FieldInfoContainer()
+FieldInfo.name = id(FieldInfo)
 add_field = FieldInfo.add_field
 add_grad = FieldInfo.add_grad
 
@@ -210,6 +221,8 @@ class FieldDetector(defaultdict):
         self.flat = flat
         self._spatial = not flat
         self.ActiveDimensions = [nd,nd,nd]
+        self.shape = tuple(self.ActiveDimensions)
+        self.size = np.prod(self.ActiveDimensions)
         self.LeftEdge = [0.0, 0.0, 0.0]
         self.RightEdge = [1.0, 1.0, 1.0]
         self.dds = np.ones(3, "float64")
@@ -341,6 +354,23 @@ class DerivedField(object):
         self.display_name = display_name
         self.not_in_all = not_in_all
 
+    def _copy_def(self):
+        dd = {}
+        dd['name'] = self.name
+        dd['convert_function'] = self._convert_function
+        dd['particle_convert_function'] = self._particle_convert_function
+        dd['units'] = self._units
+        dd['projected_units'] = self._projected_units,
+        dd['take_log'] = self.take_log
+        dd['validators'] = self.validators.copy()
+        dd['particle_type'] = self.particle_type
+        dd['vector_field'] = self.vector_field
+        dd['display_field'] = True
+        dd['not_in_all'] = self.not_in_all
+        dd['display_name'] = self.display_name
+        dd['projection_conversion'] = self.projection_conversion
+        return dd
+
     def check_available(self, data):
         """
         This raises an exception of the appropriate type if the set of
@@ -377,7 +407,8 @@ class DerivedField(object):
         ii = self.check_available(data)
         original_fields = data.keys() # Copy
         dd = self._function(self, data)
-        dd *= self._convert_function(data)
+        if dd is not None:
+            dd *= self._convert_function(data)
         for field_name in data.keys():
             if field_name not in original_fields:
                 del data[field_name]
@@ -473,7 +504,7 @@ class ValidateSpatial(FieldValidator):
         # When we say spatial information, we really mean
         # that it has a three-dimensional data structure
         #if isinstance(data, FieldDetector): return True
-        if not data._spatial:
+        if not getattr(data, '_spatial', False):
             raise NeedsGridType(self.ghost_zones,self.fields)
         if self.ghost_zones <= data._num_ghost_zones:
             return True

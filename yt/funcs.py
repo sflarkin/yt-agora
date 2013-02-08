@@ -602,3 +602,12 @@ def fix_axis(axis):
 def get_image_suffix(name):
     suffix = os.path.splitext(name)[1]
     return suffix if suffix in ['.png', '.eps', '.ps', '.pdf'] else ''
+
+# This is a modification of:
+# http://stackoverflow.com/questions/312443/how-do-you-split-a-list-into-evenly-sized-chunks-in-python
+def list_chunks(l, n):
+    """ Yield successive n-sized chunks from l.
+    """
+    ty = int(ceil(float(len(l))/n))
+    for i in xrange(0, n):
+        yield l[i*ty:(i+1)*ty]

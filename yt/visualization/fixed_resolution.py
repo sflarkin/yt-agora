@@ -30,6 +30,8 @@ from yt.utilities.definitions import \
     axis_names
 from .volume_rendering.api import off_axis_projection
 from yt.data_objects.image_array import ImageArray
+from yt.utilities.lib.misc_utilities import \
+    pixelize_cylinder
 import _MPL
 import numpy as np
 import weakref
@@ -50,12 +52,12 @@ class FixedResolutionBuffer(object):
         requires a deposition step, where individual variable-resolution pixels
         are deposited into a buffer of some resolution, to create an image.
         This object is an interface to that pixelization step: it can deposit
-        multiple fields.  It acts as a standard AMRData object, such that
+        multiple fields.  It acts as a standard YTDataContainer object, such that
         dict-style access returns an image of a given field.
 
         Parameters
         ----------
-        data_source : :class:`yt.data_objects.data_containers.AMRProjBase` or :class:`yt.data_objects.data_containers.AMRSliceBase`
+        data_source : :class:`yt.data_objects.data_containers.YTOverlapProjBase` or :class:`yt.data_objects.data_containers.YTSliceBase`
             This is the source to be pixelized, which can be a projection or a
             slice.  (For cutting planes, see
             `yt.visualization.fixed_resolution.ObliqueFixedResolutionBuffer`.)
@@ -83,7 +85,7 @@ class FixedResolutionBuffer(object):
         To make a projection and then several images, you can generate a
         single FRB and then access multiple fields:
 
-        >>> proj = pf.h.proj(0, "Density")
+        >>> proj = pf.h.proj("Density", "y")
         >>> frb1 = FixedResolutionBuffer(proj, (0.2, 0.3, 0.4, 0.5),
                         (1024, 1024))
         >>> print frb1["Density"].max()
@@ -143,21 +145,24 @@ class FixedResolutionBuffer(object):
 
     def _get_data_source_fields(self):
         exclude = self.data_source._key_fields + list(self._exclude_fields)
-        for f in self.data_source.fields:
+        fields = getattr(self.data_source, "fields", [])
+        fields += getattr(self.data_source, "field_data", {}).keys()
+        for f in fields:
             if f not in exclude:
                 self[f]
 
     def _get_info(self, item):
         info = {}
+        ftype, fname = field = self.data_source._determine_fields(item)[0]
+        finfo = self.data_source.pf._get_field_info(*field)
         info['data_source'] = self.data_source.__str__()  
         info['axis'] = self.data_source.axis
         info['field'] = str(item)
-        info['units'] = self.data_source.pf.field_info[item].get_units()
+        info['units'] = finfo.get_units()
         info['xlim'] = self.bounds[:2]
         info['ylim'] = self.bounds[2:]
         info['length_to_cm'] = self.data_source.pf['cm']
-        info['projected_units'] = \
-                self.data_source.pf.field_info[item].get_projected_units()
+        info['projected_units'] = finfo.get_projected_units()
         info['center'] = self.data_source.center
         
         try:
@@ -170,9 +175,9 @@ class FixedResolutionBuffer(object):
         except AttributeError:
             pass
         
-        info['label'] = self.data_source.pf.field_info[item].display_name
+        info['label'] = finfo.display_name
         if info['label'] is None:
-            info['label'] = r'$\rm{'+item+r'}$'
+            info['label'] = r'$\rm{'+fname+r'}$'
         elif info['label'].find('$') == -1:
             info['label'] = info['label'].replace(' ','\/')
             info['label'] = r'$\rm{'+info['label']+r'}$'
@@ -417,6 +422,30 @@ class FixedResolutionBuffer(object):
         rv[yn] = (self.bounds[2], self.bounds[3])
         return rv
 
+class CylindricalFixedResolutionBuffer(FixedResolutionBuffer):
+
+    def __init__(self, data_source, radius, buff_size, antialias = True) :
+
+        self.data_source = data_source
+        self.pf = data_source.pf
+        self.radius = radius
+        self.buff_size = buff_size
+        self.antialias = antialias
+        self.data = {}
+        
+        h = getattr(data_source, "hierarchy", None)
+        if h is not None:
+            h.plots.append(weakref.proxy(self))
+
+    def __getitem__(self, item) :
+        if item in self.data: return self.data[item]
+        buff = pixelize_cylinder(self.data_source["r"], self.data_source["dr"],
+                                 self.data_source["theta"], self.data_source["dtheta"],
+                                 self.buff_size, self.data_source[item].astype("float64"),
+                                 self.radius)
+        self[item] = buff
+        return buff
+        
 class ObliqueFixedResolutionBuffer(FixedResolutionBuffer):
     """
     This object is a subclass of :class:`yt.visualization.fixed_resolution.FixedResolutionBuffer`
