@@ -57,20 +57,20 @@ class ObsoleteDataException(YTException):
 class EmissivityIntegrator(object):
     r"""Class for making X-ray emissivity fields with hdf5 data tables 
     from Cloudy.
+    
+    Initialize an EmissivityIntegrator object.
+
+    Keyword Parameters
+    ------------------
+    filename: string
+        Path to data file containing emissivity values.  If None,
+        a file called xray_emissivity.h5 is used.  This file contains 
+        emissivity tables for primordial elements and for metals at 
+        solar metallicity for the energy range 0.1 to 100 keV.
+        Default: None.
+        
     """
     def __init__(self, filename=None):
-        r"""Initialize an EmissivityIntegrator object.
-
-        Keyword Parameters
-        ------------------
-        filename: string
-            Path to data file containing emissivity values.  If None,
-            a file called xray_emissivity.h5 is used.  This file contains 
-            emissivity tables for primordial elements and for metals at 
-            solar metallicity for the energy range 0.1 to 100 keV.
-            Default: None.
-            
-        """
 
         default_filename = False
         if filename is None:
