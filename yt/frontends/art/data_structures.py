@@ -89,7 +89,6 @@ class ARTGeometryHandler(OctreeGeometryHandler):
         self.directory = os.path.dirname(self.hierarchy_filename)
         self.max_level = pf.max_level
         self.float_type = np.float64
-        self.subchunk_size = long(2e5) #maximum # of octs per chunk
         super(ARTGeometryHandler,self).__init__(pf,data_style)
 
     def _initialize_oct_handler(self):
@@ -98,20 +97,8 @@ class ARTGeometryHandler(OctreeGeometryHandler):
         allocate the requisite memory in the oct tree
         """
         nv = len(self.fluid_field_list)
-
-        def subchunk(count,size):
-            for i in range(0,count,size):
-                yield i,i+min(size,count-i)
-
-        self.domains = []
-        root = ARTDomainFile(self.parameter_file,1,nv,0)
-        count = root.level_count
-        counts = root._level_count
-        self.domains += root,
-        for did,l in enumerate(range(1,self.pf.max_level)):
-            self.domains += ARTDomainFile(self.parameter_file,did+2,
-                                          nv,l),
-
+        self.domains = [ARTDomainFile(self.parameter_file,i+1,nv,l)
+                        for i,l in enumerate(range(self.pf.max_level))]
         self.octs_per_domain = [dom.level_count.sum() for dom in self.domains]
         self.total_octs = sum(self.octs_per_domain)
         self.oct_handler = RAMSESOctreeContainer(
