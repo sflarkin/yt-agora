@@ -13,7 +13,8 @@ Homepage: http://yt-project.org/
 Author: Nathan Goldbaum <goldbaum@ucolick.org>
 Affiliation: UC Santa Cruz
 License:
-  Copyright (C) 2008-2011 Matthew Turk, JS Oishi, Stephen Skory.  All Rights Reserved.
+  Copyright (C) 2008-2012 Matthew Turk, JS Oishi, Stephen Skory, Anthony Scopatz.  
+  All Rights Reserved.
 
   This file is part of yt.
 
@@ -354,33 +355,25 @@ class GridBoundaryCallback(PlotCallback):
             pxs, pys = np.mgrid[-1:1:3j,-1:1:3j]
         else:
             pxs, pys = np.mgrid[0:0:1j,0:0:1j]
-        GLE = plot.data.grid_left_edge
-        GRE = plot.data.grid_right_edge
-        grid_levels = plot.data.grid_levels
-        min_level = self.min_level
-        max_level = self.max_level
-        if min_level is None:
-            min_level = 0
-        if max_level is None:
-            max_level = plot.data.pf.h.max_level
-
+        GLE = plot.data.pf.h.grid_left_edge
+        GRE = plot.data.pf.h.grid_right_edge
         for px_off, py_off in zip(pxs.ravel(), pys.ravel()):
             pxo = px_off * dom[px_index]
             pyo = py_off * dom[py_index]
-            left_edge_x = (GLE[:,px_index]+pxo-x0)*dx + xx0
-            left_edge_y = (GLE[:,py_index]+pyo-y0)*dy + yy0
-            right_edge_x = (GRE[:,px_index]+pxo-x0)*dx + xx0
-            right_edge_y = (GRE[:,py_index]+pyo-y0)*dy + yy0
-            visible =  ( xpix * (right_edge_x - left_edge_x) / (xx1 - xx0) > self.min_pix ) & \
-                       ( ypix * (right_edge_y - left_edge_y) / (yy1 - yy0) > self.min_pix ) & \
-                       ( grid_levels >= min_level) & \
-                       ( grid_levels <= max_level)
-            if visible.nonzero()[0].size == 0: continue
+            left_edge_px = (GLE[:,px_index]+pxo-x0)*dx + xx0
+            left_edge_py = (GLE[:,py_index]+pyo-y0)*dy + yy0
+            right_edge_px = (GRE[:,px_index]+pxo-x0)*dx + xx0
+            right_edge_py = (GRE[:,py_index]+pyo-y0)*dy + yy0
             verts = np.array(
-                [(left_edge_x, left_edge_x, right_edge_x, right_edge_x),
-                 (left_edge_y, right_edge_y, right_edge_y, left_edge_y)])
+                [(left_edge_px, left_edge_px, right_edge_px, right_edge_px),
+                 (left_edge_py, right_edge_py, right_edge_py, left_edge_py)])
+            visible =  (right_edge_px - left_edge_px > self.min_pix) & \
+                       (right_edge_px - left_edge_px > self.min_pix)
             verts=verts.transpose()[visible,:,:]
+            if verts.size == 0: continue
             edgecolors = (0.0,0.0,0.0,self.alpha)
+            verts[:,:,0]= (xx1-xx0)*(verts[:,:,0]/width) + xx0
+            verts[:,:,1]= (yy1-yy0)*(verts[:,:,1]/height) + yy0
             grid_collection = matplotlib.collections.PolyCollection(
                 verts, facecolors="none",
                 edgecolors=edgecolors)
@@ -673,19 +666,20 @@ class ClumpContourCallback(PlotCallback):
         DomainRight = plot.data.pf.domain_right_edge
         DomainLeft = plot.data.pf.domain_left_edge
         DomainWidth = DomainRight - DomainLeft
-
+        
         nx, ny = plot.image._A.shape
         buff = np.zeros((nx,ny),dtype='float64')
         for i,clump in enumerate(reversed(self.clumps)):
             mylog.debug("Pixelizing contour %s", i)
 
+
             xf_copy = clump[xf].copy()
             yf_copy = clump[yf].copy()
-
-            temp = _MPL.Pixelize(xf_copy, yf_copy,
-                                 clump[dxf]/2.0,
-                                 clump[dyf]/2.0,
-                                 clump[dxf]*0.0+i+1, # inits inside Pixelize
+            
+            temp = _MPL.Pixelize(xf_copy, yf_copy, 
+                                 clump['dx']/2.0,
+                                 clump['dy']/2.0,
+                                 clump['dx']*0.0+i+1, # inits inside Pixelize
                                  int(nx), int(ny),
                              (x0, x1, y0, y1), 0).transpose()
             buff = np.maximum(temp, buff)
@@ -1276,7 +1270,7 @@ class MaterialBoundaryCallback(ContourCallback):
     def __init__(self, field='targ', ncont=1, factor=4, clim=(0.9, 1.0), **kwargs):
         plot_args = {'colors': 'w'}
         plot_args.update(kwargs)
-        super(MaterialBoundaryCallback, self).__init__(field=field, ncont=ncont,
+        super(MaterialBoundaryCallback, self).__init__(field=field, ncont=ncont, 
                                                        factor=factor, clim=clim,
                                                        plot_args=plot_args)
 

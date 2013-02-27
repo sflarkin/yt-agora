@@ -314,7 +314,7 @@ class Halo(object):
 
         Returns
         -------
-        sphere : `yt.data_objects.api.AMRSphereBase`
+        sphere : `yt.data_objects.api.YTSphereBase`
             The empty data source.
 
         Examples
@@ -995,7 +995,7 @@ class LoadedHalo(Halo):
 
         Returns
         -------
-        sphere : `yt.data_objects.api.AMRSphereBase`
+        sphere : `yt.data_objects.api.YTSphereBase`
             The empty data source.
 
         Examples
@@ -1059,7 +1059,7 @@ class HaloList(object):
 
     _fields = ["particle_position_%s" % ax for ax in 'xyz']
 
-    def __init__(self, data_source, dm_only=True, redshift=-1):
+    def __init__(self, data_source, dm_only=True):
         """
         Run hop on *data_source* with a given density *threshold*.  If
         *dm_only* is set, only run it on the dark matter particles, otherwise
