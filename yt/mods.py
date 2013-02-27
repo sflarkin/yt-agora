@@ -87,6 +87,12 @@ from yt.frontends.flash.api import \
 from yt.frontends.tiger.api import \
     TigerStaticOutput, TigerFieldInfo, add_tiger_field
 
+from yt.frontends.artio.api import \
+    ARTIOStaticOutput, ARTIOFieldInfo, add_artio_field
+
+#from yt.frontends.artio2.api import \
+#    Artio2StaticOutput
+
 from yt.frontends.ramses.api import \
     RAMSESStaticOutput, RAMSESFieldInfo, add_ramses_field
 
@@ -108,6 +114,11 @@ from yt.frontends.art.api import \
 from yt.frontends.stream.api import \
     StreamStaticOutput, StreamFieldInfo, add_stream_field, \
     StreamHandler, load_uniform_grid, load_amr_grids
+
+from yt.frontends.sph.api import \
+    OWLSStaticOutput, OWLSFieldInfo, add_owls_field, \
+    GadgetStaticOutput, GadgetFieldInfo, add_gadget_field, \
+    TipsyStaticOutput, TipsyFieldInfo, add_tipsy_field
 
 from yt.analysis_modules.list_modules import \
     get_available_modules, amods

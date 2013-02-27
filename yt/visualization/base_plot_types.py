@@ -82,3 +82,11 @@ class ImagePlotMPL(PlotMPL):
         self.image = self.axes.imshow(data, origin='lower', extent=extent,
                                       norm=norm, vmin=self.zmin, aspect=aspect,
                                       vmax=self.zmax, cmap=cmap)
+
+    def _repr_png_(self):
+        canvas = FigureCanvasAgg(self.figure)
+        f = cStringIO.StringIO()
+        canvas.print_figure(f)
+        f.seek(0)
+        return f.read()
+

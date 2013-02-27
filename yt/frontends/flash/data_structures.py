@@ -28,11 +28,14 @@ import stat
 import numpy as np
 import weakref
 
+from yt.config import ytcfg
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
     AMRGridPatch
-from yt.data_objects.hierarchy import \
-    AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+    GridGeometryHandler
+from yt.geometry.geometry_handler import \
+    YTDataChunk
 from yt.data_objects.static_output import \
     StaticOutput
 from yt.utilities.definitions import \
@@ -57,7 +60,11 @@ class FLASHGrid(AMRGridPatch):
     def __repr__(self):
         return "FLASHGrid_%04i (%s)" % (self.id, self.ActiveDimensions)
 
-class FLASHHierarchy(AMRHierarchy):
+    @property
+    def filename(self):
+        return None
+
+class FLASHHierarchy(GridGeometryHandler):
 
     grid = FLASHGrid
     
@@ -70,9 +77,8 @@ class FLASHHierarchy(AMRHierarchy):
         self.directory = os.path.dirname(self.hierarchy_filename)
         self._handle = pf._handle
         self._particle_handle = pf._particle_handle
-        
         self.float_type = np.float64
-        AMRHierarchy.__init__(self,pf,data_style)
+        GridGeometryHandler.__init__(self,pf,data_style)
 
     def _initialize_data_storage(self):
         pass
@@ -86,7 +92,7 @@ class FLASHHierarchy(AMRHierarchy):
     
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
     def _count_grids(self):
@@ -184,7 +190,7 @@ class FLASHHierarchy(AMRHierarchy):
         self.max_level = self.grid_levels.max()
 
     def _setup_derived_fields(self):
-        AMRHierarchy._setup_derived_fields(self)
+        super(FLASHHierarchy, self)._setup_derived_fields()
         [self.parameter_file.conversion_factors[field] 
          for field in self.field_list]
         for field in self.field_list:
@@ -205,6 +211,13 @@ class FLASHHierarchy(AMRHierarchy):
                 
     def _setup_data_io(self):
         self.io = io_registry[self.data_style](self.parameter_file)
+
+    def _chunk_io(self, dobj):
+        gobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
+        # We'll take the max of 128 and the number of processors
+        nl = max(16, ytcfg.getint("yt", "__topcomm_parallel_size"))
+        for gs in list_chunks(gobjs, nl):
+            yield YTDataChunk(dobj, "io", gs, self._count_selection)
 
 class FLASHStaticOutput(StaticOutput):
     _hierarchy_class = FLASHHierarchy
