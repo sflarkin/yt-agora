@@ -66,50 +66,9 @@ from yt.utilities.math_utils import \
     get_cyl_theta_component, \
     get_cyl_r, get_cyl_theta, \
     get_cyl_z, get_sph_r, \
-    get_sph_theta, get_sph_phi
+    get_sph_theta, get_sph_phi, \
+    periodic_dist, euclidean_dist
      
-# Note that, despite my newfound efforts to comply with PEP-8,
-# I violate it here in order to keep the name/func_name relationship
-
-def _dx(field, data):
-    return np.ones(data.ActiveDimensions, dtype='float64') * data.dds[0]
-add_field('dx', function=_dx, display_field=False,
-          validators=[ValidateSpatial(0)])
-
-def _dy(field, data):
-    return np.ones(data.ActiveDimensions, dtype='float64') * data.dds[1]
-add_field('dy', function=_dy, display_field=False,
-          validators=[ValidateSpatial(0)])
-
-def _dz(field, data):
-    return np.ones(data.ActiveDimensions, dtype='float64') * data.dds[2]
-add_field('dz', function=_dz,
-          display_field=False, validators=[ValidateSpatial(0)])
-
-def _coordX(field, data):
-    dim = data.ActiveDimensions[0]
-    return (np.ones(data.ActiveDimensions, dtype='float64')
-                   * np.arange(data.ActiveDimensions[0])[:,None,None]
-            +0.5) * data['dx'] + data.LeftEdge[0]
-add_field('x', function=_coordX, display_field=False,
-          validators=[ValidateSpatial(0)])
-
-def _coordY(field, data):
-    dim = data.ActiveDimensions[1]
-    return (np.ones(data.ActiveDimensions, dtype='float64')
-                   * np.arange(data.ActiveDimensions[1])[None,:,None]
-            +0.5) * data['dy'] + data.LeftEdge[1]
-add_field('y', function=_coordY, display_field=False,
-          validators=[ValidateSpatial(0)])
-
-def _coordZ(field, data):
-    dim = data.ActiveDimensions[2]
-    return (np.ones(data.ActiveDimensions, dtype='float64')
-                   * np.arange(data.ActiveDimensions[2])[None,None,:]
-            +0.5) * data['dz'] + data.LeftEdge[2]
-add_field('z', function=_coordZ, display_field=False,
-          validators=[ValidateSpatial(0)])
-
 def _GridLevel(field, data):
     return np.ones(data.ActiveDimensions)*(data.Level)
 add_field("GridLevel", function=_GridLevel,
@@ -127,6 +86,13 @@ def _OnesOverDx(field, data):
                    dtype=data["Density"].dtype)/data['dx']
 add_field("OnesOverDx", function=_OnesOverDx,
           display_field=False)
+
+def _Zeros(field, data):
+    return np.zeros(data.ActiveDimensions, dtype='float64')
+add_field("Zeros", function=_Zeros,
+          validators=[ValidateSpatial(0)],
+          projection_conversion="unitary",
+          display_field = False)
 
 def _Ones(field, data):
     return np.ones(data.shape, dtype='float64')
@@ -219,9 +185,9 @@ add_field("Entropy", units=r"\rm{ergs}\ \rm{cm}^{3\gamma-3}",
 def _sph_r(field, data):
     center = data.get_field_parameter("center")
       
-    coords = obtain_rvec(data).transpose()
+    coords = obtain_rvec(data)
 
-    return get_sph_r(vectors, center)
+    return get_sph_r(coords)
 
 def _Convert_sph_r_CGS(data):
    return data.convert("cm")
@@ -236,7 +202,7 @@ def _sph_theta(field, data):
     center = data.get_field_parameter("center")
     normal = data.get_field_parameter("normal")
     
-    coords = obtain_rvec(data).transpose()
+    coords = obtain_rvec(data)
 
     return get_sph_theta(coords, normal)
 
@@ -249,7 +215,7 @@ def _sph_phi(field, data):
     center = data.get_field_parameter("center")
     normal = data.get_field_parameter("normal")
     
-    coords = obtain_rvec(data).transpose()
+    coords = obtain_rvec(data)
 
     return get_sph_phi(coords, normal)
 
@@ -261,7 +227,7 @@ def _cyl_R(field, data):
     center = data.get_field_parameter("center")
     normal = data.get_field_parameter("normal")
       
-    coords = obtain_rvec(data).transpose()
+    coords = obtain_rvec(data)
 
     return get_cyl_r(coords, normal)
 
@@ -281,7 +247,7 @@ def _cyl_z(field, data):
     center = data.get_field_parameter("center")
     normal = data.get_field_parameter("normal")
     
-    coords = obtain_rvec(data).transpose()
+    coords = obtain_rvec(data)
 
     return get_cyl_z(coords, normal)
 
@@ -298,7 +264,7 @@ def _cyl_theta(field, data):
     center = data.get_field_parameter("center")
     normal = data.get_field_parameter("normal")
     
-    coords = obtain_rvec(data).transpose()
+    coords = obtain_rvec(data)
 
     return get_cyl_theta(coords, normal)
 
@@ -339,9 +305,9 @@ add_field("HeightAU", function=_Height,
 
 def _cyl_RadialVelocity(field, data):
     normal = data.get_field_parameter("normal")
-    velocities = obtain_rv_vec(data).transpose()
+    velocities = obtain_rv_vec(data)
 
-    theta = np.tile(data['cyl_theta'], (3, 1)).transpose()
+    theta = data['cyl_theta']
 
     return get_cyl_r_component(velocities, theta, normal)
 
@@ -364,8 +330,8 @@ add_field("cyl_RadialVelocityKMSABS", function=_cyl_RadialVelocityABS,
 
 def _cyl_TangentialVelocity(field, data):
     normal = data.get_field_parameter("normal")
-    velocities = obtain_rv_vec(data).transpose()
-    theta = np.tile(data['cyl_theta'], (3, 1)).transpose()
+    velocities = obtain_rv_vec(data)
+    theta = data['cyl_theta']
 
     return get_cyl_theta_component(velocities, theta, normal)
 
@@ -443,7 +409,7 @@ add_field("ComovingDensity", function=_ComovingDensity, units=r"\rm{g}/\rm{cm}^3
 
 # This is rho_total / rho_cr(z).
 def _Convert_Overdensity(data):
-    return 1 / (rho_crit_now * data.pf.hubble_constant**2 * 
+    return 1.0 / (rho_crit_now * data.pf.hubble_constant**2 * 
                 (1+data.pf.current_redshift)**3)
 add_field("Overdensity",function=_Matter_Density,
           convert_function=_Convert_Overdensity, units=r"")
@@ -463,8 +429,8 @@ def _Baryon_Overdensity(field, data):
     else:
         omega_baryon_now = 0.0441
     return data['Density'] / (omega_baryon_now * rho_crit_now * 
-                              (data.pf['CosmologyHubbleConstantNow']**2) * 
-                              ((1+data.pf['CosmologyCurrentRedshift'])**3))
+                              (data.pf.hubble_constant**2) * 
+                              ((1+data.pf.current_redshift)**3))
 add_field("Baryon_Overdensity", function=_Baryon_Overdensity, 
           units=r"")
 
@@ -494,11 +460,11 @@ add_field("WeakLensingConvergence", function=_DensityPerturbation,
 def _CellVolume(field, data):
     if data['dx'].size == 1:
         try:
-            return data['dx']*data['dy']*data['dx']*\
+            return data['dx'] * data['dy'] * data['dz'] * \
                 np.ones(data.ActiveDimensions, dtype='float64')
         except AttributeError:
-            return data['dx']*data['dy']*data['dx']
-    return data["dx"]*data["dy"]*data["dz"]
+            return data['dx'] * data['dy'] * data['dz']
+    return data["dx"] * data["dy"] * data["dz"]
 def _ConvertCellVolumeMpc(data):
     return data.convert("mpc")**3.0
 def _ConvertCellVolumeCGS(data):
@@ -771,25 +737,23 @@ add_field("ParticleAngularMomentumZ", function=_ParticleAngularMomentumZ,
          units=r"\rm{g}\/\rm{cm}^2/\rm{s}", particle_type=True,
          validators=[ValidateParameter('center')])
 
-
+def get_radius(positions, data):
+    c = data.get_field_parameter("center")
+    n_tup = tuple([1 for i in range(positions.ndim-1)])
+    center = np.tile(np.reshape(c, (positions.shape[0],)+n_tup),(1,)+positions.shape[1:])
+    periodicity = data.pf.periodicity
+    if any(periodicity):
+        period = data.pf.domain_right_edge - data.pf.domain_left_edge
+        return periodic_dist(positions, center, period, periodicity)
+    else:
+        return euclidean_dist(positions, center)
 def _ParticleRadius(field, data):
-    center = data.get_field_parameter("center")
-    DW = data.pf.domain_right_edge - data.pf.domain_left_edge
-    radius = np.zeros(data["particle_position_x"].shape, dtype='float64')
-    for i, ax in enumerate('xyz'):
-        r = np.abs(data["particle_position_%s" % ax] - center[i])
-        radius += np.minimum(r, np.abs(DW[i]-r))**2.0
-    np.sqrt(radius, radius)
-    return radius
+    positions = np.array([data["particle_position_%s" % ax] for ax in 'xyz'])
+    return get_radius(positions, data)
 def _Radius(field, data):
-    center = data.get_field_parameter("center")
-    DW = data.pf.domain_right_edge - data.pf.domain_left_edge
-    radius = np.zeros(data["x"].shape, dtype='float64')
-    for i, ax in enumerate('xyz'):
-        r = np.abs(data[ax] - center[i])
-        radius += np.minimum(r, np.abs(DW[i]-r))**2.0
-    np.sqrt(radius, radius)
-    return radius
+    positions = np.array([data['x'], data['y'], data['z']])
+    return get_radius(positions, data)
+
 def _ConvertRadiusCGS(data):
     return data.convert("cm")
 add_field("ParticleRadius", function=_ParticleRadius,
@@ -871,9 +835,9 @@ add_field("RadiusCode", function=_Radius,
 
 def _RadialVelocity(field, data):
     normal = data.get_field_parameter("normal")
-    velocities = obtain_rv_vec(data).transpose()    
-    theta = np.tile(data['sph_theta'], (3, 1)).transpose()
-    phi   = np.tile(data['sph_phi'], (3, 1)).transpose()
+    velocities = obtain_rv_vec(data)    
+    theta = data['sph_theta']
+    phi   = data['sph_phi']
 
     return get_sph_r_component(velocities, theta, phi, normal)
 
@@ -961,12 +925,12 @@ def _convertDensity(data):
     return data.convert("Density")
 def _pdensity(field, data):
     blank = np.zeros(data.ActiveDimensions, dtype='float32')
-    if data.NumberOfParticles == 0: return blank
+    if data["particle_position_x"].size == 0: return blank
     CICDeposit_3(data["particle_position_x"].astype(np.float64),
                  data["particle_position_y"].astype(np.float64),
                  data["particle_position_z"].astype(np.float64),
                  data["particle_mass"].astype(np.float32),
-                 np.int64(data.NumberOfParticles),
+                 data["particle_position_x"].size,
                  blank, np.array(data.LeftEdge).astype(np.float64),
                  np.array(data.ActiveDimensions).astype(np.int32),
                  np.float64(data['dx']))
@@ -1017,8 +981,8 @@ def _BPoloidal(field,data):
 
     Bfields = np.array([data['Bx'], data['By'], data['Bz']])
 
-    theta = np.tile(data['sph_theta'], (3, 1)).transpose()
-    phi   = np.tile(data['sph_phi'], (3, 1)).transpose()
+    theta = data['sph_theta']
+    phi   = data['sph_phi']
 
     return get_sph_theta_component(Bfields, theta, phi, normal)
 
@@ -1031,7 +995,7 @@ def _BToroidal(field,data):
 
     Bfields = np.array([data['Bx'], data['By'], data['Bz']])
 
-    phi   = np.tile(data['sph_phi'], (3, 1)).transpose()
+    phi   = data['sph_phi']
 
     return get_sph_phi_component(Bfields, phi, normal)
 
@@ -1044,8 +1008,8 @@ def _BRadial(field,data):
 
     Bfields = np.array([data['Bx'], data['By'], data['Bz']])
 
-    theta = np.tile(data['sph_theta'], (3, 1)).transpose()
-    phi   = np.tile(data['sph_phi'], (3, 1)).transpose()
+    theta = data['sph_theta']
+    phi   = data['sph_phi']
 
     return get_sph_r_component(Bfields, theta, phi, normal)
 

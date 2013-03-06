@@ -58,7 +58,7 @@ if __level >= int(ytcfgDefaults["loglevel"]):
 from yt.data_objects.api import \
     BinnedProfile1D, BinnedProfile2D, BinnedProfile3D, \
     data_object_registry, \
-    derived_field, add_field, FieldInfo, \
+    derived_field, add_field, add_grad, FieldInfo, \
     ValidateParameter, ValidateDataField, ValidateProperty, \
     ValidateSpatial, ValidateGridType, \
     TimeSeriesData, AnalysisTask, analysis_task, \
@@ -105,6 +105,15 @@ from yt.frontends.athena.api import \
 #from yt.frontends.maestro.api import \
 #    MaestroStaticOutput, MaestroFieldInfo, add_maestro_field
 
+from yt.frontends.stream.api import \
+    StreamStaticOutput, StreamFieldInfo, add_stream_field, \
+    StreamHandler, load_uniform_grid, load_amr_grids
+
+from yt.frontends.sph.api import \
+    OWLSStaticOutput, OWLSFieldInfo, add_owls_field, \
+    GadgetStaticOutput, GadgetFieldInfo, add_gadget_field, \
+    TipsyStaticOutput, TipsyFieldInfo, add_tipsy_field
+
 from yt.analysis_modules.list_modules import \
     get_available_modules, amods
 available_analysis_modules = get_available_modules()
@@ -139,7 +148,7 @@ from yt.convenience import \
 
 # Import some helpful math utilities
 from yt.utilities.math_utils import \
-    ortho_find, quartiles
+    ortho_find, quartiles, periodic_position 
 
 
 # We load plugins.  Keep in mind, this can be fairly dangerous -

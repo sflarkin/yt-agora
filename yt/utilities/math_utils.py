@@ -30,39 +30,131 @@ License:
 import numpy as np
 import math
 
-def periodic_dist(a, b, period):
-    r"""Find the Euclidian periodic distance between two points.
+def periodic_position(pos, pf):
+    r"""Assuming periodicity, find the periodic position within the domain.
+
+    Parameters
+    ----------
+    pos : array
+        An array of floats.
+
+    pf : StaticOutput
+        A simulation static output.
+    
+    Examples
+    --------
+    >>> a = np.array([1.1, 0.5, 0.5])
+    >>> data = {'Density':np.ones([32,32,32])}
+    >>> pf = load_uniform_grid(data, [32,32,32], 1.0)
+    >>> ppos = periodic_position(a, pf)
+    >>> ppos
+    array([ 0.1,  0.5,  0.5])
+    """
+ 
+    off = (pos - pf.domain_left_edge) % pf.domain_width
+    return pf.domain_left_edge + off
+
+def periodic_dist(a, b, period, periodicity=(True, True, True)):
+    r"""Find the Euclidean periodic distance between two sets of points.
     
     Parameters
     ----------
     a : array or list
-        An array or list of floats.
+        Either an ndim long list of coordinates corresponding to a single point
+        or an (ndim, npoints) list of coordinates for many points in space.
     
     b : array of list
-        An array or list of floats.
+        Either an ndim long list of coordinates corresponding to a single point
+        or an (ndim, npoints) list of coordinates for many points in space.
     
     period : float or array or list
         If the volume is symmetrically periodic, this can be a single float,
         otherwise an array or list of floats giving the periodic size of the
         volume for each dimension.
 
+    periodicity : An ndim-element tuple of booleans
+        If an entry is true, the domain is assumed to be periodic along
+        that direction.
+
     Examples
     --------
-    >>> a = np.array([0.1, 0.1, 0.1])
-    >>> b = np.array([0.9, 0,9, 0.9])
+    >>> a = [0.1, 0.1, 0.1]
+    >>> b = [0.9, 0,9, 0.9]
     >>> period = 1.
     >>> dist = periodic_dist(a, b, 1.)
     >>> dist
-    0.3464102
+    0.346410161514
     """
     a = np.array(a)
     b = np.array(b)
-    if a.size != b.size: RunTimeError("Arrays must be the same shape.")
-    c = np.empty((2, a.size), dtype="float64")
-    c[0,:] = abs(a - b)
-    c[1,:] = period - abs(a - b)
+    period = np.array(period)
+
+    if period.size == 1:
+        period = np.array([period, period, period])
+
+    if a.shape != b.shape: 
+        raise RuntimeError("Arrays must be the same shape.")
+    
+    if period.shape != a.shape and len(a.shape) > 1:
+        n_tup = tuple([1 for i in range(a.ndim-1)])
+        period = np.tile(np.reshape(period, (a.shape[0],)+n_tup), (1,)+a.shape[1:])
+    elif len(a.shape) == 1:
+        a = np.reshape(a, (a.shape[0],)+(1,1))
+        b = np.reshape(b, (a.shape[0],)+(1,1))
+        period = np.reshape(period, (a.shape[0],)+(1,1))
+
+    c = np.empty((2,) + a.shape, dtype="float64")
+    c[0,:] = np.abs(a - b)
+    
+    p_directions = [i for i,p in enumerate(periodicity) if p == True]
+    np_directions = [i for i,p in enumerate(periodicity) if p == False]
+    for d in p_directions:
+        c[1,d,:] = period[d,:] - np.abs(a - b)[d,:]
+    for d in np_directions:
+        c[1,d,:] = c[0,d,:]
+
     d = np.amin(c, axis=0)**2
-    return math.sqrt(d.sum())
+    r2 = d.sum(axis=0)
+    if r2.size == 1:
+        return np.sqrt(r2[0,0])
+    return np.sqrt(r2)
+
+def euclidean_dist(a, b):
+    r"""Find the Euclidean distance between two points.
+
+    Parameters
+    ----------
+    a : array or list
+        Either an ndim long list of coordinates corresponding to a single point
+        or an (ndim, npoints) list of coordinates for many points in space.
+
+    b : array or list
+        Either an ndim long list of coordinates corresponding to a single point
+        or an (ndim, npoints) list of coordinates for many points in space.
+
+    Examples
+    --------
+    >>> a = [0.1, 0.1, 0.1]
+    >>> b = [0.9, 0,9, 0.9]
+    >>> period = 1.
+    >>> dist = euclidean_dist(a, b)
+    >>> dist
+    1.38564064606
+
+    """
+    a = np.array(a)
+    b = np.array(b)
+    if a.shape != b.shape: RuntimeError("Arrays must be the same shape.")
+    c = a.copy()
+    np.subtract(c, b, c)
+    np.power(c, 2, c)
+    c = c.sum(axis = 0)
+    if isinstance(c, np.ndarray):
+        np.sqrt(c, c)
+    else:
+        # This happens if a and b only have one entry.
+        c = math.sqrt(c)
+    return c
 
 def rotate_vector_3D(a, dim, angle):
     r"""Rotates the elements of an array around an axis by some angle.
@@ -686,20 +778,29 @@ def get_sph_r(coords):
     # The spherical coordinates radius is simply the magnitude of the
     # coordinate vector.
 
-    return np.sqrt(np.sum(coords**2, axis=-1))
+    return np.sqrt(np.sum(coords**2, axis=0))
 
+def resize_vector(vector,vector_array):
+    if len(vector_array.shape) == 4:
+        res_vector = np.resize(vector,(3,1,1,1))
+    else:
+        res_vector = np.resize(vector,(3,1))
+    return res_vector
 
 def get_sph_theta(coords, normal):
     # The angle (theta) with respect to the normal (J), is the arccos
     # of the dot product of the normal with the normalized coordinate
     # vector.
     
-    tile_shape = list(coords.shape)[:-1] + [1]
-    J = np.tile(normal,tile_shape)
+    res_normal = resize_vector(normal, coords)
 
-    JdotCoords = np.sum(J*coords,axis=-1)
+    tile_shape = [1] + list(coords.shape)[1:]
     
-    return np.arccos( JdotCoords / np.sqrt(np.sum(coords**2,axis=-1)) )
+    J = np.tile(res_normal,tile_shape)
+
+    JdotCoords = np.sum(J*coords,axis=0)
+    
+    return np.arccos( JdotCoords / np.sqrt(np.sum(coords**2,axis=0)) )
 
 def get_sph_phi(coords, normal):
     # We have freedom with respect to what axis (xprime) to define
@@ -713,13 +814,16 @@ def get_sph_phi(coords, normal):
     # vector.
 
     (xprime, yprime, zprime) = get_ortho_basis(normal)
-    
-    tile_shape = list(coords.shape)[:-1] + [1]
-    Jx = np.tile(xprime,tile_shape)
-    Jy = np.tile(yprime,tile_shape)
 
-    Px = np.sum(Jx*coords,axis=-1)
-    Py = np.sum(Jy*coords,axis=-1)
+    res_xprime = resize_vector(xprime, coords)
+    res_yprime = resize_vector(yprime, coords)
+
+    tile_shape = [1] + list(coords.shape)[1:]
+    Jx = np.tile(res_xprime,tile_shape)
+    Jy = np.tile(res_yprime,tile_shape)
+
+    Px = np.sum(Jx*coords,axis=0)
+    Py = np.sum(Jy*coords,axis=0)
     
     return np.arctan2(Py,Px)
 
@@ -727,20 +831,24 @@ def get_cyl_r(coords, normal):
     # The cross product of the normal (J) with a coordinate vector
     # gives a vector of magnitude equal to the cylindrical radius.
 
-    tile_shape = list(coords.shape)[:-1] + [1]
-    J = np.tile(normal, tile_shape)
+    res_normal = resize_vector(normal, coords)
+
+    tile_shape = [1] + list(coords.shape)[1:]
+    J = np.tile(res_normal, tile_shape)
     
-    JcrossCoords = np.cross(J, coords)
-    return np.sqrt(np.sum(JcrossCoords**2, axis=-1))
+    JcrossCoords = np.cross(J, coords, axisa=0, axisb=0, axisc=0)
+    return np.sqrt(np.sum(JcrossCoords**2, axis=0))
 
 def get_cyl_z(coords, normal):
     # The dot product of the normal (J) with the coordinate vector 
     # gives the cylindrical height.
-    
-    tile_shape = list(coords.shape)[:-1] + [1]
-    J = np.tile(normal, tile_shape)
 
-    return np.sum(J*coords, axis=-1)  
+    res_normal = resize_vector(normal, coords)
+    
+    tile_shape = [1] + list(coords.shape)[1:]
+    J = np.tile(res_normal, tile_shape)
+
+    return np.sum(J*coords, axis=0)  
 
 def get_cyl_theta(coords, normal):
     # This is identical to the spherical phi component
@@ -753,77 +861,96 @@ def get_cyl_r_component(vectors, theta, normal):
 
     (xprime, yprime, zprime) = get_ortho_basis(normal)
 
-    tile_shape = list(vectors.shape)[:-1] + [1]
-    Jx = np.tile(xprime,tile_shape)
-    Jy = np.tile(yprime,tile_shape)
+    res_xprime = resize_vector(xprime, vectors)
+    res_yprime = resize_vector(yprime, vectors)
+
+    tile_shape = [1] + list(vectors.shape)[1:]
+    Jx = np.tile(res_xprime,tile_shape)
+    Jy = np.tile(res_yprime,tile_shape)
 
     rhat = Jx*np.cos(theta) + Jy*np.sin(theta)
 
-    return np.sum(vectors*rhat,axis=-1)
+    return np.sum(vectors*rhat,axis=0)
 
 def get_cyl_theta_component(vectors, theta, normal):
     # The theta component of a vector is the vector dotted with thetahat
     
     (xprime, yprime, zprime) = get_ortho_basis(normal)
 
-    tile_shape = list(vectors.shape)[:-1] + [1]
-    Jx = np.tile(xprime,tile_shape)
-    Jy = np.tile(yprime,tile_shape)
+    res_xprime = resize_vector(xprime, vectors)
+    res_yprime = resize_vector(yprime, vectors)
+
+    tile_shape = [1] + list(vectors.shape)[1:]
+    Jx = np.tile(res_xprime,tile_shape)
+    Jy = np.tile(res_yprime,tile_shape)
 
     thetahat = -Jx*np.sin(theta) + Jy*np.cos(theta)
 
-    return np.sum(vectors*thetahat, axis=-1)
+    return np.sum(vectors*thetahat, axis=0)
 
 def get_cyl_z_component(vectors, normal):
     # The z component of a vector is the vector dotted with zhat
     (xprime, yprime, zprime) = get_ortho_basis(normal)
 
-    tile_shape = list(vectors.shape)[:-1] + [1]
-    zhat = np.tile(zprime, tile_shape)
+    res_zprime = resize_vector(zprime, vectors)
 
-    return np.sum(vectors*zhat, axis=-1)
+    tile_shape = [1] + list(vectors.shape)[1:]
+    zhat = np.tile(res_zprime, tile_shape)
+
+    return np.sum(vectors*zhat, axis=0)
 
 def get_sph_r_component(vectors, theta, phi, normal):
     # The r component of a vector is the vector dotted with rhat
     
     (xprime, yprime, zprime) = get_ortho_basis(normal)
 
-    tile_shape = list(vectors.shape)[:-1] + [1]
-    Jx = np.tile(xprime,tile_shape)
-    Jy = np.tile(yprime,tile_shape)
-    Jz = np.tile(zprime,tile_shape)
+    res_xprime = resize_vector(xprime, vectors)
+    res_yprime = resize_vector(yprime, vectors)
+    res_zprime = resize_vector(zprime, vectors)
+
+    tile_shape = [1] + list(vectors.shape)[1:]
+    Jx = np.tile(res_xprime,tile_shape)
+    Jy = np.tile(res_yprime,tile_shape)
+    Jz = np.tile(res_zprime,tile_shape)
 
     rhat = Jx*np.sin(theta)*np.cos(phi) + \
            Jy*np.sin(theta)*np.sin(phi) + \
            Jz*np.cos(theta)
 
-    return np.sum(vectors*rhat, axis=-1)
+    return np.sum(vectors*rhat, axis=0)
 
 def get_sph_phi_component(vectors, phi, normal):
     # The phi component of a vector is the vector dotted with phihat
 
     (xprime, yprime, zprime) = get_ortho_basis(normal)
 
-    tile_shape = list(vectors.shape)[:-1] + [1]
-    Jx = np.tile(xprime,tile_shape)
-    Jy = np.tile(yprime,tile_shape)
+    res_xprime = resize_vector(xprime, vectors)
+    res_yprime = resize_vector(yprime, vectors)
+
+    tile_shape = [1] + list(vectors.shape)[1:]
+    Jx = np.tile(res_xprime,tile_shape)
+    Jy = np.tile(res_yprime,tile_shape)
 
     phihat = -Jx*np.sin(phi) + Jy*np.cos(phi)
 
-    return np.sum(vectors*phihat, axis=-1)
+    return np.sum(vectors*phihat, axis=0)
 
 def get_sph_theta_component(vectors, theta, phi, normal):
     # The theta component of a vector is the vector dotted with thetahat
     
     (xprime, yprime, zprime) = get_ortho_basis(normal)
 
-    tile_shape = list(vectors.shape)[:-1] + [1]
-    Jx = np.tile(xprime,tile_shape)
-    Jy = np.tile(yprime,tile_shape)
-    Jz = np.tile(zprime,tile_shape)
+    res_xprime = resize_vector(xprime, vectors)
+    res_yprime = resize_vector(yprime, vectors)
+    res_zprime = resize_vector(zprime, vectors)
+
+    tile_shape = [1] + list(vectors.shape)[1:]
+    Jx = np.tile(res_xprime,tile_shape)
+    Jy = np.tile(res_yprime,tile_shape)
+    Jz = np.tile(res_zprime,tile_shape)
     
     thetahat = Jx*np.cos(theta)*np.cos(phi) + \
                Jy*np.cos(theta)*np.sin(phi) - \
                Jz*np.sin(theta)
 
-    return np.sum(vectors*thetahat, axis=-1)
+    return np.sum(vectors*thetahat, axis=0)

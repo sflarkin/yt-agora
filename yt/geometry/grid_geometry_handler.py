@@ -41,6 +41,7 @@ from yt.utilities.physical_constants import sec_per_year
 from yt.utilities.io_handler import io_registry
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelAnalysisInterface, parallel_splitter
+from yt.utilities.lib import GridTree, MatchPointsToGrids
 
 from yt.data_objects.data_containers import data_object_registry
 
@@ -132,17 +133,19 @@ class GridGeometryHandler(GeometryHandler):
         """
         Prints out (stdout) relevant information about the simulation
         """
-        header = "%3s\t%6s\t%14s" % ("level","# grids", "# cells")
+        header = "%3s\t%6s\t%14s\t%14s" % ("level","# grids", "# cells",
+                                           "# cells^3")
         print header
         print "%s" % (len(header.expandtabs())*"-")
         for level in xrange(MAXLEVEL):
             if (self.level_stats['numgrids'][level]) == 0:
                 break
-            print "% 3i\t% 6i\t% 14i" % \
+            print "% 3i\t% 6i\t% 14i\t% 14i" % \
                   (level, self.level_stats['numgrids'][level],
-                   self.level_stats['numcells'][level])
+                   self.level_stats['numcells'][level],
+                   self.level_stats['numcells'][level]**(1./3))
             dx = self.select_grids(level)[0].dds[0]
-        print "-" * 28
+        print "-" * 46
         print "   \t% 6i\t% 14i" % (self.level_stats['numgrids'].sum(), self.level_stats['numcells'].sum())
         print "\n"
         try:
@@ -161,17 +164,86 @@ class GridGeometryHandler(GeometryHandler):
         for unit in u:
             print "\tWidth: %0.3e %s" % (dx*unit[0], unit[1])
 
+    def find_max(self, field, finest_levels = 3):
+        """
+        Returns (value, center) of location of maximum for a given field.
+        """
+        if (field, finest_levels) in self._max_locations:
+            return self._max_locations[(field, finest_levels)]
+        mv, pos = self.find_max_cell_location(field, finest_levels)
+        self._max_locations[(field, finest_levels)] = (mv, pos)
+        return mv, pos
+
+    def find_max_cell_location(self, field, finest_levels = 3):
+        if finest_levels is not False:
+            gi = (self.grid_levels >= self.max_level - finest_levels).ravel()
+            source = self.data_collection([0.0]*3, self.grids[gi])
+        else:
+            source = self.all_data()
+        mylog.debug("Searching for maximum value of %s", field)
+        max_val, maxi, mx, my, mz = \
+            source.quantities["MaxLocation"](field)
+        mylog.info("Max Value is %0.5e at %0.16f %0.16f %0.16f", 
+              max_val, mx, my, mz)
+        self.parameters["Max%sValue" % (field)] = max_val
+        self.parameters["Max%sPos" % (field)] = "%s" % ((mx,my,mz),)
+        return max_val, np.array((mx,my,mz), dtype='float64')
+
+    def find_points(self, x, y, z) :
+        """
+        Returns the (objects, indices) of leaf grids containing a number of (x,y,z) points
+        """
+        x = ensure_numpy_array(x)
+        y = ensure_numpy_array(y)
+        z = ensure_numpy_array(z)
+        if not len(x) == len(y) == len(z):
+            raise AssertionError("Arrays of indices must be of the same size")
+
+        grid_tree = self.get_grid_tree()
+        pts = MatchPointsToGrids(grid_tree, len(x), x, y, z)
+        ind = pts.find_points_in_tree()
+        return self.grids[ind], ind
+
+    def get_grid_tree(self) :
+
+        left_edge = np.zeros((self.num_grids, 3))
+        right_edge = np.zeros((self.num_grids, 3))
+        level = np.zeros((self.num_grids), dtype='int64')
+        parent_ind = np.zeros((self.num_grids), dtype='int64')
+        num_children = np.zeros((self.num_grids), dtype='int64')
+
+        for i, grid in enumerate(self.grids) :
+
+            left_edge[i,:] = grid.LeftEdge
+            right_edge[i,:] = grid.RightEdge
+            level[i] = grid.Level
+            if grid.Parent is None :
+                parent_ind[i] = -1
+            else :
+                parent_ind[i] = grid.Parent.id - grid.Parent._id_offset
+            num_children[i] = np.int64(len(grid.Children))
+
+        return GridTree(self.num_grids, left_edge, right_edge, parent_ind,
+                        level, num_children)
+
     def convert(self, unit):
         return self.parameter_file.conversion_factors[unit]
 
     def _identify_base_chunk(self, dobj):
-        if getattr(dobj, "_grids", None) is None:
+        if dobj._type_name == "grid":
+            dobj._chunk_info = np.empty(1, dtype='object')
+            dobj._chunk_info[0] = dobj
+        elif getattr(dobj, "_grids", None) is None:
             gi = dobj.selector.select_grids(self.grid_left_edge,
-                                            self.grid_right_edge)
+                                            self.grid_right_edge,
+                                            self.grid_levels)
             grids = list(sorted(self.grids[gi], key = lambda g: g.filename))
-            dobj._chunk_info = np.array(grids, dtype='object')
+            dobj._chunk_info = np.empty(len(grids), dtype='object')
+            for i, g in enumerate(grids):
+                dobj._chunk_info[i] = g
         if getattr(dobj, "size", None) is None:
             dobj.size = self._count_selection(dobj)
+        if getattr(dobj, "shape", None) is None:
             dobj.shape = (dobj.size,)
         dobj._current_chunk = list(self._chunk_all(dobj))[0]
 
@@ -184,9 +256,15 @@ class GridGeometryHandler(GeometryHandler):
         gobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
         yield YTDataChunk(dobj, "all", gobjs, dobj.size)
         
-    def _chunk_spatial(self, dobj, ngz):
+    def _chunk_spatial(self, dobj, ngz, sort = None):
         gobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
-        for i,og in enumerate(gobjs):
+        if sort in ("+level", "level"):
+            giter = sorted(gobjs, key = g.Level)
+        elif sort == "-level":
+            giter = sorted(gobjs, key = -g.Level)
+        elif sort is None:
+            giter = gobjs
+        for i,og in enumerate(giter):
             if ngz > 0:
                 g = og.retrieve_ghost_zones(ngz, [], smoothed=True)
             else:

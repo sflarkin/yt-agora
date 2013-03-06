@@ -43,8 +43,7 @@ from yt.utilities.definitions import \
 from yt.utilities.io_handler import \
     io_registry
 from yt.utilities.physical_constants import cm_per_mpc
-from .fields import FLASHFieldInfo, add_flash_field, KnownFLASHFields, \
-    CylindricalFLASHFieldInfo, PolarFLASHFieldInfo
+from .fields import FLASHFieldInfo, add_flash_field, KnownFLASHFields
 from yt.data_objects.field_info_container import FieldInfoContainer, NullFunc, \
      ValidateDataField, TranslationFunc
 
@@ -77,7 +76,7 @@ class FLASHHierarchy(GridGeometryHandler):
         self.hierarchy_filename = self.parameter_file.parameter_filename
         self.directory = os.path.dirname(self.hierarchy_filename)
         self._handle = pf._handle
-
+        self._particle_handle = pf._particle_handle
         self.float_type = np.float64
         GridGeometryHandler.__init__(self,pf,data_style)
 
@@ -87,9 +86,9 @@ class FLASHHierarchy(GridGeometryHandler):
     def _detect_fields(self):
         ncomp = self._handle["/unknown names"].shape[0]
         self.field_list = [s for s in self._handle["/unknown names"][:].flat]
-        if ("/particle names" in self._handle) :
+        if ("/particle names" in self._particle_handle) :
             self.field_list += ["particle_" + s[0].strip() for s
-                                in self._handle["/particle names"][:]]
+                                in self._particle_handle["/particle names"][:]]
     
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
@@ -106,6 +105,7 @@ class FLASHHierarchy(GridGeometryHandler):
     def _parse_hierarchy(self):
         f = self._handle # shortcut
         pf = self.parameter_file # shortcut
+        f_part = self._particle_handle # shortcut
         
         # Initialize to the domain left / domain right
         ND = self.parameter_file.dimensionality
@@ -128,12 +128,15 @@ class FLASHHierarchy(GridGeometryHandler):
                               for ax in 'xyz']
         self.grid_dimensions[:] *= (nxb, nyb, nzb)
         try:
-            self.grid_particle_count[:] = f["/localnp"][:][:,None]
+            self.grid_particle_count[:] = f_part["/localnp"][:][:,None]
         except KeyError:
             self.grid_particle_count[:] = 0.0
         self._particle_indices = np.zeros(self.num_grids + 1, dtype='int64')
-        np.add.accumulate(self.grid_particle_count.squeeze(),
-                          out=self._particle_indices[1:])
+        if self.num_grids > 1 :
+            np.add.accumulate(self.grid_particle_count.squeeze(),
+                              out=self._particle_indices[1:])
+        else :
+            self._particle_indices[1] = self.grid_particle_count.squeeze()
         # This will become redundant, as _prepare_grid will reset it to its
         # current value.  Note that FLASH uses 1-based indexing for refinement
         # levels, but we do not, so we reduce the level by 1.
@@ -218,12 +221,13 @@ class FLASHHierarchy(GridGeometryHandler):
 
 class FLASHStaticOutput(StaticOutput):
     _hierarchy_class = FLASHHierarchy
-    #_fieldinfo_fallback = FLASHFieldInfo # Now a property
+    _fieldinfo_fallback = FLASHFieldInfo
     _fieldinfo_known = KnownFLASHFields
     _handle = None
     
     def __init__(self, filename, data_style='flash_hdf5',
                  storage_filename = None,
+                 particle_filename = None, 
                  conversion_override = None):
 
         if self._handle is not None: return
@@ -231,6 +235,16 @@ class FLASHStaticOutput(StaticOutput):
         if conversion_override is None: conversion_override = {}
         self._conversion_override = conversion_override
 
+        self.particle_filename = particle_filename
+
+        if self.particle_filename is None :
+            self._particle_handle = self._handle
+        else :
+            try :
+                self._particle_handle = h5py.File(self.particle_filename, "r")
+            except :
+                raise IOError(self.particle_filename)
+                                                                
         StaticOutput.__init__(self, filename, data_style)
         self.storage_filename = storage_filename
 
@@ -289,6 +303,7 @@ class FLASHStaticOutput(StaticOutput):
             self.conversion_factors["Time"] = 1.0
         for unit in mpc_conversion.keys():
             self.units[unit] = mpc_conversion[unit] / mpc_conversion["cm"]
+            self.units[unit+"cm"] = self.units[unit]
             self.units[unit] /= (1.0+self.current_redshift)
             
     def _setup_cgs_units(self):
@@ -388,13 +403,8 @@ class FLASHStaticOutput(StaticOutput):
                     if vn in self.parameters and self.parameters[vn] != pval:
                         mylog.warning("{0} {1} overwrites a simulation scalar of the same name".format(hn[:-1],vn))
                     self.parameters[vn] = pval
-        self.domain_left_edge = np.array(
-            [self.parameters["%smin" % ax] for ax in 'xyz']).astype("float64")
-        self.domain_right_edge = np.array(
-            [self.parameters["%smax" % ax] for ax in 'xyz']).astype("float64")
-        self.min_level = self.parameters.get("lrefine_min", 1) - 1
-
-        # Determine domain dimensions
+        
+        # Determine block size
         try:
             nxb = self.parameters["nxb"]
             nyb = self.parameters["nyb"]
@@ -402,6 +412,8 @@ class FLASHStaticOutput(StaticOutput):
         except KeyError:
             nxb, nyb, nzb = [int(self._handle["/simulation parameters"]['n%sb' % ax])
                               for ax in 'xyz'] # FLASH2 only!
+        
+        # Determine dimensionality
         try:
             dimensionality = self.parameters["dimensionality"]
         except KeyError:
@@ -410,32 +422,52 @@ class FLASHStaticOutput(StaticOutput):
             if nyb == 1: dimensionality = 1
             if dimensionality < 3:
                 mylog.warning("Guessing dimensionality as %s", dimensionality)
-
+        
         self.dimensionality = dimensionality
 
-        self.geometry = self.parameters["geometry"]
-        if self.geometry == "cartesian":
-            self._setup_cartesian_coordinates()
-        elif self.geometry == "cylindrical":
-            self._setup_cylindrical_coordinates()
-        elif self.geometry == "polar":
-            self._setup_polar_coordinates()
-        else:
-            raise YTGeometryNotSupported(self.geometry)
+        # Determine base grid parameters
+        if 'lrefine_min' in self.parameters.keys() : # PARAMESH
+            nblockx = self.parameters["nblockx"]
+            nblocky = self.parameters["nblocky"]
+            nblockz = self.parameters["nblockz"]
+        else : # Uniform Grid
+            nblockx = self.parameters["iprocs"]
+            nblocky = self.parameters["jprocs"]
+            nblockz = self.parameters["kprocs"]
 
-        nblockx = self.parameters["nblockx"]
-        nblocky = self.parameters["nblocky"]
-        nblockz = self.parameters["nblockz"]
+        # In case the user wasn't careful
+        if self.dimensionality <= 2 : nblockz = 1
+        if self.dimensionality == 1 : nblocky = 1
+
+        # Determine domain boundaries
+        self.domain_left_edge = np.array(
+            [self.parameters["%smin" % ax] for ax in 'xyz']).astype("float64")
+        self.domain_right_edge = np.array(
+            [self.parameters["%smax" % ax] for ax in 'xyz']).astype("float64")
+        if self.dimensionality < 3:
+            for d in (dimensionality)+range(3-dimensionality):
+                if self.domain_left_edge[d] == self.domain_right_edge[d]:
+                    mylog.warning('Identical domain left edge and right edges '
+                                  'along dummy dimension (%i), attempting to read anyway' % d)
+                    self.domain_right_edge[d] = self.domain_left_edge[d]+1.0
         self.domain_dimensions = \
             np.array([nblockx*nxb,nblocky*nyb,nblockz*nzb])
+
+        # Try to determine Gamma
         try:
             self.parameters["Gamma"] = self.parameters["gamma"]
         except:
             mylog.warning("Cannot find Gamma")
             pass
 
+        # Get the simulation time
         self.current_time = self.parameters["time"]
 
+        # Determine if this is a periodic box
+        p = [self.parameters.get("%sl_boundary_type" % ax, None) == "periodic" for ax in 'xyz']
+        self.periodicity = tuple(p)
+
+        # Determine cosmological parameters.
         try: 
             self.parameters["usecosmology"]
             self.cosmological_simulation = 1
@@ -448,30 +480,9 @@ class FLASHStaticOutput(StaticOutput):
             self.current_redshift = self.omega_lambda = self.omega_matter = \
                 self.hubble_constant = self.cosmological_simulation = 0.0
 
-    def _setup_cartesian_coordinates(self):
-        pass
-
-    def _setup_cylindrical_coordinates(self):
-        if self.dimensionality == 2:
-            self.domain_left_edge[2] = 0.0
-            self.domain_right_edge[2] = 2.0 * np.pi
-
-    def _setup_polar_coordinates(self):
-        pass
-
-    @property
-    def _fieldinfo_fallback(self):
-        geom = self.parameters.get("geometry", "cartesian")
-        if geom == "cartesian":
-            return FLASHFieldInfo
-        elif geom == "cylindrical":
-            return CylindricalFLASHFieldInfo
-        elif geom == "polar":
-            return PolarFLASHFieldInfo
-        else:
-            raise RuntimeError
-
     def __del__(self):
+        if self._handle is not self._particle_handle:
+            self._particle_handle.close()
         self._handle.close()
 
     @classmethod
