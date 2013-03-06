@@ -1,10 +1,13 @@
 from yt.testing import *
-from yt.data_objects.profiles import \
-    BinnedProfile1D, BinnedProfile2D, BinnedProfile3D
+import os
 
 def setup():
     from yt.config import ytcfg
     ytcfg["yt","__withintesting"] = "True"
+
+def teardown_func(fns):
+    for fn in fns:
+        os.remove(fn)
 
 def test_projection():
     for nprocs in [8, 1]:
@@ -24,6 +27,7 @@ def test_projection():
             xax = x_dict[ax]
             yax = y_dict[ax]
             for wf in ["Density", None]:
+                fns = []
                 proj = pf.h.proj(["Ones", "Density"], ax, weight_field = wf)
                 yield assert_equal, proj["Ones"].sum(), proj["Ones"].size
                 yield assert_equal, proj["Ones"].min(), 1.0
@@ -32,8 +36,33 @@ def test_projection():
                 yield assert_equal, np.unique(proj["py"]), uc[yax]
                 yield assert_equal, np.unique(proj["pdx"]), 1.0/(dims[xax]*2.0)
                 yield assert_equal, np.unique(proj["pdy"]), 1.0/(dims[yax]*2.0)
+                pw = proj.to_pw()
+                fns += pw.save()
+                frb = proj.to_frb((1.0,'unitary'), 64)
+                for proj_field in ['Ones', 'Density']:
+                    yield assert_equal, frb[proj_field].info['data_source'], \
+                            proj.__str__()
+                    yield assert_equal, frb[proj_field].info['axis'], \
+                            ax
+                    yield assert_equal, frb[proj_field].info['field'], \
+                            proj_field
+                    yield assert_equal, frb[proj_field].info['units'], \
+                            pf.field_info[proj_field].get_units()
+                    yield assert_equal, frb[proj_field].info['xlim'], \
+                            frb.bounds[:2]
+                    yield assert_equal, frb[proj_field].info['ylim'], \
+                            frb.bounds[2:]
+                    yield assert_equal, frb[proj_field].info['length_to_cm'], \
+                            pf['cm']
+                    yield assert_equal, frb[proj_field].info['center'], \
+                            proj.center
+                    yield assert_equal, frb[proj_field].info['weight_field'], \
+                            wf
+                teardown_func(fns)
             # wf == None
             yield assert_equal, wf, None
             v1 = proj["Density"].sum()
             v2 = (dd["Density"] * dd["d%s" % an]).sum()
             yield assert_rel_equal, v1, v2, 10
+
+
