@@ -198,9 +198,9 @@ def parallel_passthrough(func):
     output; otherwise, the function gets called.  Used as a decorator.
     """
     @wraps(func)
-    def passage(self, data, **kwargs):
-        if not self._distributed: return data
-        return func(self, data, **kwargs)
+    def passage(self, *args, **kwargs):
+        if not self._distributed: return args[0]
+        return func(self, *args, **kwargs)
     return passage
 
 def _get_comm(args):
@@ -252,9 +252,10 @@ def parallel_root_only(func):
     @wraps(func)
     def root_only(*args, **kwargs):
         comm = _get_comm(args)
+        rv = None
         if comm.rank == 0:
             try:
-                func(*args, **kwargs)
+                rv = func(*args, **kwargs)
                 all_clear = 1
             except:
                 traceback.print_last()
@@ -263,6 +264,7 @@ def parallel_root_only(func):
             all_clear = None
         all_clear = comm.mpi_bcast(all_clear)
         if not all_clear: raise RuntimeError
+        return rv
     if parallel_capable: return root_only
     return func
 
@@ -279,24 +281,25 @@ class ProcessorPool(object):
     ranks = None
     available_ranks = None
     tasks = None
-    workgroups = []
     def __init__(self):
         self.comm = communication_system.communicators[-1]
         self.size = self.comm.size
         self.ranks = range(self.size)
         self.available_ranks = range(self.size)
+        self.workgroups = []
     
     def add_workgroup(self, size=None, ranks=None, name=None):
         if size is None:
             size = len(self.available_ranks)
         if len(self.available_ranks) < size:
-            print 'Not enough resources available', size, self.available_ranks
+            mylog.error('Not enough resources available, asked for %d have %d',
+                size, self.available_ranks)
             raise RuntimeError
         if ranks is None:
             ranks = [self.available_ranks.pop(0) for i in range(size)]
         # Default name to the workgroup number.
         if name is None: 
-            name = string(len(workgroups))
+            name = str(len(self.workgroups))
         group = self.comm.comm.Get_group().Incl(ranks)
         new_comm = self.comm.comm.Create(group)
         if self.comm.rank in ranks:
@@ -304,16 +307,20 @@ class ProcessorPool(object):
         self.workgroups.append(Workgroup(len(ranks), ranks, new_comm, name))
     
     def free_workgroup(self, workgroup):
+        # If you want to actually delete the workgroup you will need to
+        # pop it out of the self.workgroups list so you don't have references
+        # that are left dangling, e.g. see free_all() below.
         for i in workgroup.ranks:
             if self.comm.rank == i:
                 communication_system.communicators.pop()
             self.available_ranks.append(i) 
-        del workgroup
         self.available_ranks.sort()
 
     def free_all(self):
         for wg in self.workgroups:
             self.free_workgroup(wg)
+        for i in range(len(self.workgroups)):
+            self.workgroups.pop(0)
 
     @classmethod
     def from_sizes(cls, sizes):
@@ -431,7 +438,8 @@ def parallel_objects(objects, njobs = 0, storage = None, barrier = True,
     to_share = {}
     # If our objects object is slice-aware, like time series data objects are,
     # this will prevent intermediate objects from being created.
-    for obj_id, obj in enumerate(objects):
+    oiter = itertools.islice(enumerate(objects), my_new_id, None, njobs)
+    for obj_id, obj in oiter:
         result_id = obj_id * njobs + my_new_id
         if storage is not None:
             rstore = ResultsStorage()
@@ -578,7 +586,9 @@ class Communicator(object):
                     ncols, size = data.shape
             ncols = self.comm.allreduce(ncols, op=MPI.MAX)
             if ncols == 0:
-                    data = np.zeros(0, dtype=dtype) # This only works for
+                data = np.zeros(0, dtype=dtype) # This only works for
+            elif data is None:
+                data = np.zeros((ncols, 0), dtype=dtype)
             size = data.shape[-1]
             sizes = np.zeros(self.comm.size, dtype='int64')
             outsize = np.array(size, dtype='int64')
@@ -787,7 +797,7 @@ class Communicator(object):
                 if target < size:
                     #print "RECEIVING FROM %02i on %02i" % (target, rank)
                     buf = self.recv_quadtree(target, tgd, args)
-                    qto = QuadTree(tgd, args[2])
+                    qto = QuadTree(tgd, args[2], qt.bounds)
                     qto.frombuffer(buf[0], buf[1], buf[2], merge_style)
                     merge_quadtrees(qt, qto, style = merge_style)
                     del qto
@@ -807,7 +817,7 @@ class Communicator(object):
         self.comm.Bcast([buf[2], MPI.DOUBLE], root=0)
         self.refined = buf[0]
         if rank != 0:
-            qt = QuadTree(tgd, args[2])
+            qt = QuadTree(tgd, args[2], qt.bounds)
             qt.frombuffer(buf[0], buf[1], buf[2], merge_style)
         return qt
 
@@ -1055,3 +1065,49 @@ class ParallelAnalysisInterface(object):
                 nextdim = (nextdim + 1) % 3
         return cuts
     
+class GroupOwnership(ParallelAnalysisInterface):
+    def __init__(self, items):
+        ParallelAnalysisInterface.__init__(self)
+        self.num_items = len(items)
+        self.items = items
+        assert(self.num_items >= self.comm.size)
+        self.owned = range(self.comm.size)
+        self.pointer = 0
+        if parallel_capable:
+            communication_system.push_with_ids([self.comm.rank])
+
+    def __del__(self):
+        if parallel_capable:
+            communication_system.pop()
+
+    def inc(self, n = -1):
+        old_item = self.item
+        if n == -1: n = self.comm.size
+        for i in range(n):
+            if self.pointer >= self.num_items - self.comm.size: break
+            self.owned[self.pointer % self.comm.size] += self.comm.size
+            self.pointer += 1
+        if self.item is not old_item:
+            self.switch()
+            
+    def dec(self, n = -1):
+        old_item = self.item
+        if n == -1: n = self.comm.size
+        for i in range(n):
+            if self.pointer == 0: break
+            self.owned[(self.pointer - 1) % self.comm.size] -= self.comm.size
+            self.pointer -= 1
+        if self.item is not old_item:
+            self.switch()
+
+    _last = None
+    @property
+    def item(self):
+        own = self.owned[self.comm.rank]
+        if self._last != own:
+            self._item = self.items[own]
+            self._last = own
+        return self._item
+
+    def switch(self):
+        pass

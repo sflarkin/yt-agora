@@ -118,6 +118,70 @@ def bin_profile3d(np.ndarray[np.int64_t, ndim=1] bins_x,
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
+def lines(np.ndarray[np.float64_t, ndim=3] image, 
+          np.ndarray[np.int64_t, ndim=1] xs,
+          np.ndarray[np.int64_t, ndim=1] ys,
+          np.ndarray[np.float64_t, ndim=2] colors,
+          int points_per_color=1):
+    
+    cdef int nx = image.shape[0]
+    cdef int ny = image.shape[1]
+    cdef int nl = xs.shape[0]
+    cdef np.float64_t alpha[3], nalpha 
+    cdef int i, j
+    cdef int dx, dy, sx, sy, e2, err
+    cdef np.int64_t x0, x1, y0, y1
+    for j in range(0, nl, 2):
+        # From wikipedia http://en.wikipedia.org/wiki/Bresenham's_line_algorithm
+        x0 = xs[j]; y0 = ys[j]; x1 = xs[j+1]; y1 = ys[j+1]
+        dx = abs(x1-x0)
+        dy = abs(y1-y0)
+        err = dx - dy
+        for i in range(3):
+            alpha[i] = colors[j/points_per_color,3]*colors[j/points_per_color,i]
+        nalpha = 1.0-colors[j/points_per_color,3]
+        if x0 < x1: 
+            sx = 1
+        else:
+            sx = -1
+        if y0 < y1:
+            sy = 1
+        else:
+            sy = -1
+        while(1): 
+            if (x0 < 0 and sx == -1): break
+            elif (x0 >= nx and sx == 1): break
+            elif (y0 < 0 and sy == -1): break
+            elif (y0 >= nx and sy == 1): break
+            if (x0 >=0 and x0 < nx and y0 >= 0 and y0 < ny):
+                for i in range(3):
+                    image[x0,y0,i] = (1.-alpha[i])*image[x0,y0,i] + alpha[i]
+            if (x0 == x1 and y0 == y1):
+                break
+            e2 = 2*err
+            if e2 > -dy:
+                err = err - dy
+                x0 += sx
+            if e2 < dx :
+                err = err + dx
+                y0 += sy
+    return 
+
+def rotate_vectors(np.ndarray[np.float64_t, ndim=3] vecs,
+        np.ndarray[np.float64_t, ndim=2] R):
+    cdef int nx = vecs.shape[0]
+    cdef int ny = vecs.shape[1]
+    rotated = np.empty((nx,ny,3),dtype='float64') 
+    for i in range(nx):
+        for j in range(ny):
+            for k in range(3):
+                rotated[i,j,k] =\
+                    R[k,0]*vecs[i,j,0]+R[k,1]*vecs[i,j,1]+R[k,2]*vecs[i,j,2]
+    return rotated
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
 def get_color_bounds(np.ndarray[np.float64_t, ndim=1] px,
                      np.ndarray[np.float64_t, ndim=1] py,
                      np.ndarray[np.float64_t, ndim=1] pdx,
@@ -428,3 +492,68 @@ def obtain_rv_vec(data):
                     rvg[1,i,j,k] = vyg[i,j,k] - bv[1]
                     rvg[2,i,j,k] = vzg[i,j,k] - bv[2]
         return rvg
+
+def grow_flagging_field(oofield):
+    cdef np.ndarray[np.uint8_t, ndim=3] ofield = oofield.astype("uint8")
+    cdef np.ndarray[np.uint8_t, ndim=3] nfield
+    nfield = np.zeros_like(ofield)
+    cdef int i, j, k, ni, nj, nk
+    cdef int oi, oj, ok
+    for ni in range(ofield.shape[0]):
+        for nj in range(ofield.shape[1]):
+            for nk in range(ofield.shape[2]):
+                for oi in range(3):
+                    i = ni + (oi - 1)
+                    if i < 0 or i >= ofield.shape[0]: continue
+                    for oj in range(3):
+                        j = nj + (oj - 1)
+                        if j < 0 or j >= ofield.shape[1]: continue
+                        for ok in range(3):
+                            k = nk + (ok - 1)
+                            if k < 0 or k >= ofield.shape[2]: continue
+                            if ofield[i, j, k] == 1:
+                                nfield[ni, nj, nk] = 1
+    return nfield.astype("bool")
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def fill_region(input_fields, output_fields,
+                np.int32_t output_level,
+                np.ndarray[np.int64_t, ndim=1] left_index,
+                np.ndarray[np.int64_t, ndim=2] ipos,
+                np.ndarray[np.int64_t, ndim=1] ires,
+                np.int64_t refine_by = 2
+                ):
+    cdef int i, n
+    cdef np.int64_t tot
+    cdef np.int64_t iind[3], oind[3], dim[3], oi, oj, ok, rf
+    cdef np.ndarray[np.float64_t, ndim=3] ofield
+    cdef np.ndarray[np.float64_t, ndim=1] ifield
+    nf = len(input_fields)
+    for i in range(3):
+        dim[i] = output_fields[0].shape[i]
+    for n in range(nf):
+        tot = 0
+        ofield = output_fields[n]
+        ifield = input_fields[n]
+        for i in range(ipos.shape[0]):
+            rf = refine_by**(output_level - ires[i]) 
+            for n in range(3):
+                iind[n] = ipos[i, n] * rf - left_index[n]
+            for oi in range(rf):
+                oind[0] = oi + iind[0]
+                if oind[0] < 0 or oind[0] >= dim[0]:
+                    continue
+                for oj in range(rf):
+                    oind[1] = oj + iind[1]
+                    if oind[1] < 0 or oind[1] >= dim[1]:
+                        continue
+                    for ok in range(rf):
+                        oind[2] = ok + iind[2]
+                        if oind[2] < 0 or oind[2] >= dim[2]:
+                            continue
+                        ofield[oind[0], oind[1], oind[2]] = \
+                            ifield[i]
+                        tot += 1
+    return tot

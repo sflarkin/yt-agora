@@ -110,7 +110,8 @@ class Streamlines(ParallelAnalysisInterface):
         self.direction = np.sign(direction)
         if volume is None:
             volume = AMRKDTree(self.pf, fields=[self.xfield,self.yfield,self.zfield],
-                            log_fields=[False,False,False], merge_trees=True)
+                            log_fields=[False,False,False])
+            volume.join_parallel_trees()
         self.volume = volume
         if dx is None:
             dx = self.pf.h.get_smallest_dx()
@@ -118,7 +119,9 @@ class Streamlines(ParallelAnalysisInterface):
         if length is None:
             length = np.max(self.pf.domain_right_edge-self.pf.domain_left_edge)
         self.length = length
-        self.steps = int(length/dx)
+        self.steps = int(length/dx)+1
+        # Fix up the dx.
+        self.dx = 1.0*self.length/self.steps
         self.streamlines = np.zeros((self.N,self.steps,3), dtype='float64')
         self.magnitudes = None
         if self.get_magnitude:
@@ -136,8 +139,8 @@ class Streamlines(ParallelAnalysisInterface):
                 thismag = self.magnitudes[i,:]
             step = self.steps
             while (step > 1):
-                this_brick = self.volume.locate_brick(stream[-step,:])
-                step = self._integrate_through_brick(this_brick, stream, step, mag=thismag)
+                this_node = self.volume.locate_node(stream[-step,:])
+                step = self._integrate_through_brick(this_node, stream, step, mag=thismag)
             pbar.update(i)
         pbar.finish()
         
@@ -146,13 +149,14 @@ class Streamlines(ParallelAnalysisInterface):
     @parallel_passthrough
     def _finalize_parallel(self,data):
         self.streamlines = self.comm.mpi_allreduce(self.streamlines, op='sum')
-        self.magnitudes = self.comm.mpi_allreduce(self.magnitudes, op='sum')
+        if self.get_magnitude:
+            self.magnitudes = self.comm.mpi_allreduce(self.magnitudes, op='sum')
         
     def _integrate_through_brick(self, node, stream, step,
                                  periodic=False, mag=None):
         while (step > 1):
             self.volume.get_brick_data(node)
-            brick = node.brick
+            brick = node.data
             stream[-step+1] = stream[-step]
             if mag is None:
                 brick.integrate_streamline(stream[-step+1], self.direction*self.dx, None)
@@ -165,8 +169,8 @@ class Streamlines(ParallelAnalysisInterface):
                    np.any(stream[-step+1,:] >= self.pf.domain_right_edge):
                 return 0
 
-            if np.any(stream[-step+1,:] < node.l_corner) | \
-                   np.any(stream[-step+1,:] >= node.r_corner):
+            if np.any(stream[-step+1,:] < node.left_edge) | \
+                   np.any(stream[-step+1,:] >= node.right_edge):
                 return step-1
             step -= 1
         return step
@@ -205,5 +209,6 @@ class Streamlines(ParallelAnalysisInterface):
         >>> matplotlib.pylab.semilogy(stream['t'], stream['Density'], '-x')
         
         """
-        return YTStreamlineBase(self.streamlines[streamline_id], pf=self.pf)
+        return YTStreamlineBase(self.streamlines[streamline_id], pf=self.pf,
+                                    length = self.length)
         
