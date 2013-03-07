@@ -4,8 +4,9 @@ Symbolic unit handling.
 Author: Casey W. Stark <caseywstark@gmail.com>
 Affiliation: UC Berkeley
 
+Homepage: http://yt-project.org/
 License:
-  Copyright (C) 2012 Casey W. Stark.  All Rights Reserved.
+  Copyright (C) 2012, 2013 Casey W. Stark.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -28,14 +29,36 @@ from sympy import Expr, Mul, Number, Pow, Rational, Symbol
 from sympy import nsimplify, posify, sympify
 from sympy.parsing.sympy_parser import parse_expr
 
-# The base dimensions
+#
+# Exceptions
+#
+
+class SymbolNotFoundError(Exception):
+    pass
+
+class UnitParseError(Exception):
+    pass
+
+class UnitOperationError(Exception):
+    pass
+
+#
+# Base dimensions
+#
+
 mass = Symbol("(mass)", positive=True)
 length = Symbol("(length)", positive=True)
 time = Symbol("(time)", positive=True)
 temperature = Symbol("(temperature)", positive=True)
+
 base_dimensions = [mass, length, time, temperature]
 
-### Misc. dimensions
+#
+# Derived dimensions
+#
+
+dimensionless = sympify(1)
+
 rate = 1 / time
 
 velocity     = length / time
@@ -54,13 +77,17 @@ charge   = (energy * length)**Rational(1, 2)  # proper 1/2 power
 electric_field = charge / length**2
 magnetic_field = electric_field
 
-# Dictionary that holds information of known unit symbols.
-# The key is the symbol, the value is a tuple with the conversion factor to cgs,
-# and the dimensionality.
-unit_symbols_dict = {
+#
+# The default/basic unit symbol lookup table.
+#
+# Lookup a unit symbol with the symbol string, and provide a tuple with the
+# conversion factor to cgs and dimensionality.
+#
+
+default_unit_symbol_LUT = {
     # base
     "g":  (1.0, mass),
-    #"cm": (1.0, length),  # duplicate with meter below...
+    #"cm": (1.0, length, r"\rm{cm}"),  # duplicate with meter below...
     "s":  (1.0, time),
     "K":  (1.0, temperature),
 
@@ -74,6 +101,9 @@ unit_symbols_dict = {
     "J": (1.0e7, energy),
     "Hz": (1.0, rate),
 
+    # dimensionless stuff
+    "h": (1.0, dimensionless),
+
     # times
     "min": (60.0, time),
     "hr":  (3600.0, time),
@@ -85,6 +115,7 @@ unit_symbols_dict = {
     "Rsun": (6.96e10, length),
     "Lsun": (3.9e33, power),
     "Tsun": (5870.0, temperature),
+    "Zsun": (1.0, dimensionless),
 
     # astro distances
     "AU": (1.49598e13, length),
@@ -124,10 +155,41 @@ unit_prefixes = {
 }
 
 
-class UnitParseError(Exception):
-    pass
-class UnitOperationError(Exception):
-    pass
+class UnitSymbolRegistry:
+
+    def __init__(self, add_default_symbols=True):
+        self.lut = {}
+
+        if add_default_symbols:
+            self.lut.update(default_unit_symbol_LUT)
+
+    def add(symbol, cgs_value, dimensions):
+        """
+        Add a symbol to this registry.
+
+        """
+        # Validate
+        if not isinstance(cgs_value, float):
+            raise UnitParseError("cgs_value must be a float, got a %s." % type(cgs_value))
+
+        validate_dimensions(dimensions)
+
+        # Add to lut
+        self.lut.update( {symbol: (cgs_value, dimensions)} )
+
+    def remove(symbol):
+        """
+        Remove the entry for the unit matching `symbol`.
+
+        """
+        if symbol not in self.lut:
+            raise SymbolNotFoundError("Tried to remove the symbol '%s', but it does not exist in this registry." % symbol)
+
+        del self.lut[symbol]
+
+
+default_symbol_registry = UnitSymbolRegistry()
+
 
 
 class Unit(Expr):
@@ -161,12 +223,22 @@ class Unit(Expr):
             time, and temperature objects to various powers.
 
         """
-        # if we have a string, parse into an expression
-        if isinstance(unit_expr, str):
+        # Simplest case. If user passes a Unit object, just use the expr.
+        if isinstance(unit_expr, Unit):
+            # grab the unit object's sympy expression.
+            unit_expr = unit_expr.expr
+
+        # If we have a string, have sympy parse it into an Expr.
+        elif isinstance(unit_expr, str):
+            if not unit_expr:
+                # Bug catch...
+                # if unit_expr is an empty string, parse_expr fails hard...
+                unit_expr = "1"
             unit_expr = parse_expr(unit_expr)
 
+        # Make sure we have an Expr at this point.
         if not isinstance(unit_expr, Expr):
-            raise UnitParseError("Unit representation must be a string or sympy Expr. %s is a %s." % (unit_expr, type(unit_expr)))
+            raise UnitParseError("Unit representation must be a string or sympy Expr. %s has type %s." % (unit_expr, type(unit_expr)))
         # done with argument checking...
 
         # sympify, make positive symbols, and nsimplify the expr
@@ -190,7 +262,7 @@ class Unit(Expr):
             except ValueError:
                 raise UnitParseError("Please provide a float for the cgs_value kwarg. I got '%s'." % cgs_value)
             # check that dimensions is valid
-            dimensions = verify_dimensions(dimensions)
+            dimensions = validate_dimensions(dimensions)
             # save the values
             this_cgs_value, this_dimensions = cgs_value, dimensions
 
@@ -289,6 +361,9 @@ class Unit(Expr):
              self.dimensions.expand().as_coeff_exponent(temperature)[1])
         return Unit(cgs_units_string, 1, self.dimensions)
 
+    def get_conversion_factor(self, other_units):
+        return get_conversion_factor(self, other_units)
+
 
 def make_symbols_positive(expr):
     """
@@ -309,7 +384,7 @@ def make_symbols_positive(expr):
 # @todo: simpler method that doesn't use recursion would be better...
 # We could check if dimensions.atoms are all numbers or symbols, but we should
 # check the functions also...
-def verify_dimensions(d):
+def validate_dimensions(d):
     """
     Make sure that `d` is a valid dimension expression. It must consist of only
     the base dimension symbols, to powers, multiplied together. If valid, return
@@ -327,12 +402,12 @@ def verify_dimensions(d):
 
     # validate args of a Pow or Mul separately
     elif isinstance(d, Pow):
-        return verify_dimensions(d.args[0])**verify_dimensions(d.args[1])
+        return validate_dimensions(d.args[0])**validate_dimensions(d.args[1])
 
     elif isinstance(d, Mul):
         total_mul = 1
         for arg in d.args:
-            total_mul *= verify_dimensions(arg)
+            total_mul *= validate_dimensions(arg)
         return total_mul
 
     # should never get here
@@ -376,9 +451,9 @@ def get_unit_data_from_expr(unit_expr):
 def lookup_unit_symbol(symbol_str):
     """ Searches for the unit data typle corresponding to the given symbol. """
 
-    if symbol_str in unit_symbols_dict:
+    if symbol_str in default_unit_symbol_LUT:
         # lookup successful, return the tuple directly
-        return unit_symbols_dict[symbol_str]
+        return default_unit_symbol_LUT[symbol_str]
 
     # could still be a known symbol with a prefix
     possible_prefix = symbol_str[0]
@@ -386,9 +461,9 @@ def lookup_unit_symbol(symbol_str):
         # the first character could be a prefix, check the rest of the symbol
         symbol_wo_prefix = symbol_str[1:]
 
-        if symbol_wo_prefix in unit_symbols_dict:
+        if symbol_wo_prefix in default_unit_symbol_LUT:
             # lookup successful, it's a symbol with a prefix
-            unit_data = unit_symbols_dict[symbol_wo_prefix]
+            unit_data = default_unit_symbol_LUT[symbol_wo_prefix]
             prefix_value = unit_prefixes[possible_prefix]
 
             # don't forget to account for the prefix value!
