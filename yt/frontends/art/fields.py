@@ -35,6 +35,7 @@ from yt.data_objects.field_info_container import \
     ValidateGridType
 import yt.data_objects.universal_fields
 import yt.utilities.lib as amr_utils
+from yt.frontends.art.definitions import *
 
 KnownARTFields = FieldInfoContainer()
 add_art_field = KnownARTFields.add_field
@@ -45,16 +46,25 @@ add_field = ARTFieldInfo.add_field
 import numpy as np
 
 #these are just the hydro fields
-known_art_fields = [ 'Density','TotalEnergy',
-                     'XMomentumDensity','YMomentumDensity','ZMomentumDensity',
-                     'Pressure','Gamma','GasEnergy',
-                     'MetalDensitySNII', 'MetalDensitySNIa',
-                     'PotentialNew','PotentialOld']
-
 #Add the fields, then later we'll individually defined units and names
-for f in known_art_fields:
+for f in fluid_fields:
     add_art_field(f, function=NullFunc, take_log=True,
               validators = [ValidateDataField(f)])
+
+for f in particle_fields:
+    add_art_field(f, function=NullFunc, take_log=True,
+              validators = [ValidateDataField(f)],
+              particle_type = True)
+
+add_art_field("particle_mass",function=NullFunc,take_log=True,
+            validators=[ValidateDataField(f)],
+            particle_type = True,
+            convert_function= lambda x: x.convert("particle_mass"))
+
+add_art_field("particle_mass_initial",function=NullFunc,take_log=True,
+            validators=[ValidateDataField(f)],
+            particle_type = True,
+            convert_function= lambda x: x.convert("particle_mass"))
 
 #Hydro Fields that are verified to be OK unit-wise:
 #Density
@@ -168,23 +178,14 @@ KnownARTFields["PotentialOld"]._convert_function=_convertPotentialOld
 ####### Derived fields
 
 def _temperature(field, data):
-    dg = data["GasEnergy"] #.astype('float64')
-    dg /= data.pf.conversion_factors["GasEnergy"]
-    dd = data["Density"] #.astype('float64')
-    dd /= data.pf.conversion_factors["Density"]
-    tr = dg/dd*data.pf.conversion_factors['tr']
-    #ghost cells have zero density?
-    tr[np.isnan(tr)] = 0.0
-    #dd[di] = -1.0
-    #if data.id==460:
-    #tr[di] = -1.0 #replace the zero-density points with zero temp
-    #print tr.min()
-    #assert np.all(np.isfinite(tr))
+    tr  = data["GasEnergy"]/data["Density"]
+    tr /= data.pf.conversion_factors["GasEnergy"]
+    tr *= data.pf.conversion_factors["Density"]
+    tr *= data.pf.conversion_factors['tr']
     return tr
+
 def _converttemperature(data):
-    #x = data.pf.conversion_factors["Temperature"]
-    x = 1.0
-    return x
+    return 1.0
 add_field("Temperature", function=_temperature, units = r"\mathrm{K}",take_log=True)
 ARTFieldInfo["Temperature"]._units = r"\mathrm{K}"
 ARTFieldInfo["Temperature"]._projected_units = r"\mathrm{K}"
@@ -242,3 +243,41 @@ ARTFieldInfo["Metal_Density"]._projected_units = r""
 
 
 #Particle fields
+
+def _particle_age(field,data):
+    tr = data["particle_creation_time"]
+    return data.pf.current_time - tr
+add_field("particle_age",function=_particle_age,units=r"\mathrm{s}",
+          take_log=True,particle_type=True)
+
+def spread_ages(ages,spread=1.0e7*365*24*3600):
+    #stars are formed in lumps; spread out the ages linearly
+    da= np.diff(ages)
+    assert np.all(da<=0)
+    #ages should always be decreasing, and ordered so
+    agesd = np.zeros(ages.shape)
+    idx, = np.where(da<0)
+    idx+=1 #mark the right edges
+    #spread this age evenly out to the next age
+    lidx=0
+    lage=0
+    for i in idx:
+        n = i-lidx #n stars affected
+        rage = ages[i]
+        lage = max(rage-spread,0.0)
+        agesd[lidx:i]=np.linspace(lage,rage,n)
+        lidx=i
+        #lage=rage
+    #we didn't get the last iter
+    n = agesd.shape[0]-lidx
+    rage = ages[-1]
+    lage = max(rage-spread,0.0)
+    agesd[lidx:]=np.linspace(lage,rage,n)
+    return agesd
+
+def _particle_age_spread(field,data):
+    tr = data["particle_creation_time"]
+    return spread_ages(data.pf.current_time - tr)
+
+add_field("particle_age_spread",function=_particle_age_spread,
+          particle_type=True,take_log=True,units=r"\rm{s}")

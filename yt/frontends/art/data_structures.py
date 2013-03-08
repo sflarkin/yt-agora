@@ -39,7 +39,7 @@ from yt.geometry.geometry_handler import \
 from yt.data_objects.static_output import \
       StaticOutput
 from yt.geometry.oct_container import \
-    RAMSESOctreeContainer
+    ARTOctreeContainer
 from yt.data_objects.field_info_container import \
     FieldInfoContainer, NullFunc
 from .fields import \
@@ -52,19 +52,14 @@ from yt.utilities.lib import \
     get_box_grids_level
 import yt.utilities.lib as amr_utils
 
-from .definitions import *
-from .io import _read_frecord
-from .io import _read_record
-from .io import _read_struct
+from yt.frontends.art.definitions import *
+from yt.utilities.fortran_utils import *
 from .io import _read_art_level_info
 from .io import _read_child_mask_level
 from .io import _read_child_level
 from .io import _read_root_level
-from .io import _read_record_size
-from .io import _skip_record
 from .io import _count_art_octs
 from .io import b2t
-
 
 import yt.frontends.ramses._ramses_reader as _ramses_reader
 
@@ -79,14 +74,8 @@ from yt.data_objects.field_info_container import \
     FieldInfoContainer, NullFunc
 from yt.utilities.physical_constants import \
     mass_hydrogen_cgs, sec_per_Gyr
-
 class ARTGeometryHandler(OctreeGeometryHandler):
     def __init__(self,pf,data_style="art"):
-        """
-        Life is made simpler because we only have one AMR file
-        and one domain. However, we are matching to the RAMSES
-        multi-domain architecture.
-        """
         self.fluid_field_list = fluid_fields
         self.data_style = data_style
         self.parameter_file = weakref.proxy(pf)
@@ -102,10 +91,11 @@ class ARTGeometryHandler(OctreeGeometryHandler):
         allocate the requisite memory in the oct tree
         """
         nv = len(self.fluid_field_list)
-        self.domains = [ARTDomainFile(self.parameter_file,1,nv)]
+        self.domains = [ARTDomainFile(self.parameter_file,i+1,nv,l)
+                        for i,l in enumerate(range(self.pf.max_level))]
         self.octs_per_domain = [dom.level_count.sum() for dom in self.domains]
         self.total_octs = sum(self.octs_per_domain)
-        self.oct_handler = RAMSESOctreeContainer(
+        self.oct_handler = ARTOctreeContainer(
             self.parameter_file.domain_dimensions/2, #dd is # of root cells
             self.parameter_file.domain_left_edge,
             self.parameter_file.domain_right_edge)
@@ -138,8 +128,11 @@ class ARTGeometryHandler(OctreeGeometryHandler):
             counts = self.oct_handler.count_cells(dobj.selector, mask)
             #For all domains, figure out how many counts we have 
             #and build a subset=mask of domains 
-            subsets = [ARTDomainSubset(d, mask, c)
-                       for d, c in zip(self.domains, counts) if c > 0]
+            subsets = []
+            for d,c in zip(self.domains,counts):
+                nocts = d.level_count[d.domain_level]
+                if c<1: continue
+                subsets += ARTDomainSubset(d,mask,c,d.domain_level),
             dobj._chunk_info = subsets
             dobj.size = sum(counts)
             dobj.shape = (dobj.size,)
@@ -173,18 +166,24 @@ class ARTStaticOutput(StaticOutput):
     def __init__(self,filename,data_style='art',
                  fields = None, storage_filename = None,
                  skip_particles=False,skip_stars=False,
-                 limit_level=None,spread_age=True):
+                 limit_level=None,spread_age=True,
+                 force_max_level=None,file_particle_header=None,
+                 file_particle_data=None,file_particle_stars=None):
         if fields is None:
             fields = fluid_fields
         filename = os.path.abspath(filename)
         self._fields_in_file = fields
         self._find_files(filename)
         self.file_amr = filename
+        self.file_particle_header = file_particle_header
+        self.file_particle_data = file_particle_data
+        self.file_particle_stars = file_particle_stars
         self.parameter_filename = filename
         self.skip_particles = skip_particles
         self.skip_stars = skip_stars
         self.limit_level = limit_level
         self.max_level = limit_level
+        self.force_max_level = force_max_level
         self.spread_age = spread_age
         self.domain_left_edge = np.zeros(3,dtype='float')
         self.domain_right_edge = np.zeros(3,dtype='float')+1.0
@@ -298,11 +297,12 @@ class ARTStaticOutput(StaticOutput):
         cf["Potential"] = 1.0
         cf["Entropy"] = S_0
         cf["Temperature"] = tr
+        cf["Time"] = 1.0 
+        cf["particle_mass"] = cf['Mass']
+        cf["particle_mass_initial"] = cf['Mass']
         self.cosmological_simulation = True
         self.conversion_factors = cf
         
-        for particle_field in particle_fields:
-            self.conversion_factors[particle_field] =  1.0
         for ax in 'xyz':
             self.conversion_factors["%s-velocity" % ax] = 1.0
         for unit in sec_conversion.keys():
@@ -320,12 +320,13 @@ class ARTStaticOutput(StaticOutput):
         self.unique_identifier = \
             int(os.stat(self.parameter_filename)[stat.ST_CTIME])
         self.parameters.update(constants)
+        self.parameters['Time'] = 1.0
         #read the amr header
         with open(self.file_amr,'rb') as f:
-            amr_header_vals = _read_struct(f,amr_header_struct)
+            amr_header_vals = read_attrs(f,amr_header_struct,'>')
             for to_skip in ['tl','dtl','tlold','dtlold','iSO']:
-                _skip_record(f)
-            (self.ncell,) = struct.unpack('>l', _read_record(f))
+                skipped=skip(f,endian='>')
+            (self.ncell) = read_vector(f,'i','>')[0]
             # Try to figure out the root grid dimensions
             est = int(np.rint(self.ncell**(1.0/3.0)))
             # Note here: this is the number of *cells* on the root grid.
@@ -337,27 +338,32 @@ class ARTStaticOutput(StaticOutput):
             self.root_ncells = self.root_nocts*8
             mylog.debug("Estimating %i cells on a root grid side,"+ \
                         "%i root octs",est,self.root_nocts)
-            self.root_iOctCh = _read_frecord(f,'>i')[:self.root_ncells]
+            self.root_iOctCh = read_vector(f,'i','>')[:self.root_ncells]
             self.root_iOctCh = self.root_iOctCh.reshape(self.domain_dimensions,
                  order='F')
             self.root_grid_offset = f.tell()
-            #_skip_record(f) # hvar
-            #_skip_record(f) # var
-            self.root_nhvar = _read_frecord(f,'>f',size_only=True)
-            self.root_nvar  = _read_frecord(f,'>f',size_only=True)
+            self.root_nhvar = skip(f,endian='>')
+            self.root_nvar  = skip(f,endian='>')
             #make sure that the number of root variables is a multiple of rootcells
             assert self.root_nhvar%self.root_ncells==0
             assert self.root_nvar%self.root_ncells==0
             self.nhydro_variables = ((self.root_nhvar+self.root_nvar)/ 
                                     self.root_ncells)
-            self.iOctFree, self.nOct = struct.unpack('>ii', _read_record(f))
+            self.iOctFree, self.nOct = read_vector(f,'i','>')
             self.child_grid_offset = f.tell()
             self.parameters.update(amr_header_vals)
             self.parameters['ncell0'] = self.parameters['ng']**3
+            #estimate the root level
+            float_center, fl, iocts, nocts,root_level = _read_art_level_info(f,
+                [0,self.child_grid_offset],1,
+                coarse_grid=self.domain_dimensions[0])
+            del float_center, fl, iocts, nocts
+            self.root_level = root_level
+            mylog.info("Using root level of %02i",self.root_level)
         #read the particle header
         if not self.skip_particles and self.file_particle_header:
             with open(self.file_particle_header,"rb") as fh:
-                particle_header_vals = _read_struct(fh,particle_header_struct)
+                particle_header_vals = read_attrs(fh,particle_header_struct,'>')
                 fh.seek(seek_extras)
                 n = particle_header_vals['Nspecies']
                 wspecies = np.fromfile(fh,dtype='>f',count=10)
@@ -365,6 +371,7 @@ class ARTStaticOutput(StaticOutput):
             self.parameters['wspecies'] = wspecies[:n]
             self.parameters['lspecies'] = lspecies[:n]
             ls_nonzero = np.diff(lspecies)[:n-1]
+            self.star_type = len(ls_nonzero)
             mylog.info("Discovered %i species of particles",len(ls_nonzero))
             mylog.info("Particle populations: "+'%1.1e '*len(ls_nonzero),
                 *ls_nonzero)
@@ -384,8 +391,13 @@ class ARTStaticOutput(StaticOutput):
         self.hubble_constant = amr_header_vals['hubble']
         self.min_level = amr_header_vals['min_level']
         self.max_level = amr_header_vals['max_level']
+        if self.limit_level is not None:
+            self.max_level = min(self.limit_level,amr_header_vals['max_level'])
+        if self.force_max_level is not None:
+            self.max_level = self.force_max_level
         self.hubble_time  = 1.0/(self.hubble_constant*100/3.08568025e19)
         self.current_time = b2t(self.parameters['t']) * sec_per_Gyr
+        mylog.info("Max level is %02i",self.max_level)
 
     @classmethod
     def _is_valid(self, *args, **kwargs):
@@ -393,20 +405,23 @@ class ARTStaticOutput(StaticOutput):
         Defined for the NMSU file naming scheme.
         This could differ for other formats.
         """
-        fn = ("%s" % (os.path.basename(args[0])))
         f = ("%s" % args[0])
         prefix, suffix = filename_pattern['amr'].split('%s')
-        if fn.endswith(suffix) and fn.startswith(prefix) and\
-                os.path.exists(f): 
+        with open(f,'rb') as fh:
+            try:
+                amr_header_vals = read_attrs(fh,amr_header_struct,'>')
                 return True
+            except:
+                return False
         return False
 
 class ARTDomainSubset(object):
-    def __init__(self, domain, mask, cell_count):
+    def __init__(self, domain, mask, cell_count,domain_level):
         self.mask = mask
         self.domain = domain
         self.oct_handler = domain.pf.h.oct_handler
         self.cell_count = cell_count
+        self.domain_level = domain_level
         level_counts = self.oct_handler.count_levels(
             self.domain.pf.max_level, self.domain.domain_id, mask)
         assert(level_counts.sum() == cell_count)
@@ -432,7 +447,7 @@ class ARTDomainSubset(object):
     def select_fwidth(self, dobj):
         base_dx = 1.0/self.domain.pf.domain_dimensions
         widths = np.empty((self.cell_count, 3), dtype="float64")
-        dds = (2**self.ires(dobj))
+        dds = (2**self.select_ires(dobj))
         for i in range(3):
             widths[:,i] = base_dx[i] / dds
         return widths
@@ -452,25 +467,35 @@ class ARTDomainSubset(object):
         filled = pos = level_offset = 0
         field_idxs = [all_fields.index(f) for f in fields]
         for field in fields:
-            dest[field] = np.zeros(self.cell_count, 'float64')
-        for level, offset in enumerate(self.domain.level_offsets):
-            no = self.domain.level_count[level]
-            if level==0:
-                data = _read_root_level(content,self.domain.level_child_offsets,
-                                       self.domain.level_count)
-                data = data[field_idxs,:]
-            else:
-                data = _read_child_level(content,self.domain.level_child_offsets,
+            dest[field] = np.zeros(self.cell_count, 'float64')-1.
+        level = self.domain_level
+        offset = self.domain.level_offsets
+        no = self.domain.level_count[level]
+        if level==0:
+            source= {}
+            data = _read_root_level(content,self.domain.level_child_offsets,
+                                   self.domain.level_count)
+            for field,i in zip(fields,field_idxs):
+                temp = np.reshape(data[i,:],self.domain.pf.domain_dimensions,
+                                  order='F').astype('float64').T
+                source[field] = temp
+            level_offset += oct_handler.fill_level_from_grid(self.domain.domain_id, 
+                                   level, dest, source, self.mask, level_offset)
+        else:
+            def subchunk(count,size):
+                for i in range(0,count,size):
+                    yield i,i+min(size,count-i)
+            for noct_range in subchunk(no,long(1e8)):
+                source = _read_child_level(content,self.domain.level_child_offsets,
                                          self.domain.level_offsets,
                                          self.domain.level_count,level,fields,
                                          self.domain.pf.domain_dimensions,
-                                         self.domain.pf.parameters['ncell0'])
-            source= {}
-            for i,field in enumerate(fields):
-                source[field] = np.empty((no, 8), dtype="float64")
-                source[field][:,:] = np.reshape(data[i,:],(no,8))
-            level_offset += oct_handler.fill_level(self.domain.domain_id, 
-                                   level, dest, source, self.mask, level_offset)
+                                         self.domain.pf.parameters['ncell0'],
+                                         noct_range = noct_range)
+                nocts_filling = noct_range[1]-noct_range[0]
+                level_offset += oct_handler.fill_level(self.domain.domain_id, 
+                                    level, dest, source, self.mask, level_offset,
+                                    noct_range[0],nocts_filling)
         return dest
 
 class ARTDomainFile(object):
@@ -483,20 +508,22 @@ class ARTDomainFile(object):
     _last_mask = None
     _last_seletor_id = None
 
-    def __init__(self,pf,domain_id,nvar):
+    def __init__(self,pf,domain_id,nvar,level):
         self.nvar = nvar
         self.pf = pf
         self.domain_id = domain_id
+        self.domain_level = level
         self._level_count = None
         self._level_oct_offsets = None
         self._level_child_offsets = None
+
 
     @property
     def level_count(self):
         #this is number of *octs*
         if self._level_count is not None: return self._level_count
         self.level_offsets
-        return self._level_count
+        return self._level_count[self.domain_level]
 
     @property
     def level_child_offsets(self):
@@ -540,41 +567,42 @@ class ARTDomainFile(object):
         self.level_offsets
         f = open(self.pf.file_amr, "rb")
         #add the root *cell* not *oct* mesh
+        level = self.domain_level
         root_octs_side = self.pf.domain_dimensions[0]/2
         NX = np.ones(3)*root_octs_side
-        LE = np.array([0.0, 0.0, 0.0], dtype='float64')
-        RE = np.array([1.0, 1.0, 1.0], dtype='float64')
-        root_dx = (RE - LE) / NX
-        LL = LE + root_dx/2.0
-        RL = RE - root_dx/2.0
-        #compute floating point centers of root octs
-        root_fc= np.mgrid[LL[0]:RL[0]:NX[0]*1j,
-                          LL[1]:RL[1]:NX[1]*1j,
-                          LL[2]:RL[2]:NX[2]*1j ]
-        root_fc= np.vstack([p.ravel() for p in root_fc]).T
-        nocts_check = oct_handler.add(1, 0, root_octs_side**3,
-                                      root_fc, self.domain_id)
-        assert(oct_handler.nocts == root_fc.shape[0])
-        nocts_added = root_fc.shape[0]
-        mylog.debug("Added %07i octs on level %02i, cumulative is %07i",
-                    root_octs_side**3, 0,nocts_added)
-        for level in xrange(1, self.pf.max_level+1):
-            left_index, fl, iocts, nocts,root_level = _read_art_level_info(f, 
+        octs_side = NX*2**level
+        if level == 0:
+            LE = np.array([0.0, 0.0, 0.0], dtype='float64')
+            RE = np.array([1.0, 1.0, 1.0], dtype='float64')
+            root_dx = (RE - LE) / NX
+            LL = LE + root_dx/2.0
+            RL = RE - root_dx/2.0
+            #compute floating point centers of root octs
+            root_fc= np.mgrid[LL[0]:RL[0]:NX[0]*1j,
+                              LL[1]:RL[1]:NX[1]*1j,
+                              LL[2]:RL[2]:NX[2]*1j ]
+            root_fc= np.vstack([p.ravel() for p in root_fc]).T
+            nocts_check = oct_handler.add(self.domain_id, level, 
+                                          root_octs_side**3,
+                                          root_fc, self.domain_id)
+            assert(oct_handler.nocts == root_fc.shape[0])
+            mylog.debug("Added %07i octs on level %02i, cumulative is %07i",
+                        root_octs_side**3, 0,oct_handler.nocts)
+        else:
+            unitary_center, fl, iocts, nocts,root_level = _read_art_level_info(f,
                 self._level_oct_offsets,level,
-                coarse_grid=self.pf.domain_dimensions[0])
-            left_index/=2
+                coarse_grid=self.pf.domain_dimensions[0],
+                root_level=self.pf.root_level)
             #at least one of the indices should be odd
             #assert np.sum(left_index[:,0]%2==1)>0
-            octs_side = NX*2**level
-            float_left_edge = left_index.astype("float64") / octs_side
-            float_center = float_left_edge + 0.5*1.0/octs_side
+            #float_left_edge = left_index.astype("float64") / octs_side
+            #float_center = float_left_edge + 0.5*1.0/octs_side
             #all floatin unitary positions should fit inside the domain
-            assert np.all(float_center<1.0)
-            nocts_check = oct_handler.add(1,level, nocts, float_left_edge, self.domain_id)
-            nocts_added += nocts
-            assert(oct_handler.nocts == nocts_added)
+            nocts_check = oct_handler.add(self.domain_id,level, nocts, 
+                                          unitary_center, self.domain_id)
+            assert(nocts_check == nocts)
             mylog.debug("Added %07i octs on level %02i, cumulative is %07i",
-                        nocts, level,nocts_added)
+                        nocts, level,oct_handler.nocts)
 
     def select(self, selector):
         if id(selector) == self._last_selector_id:
