@@ -55,7 +55,7 @@ from yt.utilities.physical_constants import \
     G, \
     rho_crit_now, \
     speed_of_light_cgs, \
-     km_per_cm, keV_per_K
+    km_per_cm, keV_per_K
 
 from yt.utilities.math_utils import \
     get_sph_r_component, \
@@ -205,9 +205,11 @@ def _pressure(field, data):
     """ M{(Gamma-1.0)*rho*E} """
     return (data.pf.gamma - 1.0) * data["density"] * data["thermal_energy"]
 
+add_field("pressure", function=_pressure, units="dyne/cm**2")
+
 def _TempkeV(field, data):
     return data["Temperature"] * keV_per_K
-add_field("TempkeV", function=_TempkeV, units=r"\rm{keV}",
+add_field("TempkeV", function=_TempkeV, units="keV",
           display_name="Temperature")
 
 def _entropy(field, data):
@@ -215,9 +217,14 @@ def _entropy(field, data):
         mw = mh * data.get_field_parameter("mu")
     else:
         mw = mh
-    return ( kboltz * data["temperature"]
-             / ((data["density"] / mw)**(data.pf.gamma - 1.0)) )
+    try:
+        gammam1 = data.pf["Gamma"] - 1.0
+    except:
+        gammam1 = 5./3. - 1.0
+    return kboltz * data["Temperature"] / \
+           ((data["Density"]/mw)**gammam1)
 add_field("entropy", units="erg/K", function=_entropy)
+
 ### spherical coordinates: r (radius)
 def _spherical_r(field, data):
     center = data.get_field_parameter("center")
