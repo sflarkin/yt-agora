@@ -192,17 +192,17 @@ class YTDataContainer(object):
         """
         Returns a single field.  Will add if necessary.
         """
-        if key not in self.field_data:
-            if key in self._container_fields:
-                self.field_data[key] = \
+        f = self._determine_fields(key)[0]
+        if f not in self.field_data:
+            if f in self._container_fields:
+                self.field_data[f] = \
                     YTArray(self._generate_container_field(key), input_units='1')
                 return self.field_data[key]
             else:
                 self.get_data(key)
 
-        f = self._determine_fields(key)[0]
         fi = self.pf._get_field_info(*f)
-        
+
         # @todo: Might find a better way to grab the unit object.
         # fi.units is the unit expression string. We depend on the registry
         # hanging off the dataset to define this unit object.
@@ -1195,7 +1195,7 @@ class YTBooleanRegionBase(YTSelectionContainer3D):
         self._get_all_regions()
         self._make_overlaps()
         self._get_list_of_grids()
-    
+
     def _get_all_regions(self):
         # Before anything, we simply find out which regions are involved in all
         # of this process, uniquely.
@@ -1205,7 +1205,7 @@ class YTBooleanRegionBase(YTSelectionContainer3D):
             # So cut_masks don't get messed up.
             item._boolean_touched = True
         self._all_regions = np.unique(self._all_regions)
-    
+
     def _make_overlaps(self):
         # Using the processed cut_masks, we'll figure out what grids
         # are left in the hybrid region.
@@ -1239,7 +1239,7 @@ class YTBooleanRegionBase(YTSelectionContainer3D):
                     continue
             pbar.update(i)
         pbar.finish()
-    
+
     def __repr__(self):
         # We'll do this the slow way to be clear what's going on
         s = "%s (%s): " % (self.__class__.__name__, self.pf)
@@ -1252,7 +1252,7 @@ class YTBooleanRegionBase(YTSelectionContainer3D):
             if i < (len(self.regions) - 1): s += ", "
         s += "]"
         return s
-    
+
     def _is_fully_enclosed(self, grid):
         return (grid in self._all_overlap)
 
@@ -1263,8 +1263,8 @@ class YTBooleanRegionBase(YTSelectionContainer3D):
     def _get_cut_mask(self, grid, field=None):
         if self._is_fully_enclosed(grid):
             return True # We do not want child masking here
-        if not isinstance(grid, (FakeGridForParticles, GridChildMaskWrapper)) \
-                and grid.id in self._cut_masks:
+        if not isinstance(grid, (FakeGridForParticles,)) \
+             and grid.id in self._cut_masks:
             return self._cut_masks[grid.id]
         # If we get this far, we have to generate the cut_mask.
         return self._get_level_mask(self.regions, grid)

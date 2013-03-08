@@ -311,10 +311,6 @@ class FieldDetector(defaultdict):
     def convert(self, item):
         return 1
 
-
-class FieldUnitsError(Exception):
-    pass
-
     @property
     def fcoords(self):
         fc = np.array(np.mgrid[0:1:self.nd*1j,
@@ -350,6 +346,9 @@ class FieldUnitsError(Exception):
         if not self.flat:
             fw.shape = (self.nd, self.nd, self.nd)
         return fw
+
+class FieldUnitsError(Exception):
+    pass
 
 class DerivedField(object):
     """
