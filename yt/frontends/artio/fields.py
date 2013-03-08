@@ -1,5 +1,5 @@
 """
-ART-specific fields
+ARTIO-specific fields
 
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: UCSD
@@ -34,232 +34,224 @@ from yt.data_objects.field_info_container import \
     ValidateSpatial, \
     ValidateGridType
 import yt.data_objects.universal_fields
-import yt.utilities.lib as amr_utils
-
-KnownARTFields = FieldInfoContainer()
-add_art_field = KnownARTFields.add_field
-
-ARTFieldInfo = FieldInfoContainer.create_with_fallback(FieldInfo)
-add_field = ARTFieldInfo.add_field
-
 import numpy as np
 
-#these are just the hydro fields
-known_art_fields = [ 'Density','TotalEnergy',
-                     'XMomentumDensity','YMomentumDensity','ZMomentumDensity',
-                     'Pressure','Gamma','GasEnergy',
-                     'MetalDensitySNII', 'MetalDensitySNIa',
-                     'PotentialNew','PotentialOld']
+KnownARTIOFields = FieldInfoContainer()
+add_artio_field = KnownARTIOFields.add_field
 
+#snl: doug removed RFI, but field name is needed in yt/data_objects/field_info_container.py?
+ARTIOFieldInfo = FieldInfoContainer.create_with_fallback(FieldInfo, "RFI") 
+add_field = ARTIOFieldInfo.add_field
+
+known_artio_fields = ['Density', 'TotalEnergy',
+                     'XMomentumDensity','YMomentumDensity','ZMomentumDensity',
+                     'Pressure','GasEnergy',
+                     'MetalDensitySNII', 'MetalDensitySNIa',
+                     'Potential','PotentialHydro']
+                     
 #Add the fields, then later we'll individually defined units and names
-for f in known_art_fields:
-    add_art_field(f, function=NullFunc, take_log=True,
+for f in known_artio_fields:
+    add_artio_field(f, function=NullFunc, take_log=True,
               validators = [ValidateDataField(f)])
 
-#Hydro Fields that are verified to be OK unit-wise:
-#Density
-#Temperature
-#metallicities
-#MetalDensity SNII + SNia
+add_artio_field("Gamma", function=NullFunc, take_log=False,
+                validators = [ValidateDataField("Gamma")])
 
-#Hydro Fields that need to be tested:
-#TotalEnergy
-#XYZMomentum
-#Pressure
-#Gamma
-#GasEnergy
-#Potentials
-#xyzvelocity
+def dx(field, data):
+    return data.fwidth[:,0]
+add_field("dx", function=dx)
 
-#Particle fields that are tested:
-#particle_position_xyz
-#particle_type
-#particle_index
-#particle_mass
-#particle_mass_initial
-#particle_age
-#particle_velocity
-#particle_metallicity12
+def dy(field, data):
+    return data.fwidth[:,1]
+add_field("dy", function=dy)
 
-#Particle fields that are untested:
-#NONE
+def dz(field, data):
+    return data.fwidth[:,2]
+add_field("dz", function=dz)
 
-#Other checks:
-#CellMassMsun == Density * CellVolume
 
 def _convertDensity(data):
     return data.convert("Density")
-KnownARTFields["Density"]._units = r"\rm{g}/\rm{cm}^3"
-KnownARTFields["Density"]._projected_units = r"\rm{g}/\rm{cm}^2"
-KnownARTFields["Density"]._convert_function=_convertDensity
+KnownARTIOFields["Density"]._units = r"\rm{g}/\rm{cm}^3"
+KnownARTIOFields["Density"]._projected_units = r"\rm{g}/\rm{cm}^2"
+KnownARTIOFields["Density"]._convert_function=_convertDensity
 
 def _convertTotalEnergy(data):
     return data.convert("GasEnergy")
-KnownARTFields["TotalEnergy"]._units = r"\rm{g}/\rm{cm}^3"
-KnownARTFields["TotalEnergy"]._projected_units = r"\rm{K}"
-KnownARTFields["TotalEnergy"]._convert_function=_convertTotalEnergy
+KnownARTIOFields["TotalEnergy"]._units = r"\rm{g}/\rm{cm}^3"
+KnownARTIOFields["TotalEnergy"]._projected_units = r"\rm{K}"
+KnownARTIOFields["TotalEnergy"]._convert_function=_convertTotalEnergy
 
 def _convertXMomentumDensity(data):
     tr  = data.convert("Mass")*data.convert("Velocity")
     tr *= (data.convert("Density")/data.convert("Mass"))
     return tr
-KnownARTFields["XMomentumDensity"]._units = r"\rm{mg}/\rm{s}/\rm{cm}^3"
-KnownARTFields["XMomentumDensity"]._projected_units = r"\rm{K}"
-KnownARTFields["XMomentumDensity"]._convert_function=_convertXMomentumDensity
+KnownARTIOFields["XMomentumDensity"]._units = r"\rm{mg}/\rm{s}/\rm{cm}^3"
+KnownARTIOFields["XMomentumDensity"]._projected_units = r"\rm{K}"
+KnownARTIOFields["XMomentumDensity"]._convert_function=_convertXMomentumDensity
 
 def _convertYMomentumDensity(data):
     tr  = data.convert("Mass")*data.convert("Velocity")
     tr *= (data.convert("Density")/data.convert("Mass"))
     return tr
-KnownARTFields["YMomentumDensity"]._units = r"\rm{mg}/\rm{s}/\rm{cm}^3"
-KnownARTFields["YMomentumDensity"]._projected_units = r"\rm{K}"
-KnownARTFields["YMomentumDensity"]._convert_function=_convertYMomentumDensity
+KnownARTIOFields["YMomentumDensity"]._units = r"\rm{mg}/\rm{s}/\rm{cm}^3"
+KnownARTIOFields["YMomentumDensity"]._projected_units = r"\rm{K}"
+KnownARTIOFields["YMomentumDensity"]._convert_function=_convertYMomentumDensity
 
 def _convertZMomentumDensity(data):
     tr  = data.convert("Mass")*data.convert("Velocity")
     tr *= (data.convert("Density")/data.convert("Mass"))
     return tr
-KnownARTFields["ZMomentumDensity"]._units = r"\rm{mg}/\rm{s}/\rm{cm}^3"
-KnownARTFields["ZMomentumDensity"]._projected_units = r"\rm{K}"
-KnownARTFields["ZMomentumDensity"]._convert_function=_convertZMomentumDensity
+KnownARTIOFields["ZMomentumDensity"]._units = r"\rm{mg}/\rm{s}/\rm{cm}^3"
+KnownARTIOFields["ZMomentumDensity"]._projected_units = r"\rm{K}"
+KnownARTIOFields["ZMomentumDensity"]._convert_function=_convertZMomentumDensity
 
 def _convertPressure(data):
     return data.convert("Pressure")
-KnownARTFields["Pressure"]._units = r"\rm{g}/\rm{cm}/\rm{s}^2"
-KnownARTFields["Pressure"]._projected_units = r"\rm{g}/\rm{s}^2"
-KnownARTFields["Pressure"]._convert_function=_convertPressure
+KnownARTIOFields["Pressure"]._units = r"\rm{g}/\rm{cm}/\rm{s}^2"
+KnownARTIOFields["Pressure"]._projected_units = r"\rm{g}/\rm{s}^2"
+KnownARTIOFields["Pressure"]._convert_function=_convertPressure
 
 def _convertGamma(data):
     return 1.0
-KnownARTFields["Gamma"]._units = r""
-KnownARTFields["Gamma"]._projected_units = r""
-KnownARTFields["Gamma"]._convert_function=_convertGamma
+KnownARTIOFields["Gamma"]._units = r""
+KnownARTIOFields["Gamma"]._projected_units = r""
+KnownARTIOFields["Gamma"]._convert_function=_convertGamma
 
 def _convertGasEnergy(data):
     return data.convert("GasEnergy")
-KnownARTFields["GasEnergy"]._units = r"\rm{ergs}/\rm{g}"
-KnownARTFields["GasEnergy"]._projected_units = r""
-KnownARTFields["GasEnergy"]._convert_function=_convertGasEnergy
+KnownARTIOFields["GasEnergy"]._units = r"\rm{ergs}/\rm{g}"
+KnownARTIOFields["GasEnergy"]._projected_units = r""
+KnownARTIOFields["GasEnergy"]._convert_function=_convertGasEnergy
 
 def _convertMetalDensitySNII(data):
     return data.convert('Density')
-KnownARTFields["MetalDensitySNII"]._units = r"\rm{g}/\rm{cm}^3"
-KnownARTFields["MetalDensitySNII"]._projected_units = r"\rm{g}/\rm{cm}^2"
-KnownARTFields["MetalDensitySNII"]._convert_function=_convertMetalDensitySNII
+KnownARTIOFields["MetalDensitySNII"]._units = r"\rm{g}/\rm{cm}^3"
+KnownARTIOFields["MetalDensitySNII"]._projected_units = r"\rm{g}/\rm{cm}^2"
+KnownARTIOFields["MetalDensitySNII"]._convert_function=_convertMetalDensitySNII
 
 def _convertMetalDensitySNIa(data):
     return data.convert('Density')
-KnownARTFields["MetalDensitySNIa"]._units = r"\rm{g}/\rm{cm}^3"
-KnownARTFields["MetalDensitySNIa"]._projected_units = r"\rm{g}/\rm{cm}^2"
-KnownARTFields["MetalDensitySNIa"]._convert_function=_convertMetalDensitySNIa
+KnownARTIOFields["MetalDensitySNIa"]._units = r"\rm{g}/\rm{cm}^3"
+KnownARTIOFields["MetalDensitySNIa"]._projected_units = r"\rm{g}/\rm{cm}^2"
+KnownARTIOFields["MetalDensitySNIa"]._convert_function=_convertMetalDensitySNIa
 
-def _convertPotentialNew(data):
+def _convertPotential(data):
     return data.convert("Potential")
-KnownARTFields["PotentialNew"]._units = r"\rm{g}/\rm{cm}^3"
-KnownARTFields["PotentialNew"]._projected_units = r"\rm{g}/\rm{cm}^2"
-KnownARTFields["PotentialNew"]._convert_function=_convertPotentialNew
+KnownARTIOFields["Potential"]._units = r"\rm{g}/\rm{cm}^3"
+KnownARTIOFields["Potential"]._projected_units = r"\rm{g}/\rm{cm}^2"
+KnownARTIOFields["Potential"]._convert_function=_convertPotential
 
-def _convertPotentialOld(data):
+def _convertPotentialHydro(data):
     return data.convert("Potential")
-KnownARTFields["PotentialOld"]._units = r"\rm{g}/\rm{cm}^3"
-KnownARTFields["PotentialOld"]._projected_units = r"\rm{g}/\rm{cm}^2"
-KnownARTFields["PotentialOld"]._convert_function=_convertPotentialOld
+KnownARTIOFields["PotentialHydro"]._units = r"\rm{g}/\rm{cm}^3"
+KnownARTIOFields["PotentialHydro"]._projected_units = r"\rm{g}/\rm{cm}^2"
+KnownARTIOFields["PotentialHydro"]._convert_function=_convertPotentialHydro
 
 ####### Derived fields
-
+import sys
 def _temperature(field, data):
-    dg = data["GasEnergy"] #.astype('float64')
-    dg /= data.pf.conversion_factors["GasEnergy"]
-    dd = data["Density"] #.astype('float64')
-    dd /= data.pf.conversion_factors["Density"]
-    tr = dg/dd*data.pf.tr
-    #ghost cells have zero density?
+    tr = data["GasEnergy"]/data["Density"] #Gamma fixed not field *(data["Gamma"]-1)*wmu 
     tr[np.isnan(tr)] = 0.0
-    #dd[di] = -1.0
-    #if data.id==460:
-    #tr[di] = -1.0 #replace the zero-density points with zero temp
-    #print tr.min()
-    #assert np.all(np.isfinite(tr))
     return tr
 def _converttemperature(data):
-    #x = data.pf.conversion_factors["Temperature"]
-    x = 1.0
+    x = data.pf.conversion_factors["Temperature"]*data.pf.conversion_factors["Density"]/data.pf.conversion_factors["GasEnergy"]
     return x
 add_field("Temperature", function=_temperature, units = r"\mathrm{K}",take_log=True)
-ARTFieldInfo["Temperature"]._units = r"\mathrm{K}"
-ARTFieldInfo["Temperature"]._projected_units = r"\mathrm{K}"
-#ARTFieldInfo["Temperature"]._convert_function=_converttemperature
+ARTIOFieldInfo["Temperature"]._units = r"\mathrm{K}"
+ARTIOFieldInfo["Temperature"]._projected_units = r"\mathrm{K}"
+ARTIOFieldInfo["Temperature"]._convert_function=_converttemperature
 
 def _metallicity_snII(field, data):
     tr  = data["MetalDensitySNII"] / data["Density"]
     return tr
 add_field("Metallicity_SNII", function=_metallicity_snII, units = r"\mathrm{K}",take_log=True)
-ARTFieldInfo["Metallicity_SNII"]._units = r""
-ARTFieldInfo["Metallicity_SNII"]._projected_units = r""
+ARTIOFieldInfo["Metallicity_SNII"]._units = r""
+ARTIOFieldInfo["Metallicity_SNII"]._projected_units = r""
 
 def _metallicity_snIa(field, data):
     tr  = data["MetalDensitySNIa"] / data["Density"]
     return tr
 add_field("Metallicity_SNIa", function=_metallicity_snIa, units = r"\mathrm{K}",take_log=True)
-ARTFieldInfo["Metallicity_SNIa"]._units = r""
-ARTFieldInfo["Metallicity_SNIa"]._projected_units = r""
+ARTIOFieldInfo["Metallicity_SNIa"]._units = r""
+ARTIOFieldInfo["Metallicity_SNIa"]._projected_units = r""
 
 def _metallicity(field, data):
     tr  = data["Metal_Density"] / data["Density"]
     return tr
 add_field("Metallicity", function=_metallicity, units = r"\mathrm{K}",take_log=True)
-ARTFieldInfo["Metallicity"]._units = r""
-ARTFieldInfo["Metallicity"]._projected_units = r""
+ARTIOFieldInfo["Metallicity"]._units = r""
+ARTIOFieldInfo["Metallicity"]._projected_units = r""
 
 def _x_velocity(field,data):
     tr  = data["XMomentumDensity"]/data["Density"]
     return tr
 add_field("x-velocity", function=_x_velocity, units = r"\mathrm{cm/s}",take_log=False)
-ARTFieldInfo["x-velocity"]._units = r"\rm{cm}/\rm{s}"
-ARTFieldInfo["x-velocity"]._projected_units = r"\rm{cm}/\rm{s}"
+ARTIOFieldInfo["x-velocity"]._units = r"\rm{cm}/\rm{s}"
+ARTIOFieldInfo["x-velocity"]._projected_units = r"\rm{cm}/\rm{s}"
 
 def _y_velocity(field,data):
     tr  = data["YMomentumDensity"]/data["Density"]
     return tr
 add_field("y-velocity", function=_y_velocity, units = r"\mathrm{cm/s}",take_log=False)
-ARTFieldInfo["y-velocity"]._units = r"\rm{cm}/\rm{s}"
-ARTFieldInfo["y-velocity"]._projected_units = r"\rm{cm}/\rm{s}"
+ARTIOFieldInfo["y-velocity"]._units = r"\rm{cm}/\rm{s}"
+ARTIOFieldInfo["y-velocity"]._projected_units = r"\rm{cm}/\rm{s}"
 
 def _z_velocity(field,data):
     tr  = data["ZMomentumDensity"]/data["Density"]
     return tr
 add_field("z-velocity", function=_z_velocity, units = r"\mathrm{cm/s}",take_log=False)
-ARTFieldInfo["z-velocity"]._units = r"\rm{cm}/\rm{s}"
-ARTFieldInfo["z-velocity"]._projected_units = r"\rm{cm}/\rm{s}"
+ARTIOFieldInfo["z-velocity"]._units = r"\rm{cm}/\rm{s}"
+ARTIOFieldInfo["z-velocity"]._projected_units = r"\rm{cm}/\rm{s}"
 
 def _metal_density(field, data):
     tr  = data["MetalDensitySNIa"]
     tr += data["MetalDensitySNII"]
     return tr
 add_field("Metal_Density", function=_metal_density, units = r"\mathrm{K}",take_log=True)
-ARTFieldInfo["Metal_Density"]._units = r""
-ARTFieldInfo["Metal_Density"]._projected_units = r""
+ARTIOFieldInfo["Metal_Density"]._units = r""
+ARTIOFieldInfo["Metal_Density"]._projected_units = r""
 
-
+##################################################
 #Particle fields
+
+for ax in 'xyz':
+    pf = "particle_velocity_%s" % ax
+    add_artio_field(pf, function=NullFunc,
+              particle_type=True)
+add_artio_field("particle_mass", function=NullFunc, particle_type=True)
+add_artio_field("particle_index", function=NullFunc, particle_type=True)
+
+for ax in 'xyz':
+    pf = "particle_position_%s" % ax
+    add_artio_field(pf, function=NullFunc,
+              particle_type=True)
 
 def ParticleMass(field,data):
     return data['particle_mass']
-add_field("ParticleMass",function=ParticleMass,units=r"\rm{g}",particle_type=True)
-
-
-#Derived particle fields
+def _convertParticleMass(field,data):
+    return data.convert('particle_mass')
+add_field("ParticleMass",
+          function=ParticleMass,
+          convert_function=_convertParticleMass,
+          units=r"\rm{g}",
+          particle_type=True)
 
 def ParticleMassMsun(field,data):
-    return data['particle_mass']*data.pf['Msun']
-add_field("ParticleMassMsun",function=ParticleMassMsun,units=r"\rm{g}",particle_type=True)
+    return data['particle_mass']*data.pf.conversion_factors['particle_mass_msun']
+add_field("ParticleMassMsun",
+          function=ParticleMassMsun,
+          units=r"\rm{M\odot}",particle_type=True)
 
-def _creation_time(field,data):
-    pa = data["particle_age"]
-    tr = np.zeros(pa.shape,dtype='float')-1.0
-    tr[pa>0] = pa[pa>0]
+add_artio_field("creation_time", function=NullFunc, particle_type=True)
+from io import b2t
+def _particle_age(field,data):
+    pa = data['creation_time']
+#    tr = np.zeros(pa.shape,dtype='float')-1.0
+#    tr[pa>0] = pa[pa>0]
+    tr = pa
     return tr
-add_field("creation_time",function=_creation_time,units=r"\rm{s}",particle_type=True)
+add_field("particle_age",function=_particle_age,units=r"\rm{s}",particle_type=True)
 
 def mass_dm(field, data):
     tr = np.ones(data.ActiveDimensions, dtype='float32')
