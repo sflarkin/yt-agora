@@ -40,7 +40,7 @@ KnownARTIOFields = FieldInfoContainer()
 add_artio_field = KnownARTIOFields.add_field
 
 #snl: doug removed RFI, but field name is needed in yt/data_objects/field_info_container.py?
-ARTIOFieldInfo = FieldInfoContainer.create_with_fallback(FieldInfo, "RFI") 
+ARTIOFieldInfo = FieldInfoContainer.create_with_fallback(FieldInfo) 
 add_field = ARTIOFieldInfo.add_field
 
 known_artio_fields = ['Density', 'TotalEnergy',
@@ -57,18 +57,29 @@ for f in known_artio_fields:
 add_artio_field("Gamma", function=NullFunc, take_log=False,
                 validators = [ValidateDataField("Gamma")])
 
-def dx(field, data):
-    return data.fwidth[:,0]
-add_field("dx", function=dx)
-
-def dy(field, data):
-    return data.fwidth[:,1]
-add_field("dy", function=dy)
-
-def dz(field, data):
-    return data.fwidth[:,2]
-add_field("dz", function=dz)
-
+#def dx(field, data):
+#    return data.fwidth[:,0]
+#add_field("dx", function=dx)
+#
+#def dy(field, data):
+#    return data.fwidth[:,1]
+#add_field("dy", function=dy)
+#
+#def dz(field, data):
+#    return data.fwidth[:,2]
+#add_field("dz", function=dz)
+#
+#def x(field, data):
+#    return data.fcoords[:,0]
+#add_field("x", function=x)
+#
+#def y(field, data):
+#    return data.fcoords[:,1]
+#add_field("y", function=y)
+#
+#def z(field, data):
+#    return data.fcoords[:,2]
+#add_field("z", function=z)
 
 def _convertDensity(data):
     return data.convert("Density")
@@ -151,17 +162,11 @@ KnownARTIOFields["PotentialHydro"]._convert_function=_convertPotentialHydro
 ####### Derived fields
 import sys
 def _temperature(field, data):
-    tr = data["GasEnergy"]/data.pf.conversion_factors["GasEnergy"]*data.pf.conversion_factors["Density"]/data["Density"] #*(data["Gamma"]-1)*wmu 
-    #ghost cells have zero density?
+    tr = data["GasEnergy"]/data["Density"] #Gamma fixed not field *(data["Gamma"]-1)*wmu 
     tr[np.isnan(tr)] = 0.0
-    #dd[di] = -1.0
-    #if data.id==460:
-    #tr[di] = -1.0 #replace the zero-density points with zero temp
-    #print tr.min()
-    #assert np.all(np.isfinite(tr))
     return tr
 def _converttemperature(data):
-    x = data.pf.conversion_factors["Temperature"]
+    x = data.pf.conversion_factors["Temperature"]*data.pf.conversion_factors["Density"]/data.pf.conversion_factors["GasEnergy"]
     return x
 add_field("Temperature", function=_temperature, units = r"\mathrm{K}",take_log=True)
 ARTIOFieldInfo["Temperature"]._units = r"\mathrm{K}"
@@ -225,8 +230,8 @@ for ax in 'xyz':
     pf = "particle_velocity_%s" % ax
     add_artio_field(pf, function=NullFunc,
               particle_type=True)
-
 add_artio_field("particle_mass", function=NullFunc, particle_type=True)
+add_artio_field("particle_index", function=NullFunc, particle_type=True)
 
 for ax in 'xyz':
     pf = "particle_position_%s" % ax
@@ -235,21 +240,28 @@ for ax in 'xyz':
 
 def ParticleMass(field,data):
     return data['particle_mass']
-add_field("ParticleMass",function=ParticleMass,units=r"\rm{g}",particle_type=True)
-
-
-#Derived particle fields
+def _convertParticleMass(field,data):
+    return data.convert('particle_mass')
+add_field("ParticleMass",
+          function=ParticleMass,
+          convert_function=_convertParticleMass,
+          units=r"\rm{g}",
+          particle_type=True)
 
 def ParticleMassMsun(field,data):
-    return data['particle_mass']/1.989e33 #*data.pf['Msun']
-add_field("ParticleMassMsun",function=ParticleMassMsun,units=r"\rm{g}",particle_type=True)
+    return data['particle_mass']*data.pf.conversion_factors['particle_mass_msun']
+add_field("ParticleMassMsun",
+          function=ParticleMassMsun,
+          units=r"\rm{M\odot}",particle_type=True)
 
-def _creation_time(field,data):
-    pa = data["particle_age"]
-    tr = np.zeros(pa.shape,dtype='float')-1.0
-    tr[pa>0] = pa[pa>0]
+add_artio_field("creation_time", function=NullFunc, particle_type=True)
+def _particle_age(field,data):
+    pa = b2t(data['creation_time'])
+#    tr = np.zeros(pa.shape,dtype='float')-1.0
+#    tr[pa>0] = pa[pa>0]
+    tr = pa
     return tr
-add_field("creation_time",function=_creation_time,units=r"\rm{s}",particle_type=True)
+add_field("particle_age",function=_particle_age,units=r"\rm{s}",particle_type=True)
 
 def mass_dm(field, data):
     tr = np.ones(data.ActiveDimensions, dtype='float32')
@@ -293,3 +305,106 @@ def _simple_density(field,data):
 
 add_field("star_density", function=_simple_density,
           validators=[ValidateSpatial(0)], convert_function=_convertDensity)
+
+
+
+#stolen from frontends/art/
+#All of these functions are to convert from hydro time var to 
+#proper time
+sqrt = np.sqrt
+sign = np.sign
+
+def find_root(f,a,b,tol=1e-6):
+    c = (a+b)/2.0
+    last = -np.inf
+    assert(sign(f(a)) != sign(f(b)))  
+    while np.abs(f(c)-last) > tol:
+        last=f(c)
+        if sign(last)==sign(f(b)):
+            b=c
+        else:
+            a=c
+        c = (a+b)/2.0
+    return c
+
+def quad(fintegrand,xmin,xmax,n=1e4):
+    spacings = np.logspace(np.log10(xmin),np.log10(xmax),n)
+    integrand_arr = fintegrand(spacings)
+    val = np.trapz(integrand_arr,dx=np.diff(spacings))
+    return val
+
+def a2b(at,Om0=0.27,Oml0=0.73,h=0.700):
+    def f_a2b(x):
+        val = 0.5*sqrt(Om0) / x**3.0
+        val /= sqrt(Om0/x**3.0 +Oml0 +(1.0 - Om0-Oml0)/x**2.0)
+        return val
+    #val, err = si.quad(f_a2b,1,at)
+    val = quad(f_a2b,1,at)
+    return val
+
+def b2a(bt,**kwargs):
+    #converts code time into expansion factor 
+    #if Om0 ==1and OmL == 0 then b2a is (1 / (1-td))**2
+    #if bt < -190.0 or bt > -.10:  raise 'bt outside of range'
+    f_b2a = lambda at: a2b(at,**kwargs)-bt
+    return find_root(f_b2a,1e-4,1.1)
+    #return so.brenth(f_b2a,1e-4,1.1)
+    #return brent.brent(f_b2a)
+
+def a2t(at,Om0=0.27,Oml0=0.73,h=0.700):
+    integrand = lambda x : 1./(x*sqrt(Oml0+Om0*x**-3.0))
+    #current_time,err = si.quad(integrand,0.0,at,epsabs=1e-6,epsrel=1e-6)
+    current_time = quad(integrand,1e-4,at)
+    #spacings = np.logspace(-5,np.log10(at),1e5)
+    #integrand_arr = integrand(spacings)
+    #current_time = np.trapz(integrand_arr,dx=np.diff(spacings))
+    current_time *= 9.779/h
+    return current_time
+
+def b2t(tb,n = 1e2,logger=None,**kwargs):
+    tb = np.array(tb)
+    if type(tb) == type(1.1): 
+        return a2t(b2a(tb))
+    if tb.shape == (): 
+        return a2t(b2a(tb))
+    if len(tb) < n: n= len(tb)
+    age_min = a2t(b2a(tb.max(),**kwargs),**kwargs)
+    age_max = a2t(b2a(tb.min(),**kwargs),**kwargs)
+    tbs  = -1.*np.logspace(np.log10(-tb.min()),
+                          np.log10(-tb.max()),n)
+    ages = []
+    for i,tbi in enumerate(tbs):
+        ages += a2t(b2a(tbi)),
+        if logger: logger(i)
+    ages = np.array(ages)
+    fb2t = np.interp(tb,tbs,ages)
+    #fb2t = interp1d(tbs,ages)
+    return fb2t
+
+def spread_ages(ages,logger=None,spread=1.0e7*365*24*3600):
+    #stars are formed in lumps; spread out the ages linearly
+    da= np.diff(ages)
+    assert np.all(da<=0)
+    #ages should always be decreasing, and ordered so
+    agesd = np.zeros(ages.shape)
+    idx, = np.where(da<0)
+    idx+=1 #mark the right edges
+    #spread this age evenly out to the next age
+    lidx=0
+    lage=0
+    for i in idx:
+        n = i-lidx #n stars affected
+        rage = ages[i]
+        lage = max(rage-spread,0.0)
+        agesd[lidx:i]=np.linspace(lage,rage,n)
+        lidx=i
+        #lage=rage
+        if logger: logger(i)
+    #we didn't get the last iter
+    i=ages.shape[0]-1
+    n = i-lidx #n stars affected
+    rage = ages[i]
+    lage = max(rage-spread,0.0)
+    agesd[lidx:i]=np.linspace(lage,rage,n)
+    return agesd
+

@@ -30,51 +30,47 @@ import cStringIO
 from .definitions import yt_to_art, ARTIOconstants,\
    fluid_fields, particle_fields, particle_star_fields
 from _artio_caller import \
-    artio_is_valid, artio_fileset 
+    artio_is_valid, artio_fileset
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion 
 from .fields import ARTIOFieldInfo, KnownARTIOFields
-#######
+from .definitions import codetime_fields
 
-###############################
 from yt.funcs import *
-from yt.data_objects.grid_patch import \
-      AMRGridPatch
-from yt.geometry.oct_geometry_handler import \
-    OctreeGeometryHandler
 from yt.geometry.geometry_handler import \
     GeometryHandler, YTDataChunk
 from yt.data_objects.static_output import \
     StaticOutput
-############################
-
-############################
-from yt.utilities.lib import \
-    get_box_grids_level
-from yt.utilities.io_handler import \
-    io_registry
-############################
 
 from yt.data_objects.field_info_container import \
     FieldInfoContainer, NullFunc
 
 import yt.utilities.fortran_utils as fpu
 
-from yt.geometry.oct_container import \
-    ARTIOOctreeContainer
+class ARTIOChunk(object) :
 
-class ARTIODomainFile(object):
-
-    def __init__(self, pf, domain_id):
+    def __init__(self, pf, selector, sfc_start, sfc_end ):
         self.pf = pf
-        self.domain_id = domain_id
-        self._fileset_prefix = pf.parameter_filename[:-4]
-        self.grid_fn = "%s.g%03i" % (pf.parameter_filename[:-4],domain_id)
-	self.part_fn = "%s.p%03i" % (pf.parameter_filename[:-4],domain_id)
-        self._handle = self.pf._handle
-        self.local_oct_count = self._handle.count_refined_octs() 
-        print "Local oct count = ", self.local_oct_count
+        self.selector = selector
+        self.sfc_start = sfc_start
+        self.sfc_end = sfc_end
+        self.data_size = 0
 
+    _fcoords = None
+    def fcoords(self, dobj):
+        if self._fcoords is None :
+            print "Error: ARTIOChunk.fcoords called before fill"
+            raise RuntimeError
+        return self._fcoords
+
+<<<<<<< local
+    _ires = None
+    def ires(self, dobj):
+        if self._ires is None :
+            print "Error: ARTIOChunk.ires called before fill"
+            raise RuntimeError
+        return self._ires
+=======
         self.local_particle_count = 0
         self.particle_field_offsets = {}                                                      
  
@@ -129,7 +125,15 @@ class ARTIODomainSubset(object):
         return self.oct_handler.fcoords(self.domain.domain_id, self.mask,
                                         self.masked_cell_count,
                                         self.ncum_masked_level.copy())
+>>>>>>> other
 
+<<<<<<< local
+    def fwidth(self, dobj):
+        if self._ires is None :
+            print "Error: ARTIOChunk.fwidth called before fill"
+            raise RuntimeError
+        return np.array([2.**-self._ires,2.**-self._ires,2.**-self._ires]).transpose()
+=======
     def select_fwidth(self, dobj):
         # Recall domain_dimensions is the number of cells, not octs
         # snl FIX: please don't hardcode this here 
@@ -146,54 +150,66 @@ class ARTIODomainSubset(object):
         for i in range(3):
             widths[:,i] = base_dx[i] / dds
         return widths
+>>>>>>> other
 
+<<<<<<< local
+    def icoords(self, dobj):
+        if self._fcoords is None or self._ires is None :
+            print "Error: ARTIOChunk.icoords called before fill fcoords/level"
+            raise RuntimeError
+        return (int) (self._fcoords/2**-self._ires)
+=======
     def select_ires(self, dobj):
         return self.oct_handler.ires(self.domain.domain_id, self.mask,
                                      self.masked_cell_count,
                                      self.ncum_masked_level.copy())
+>>>>>>> other
 
     def fill(self, fields):
-        # translate fields into ARTIO names (this dict should be moved to fields.py)
+        art_fields = [yt_to_art[f[1]] for f in fields]
+        (self._fcoords,self._ires, artdata) = \
+                    self.pf._handle.read_grid_chunk( self.selector,
+                    self.sfc_start, self.sfc_end, art_fields )
+        data = {}
+        for i,f in enumerate(fields) :
+            data[f] = artdata[i] 
+        self.data_size = len(self._fcoords)
+        return data
 
-        tr = {}
-        for fieldtype, fieldname in fields: 
-            tr[fieldname] = np.zeros(self.masked_cell_count, 'float64')
+    def fill_particles(self, field_data, fields):
+        art_fields = {}
+        for s,f in fields :
+            if not yt_to_art.has_key(f) :
+                print "Unknown field ",f
+                raise RuntimeError
+            af = yt_to_art[f]
+            for i in range(self.pf._handle.num_species) :
+                if s == "all" or self.pf.parameters['particle_species_labels'][i] == yt_to_art[s] :
+                    if self.parameters['num_primary_variables'][i] > 0 and \
+                            af in self.pf.parameters["species_%02u_primary_variable_labels"%(i,)] :
+                        art_fields[(i,af)] = 1
+                    elif self.pf.parameters['num_secondary_variables'][i] > 0 and \
+                            af in self.pf.parameters["species_%02u_secondary_variable_labels"%(i,)] :
+                        art_fields[(i,af)] = 1
 
-        temp = {}
-        for fieldtype, fieldname in fields:
-            temp[yt_to_art[fieldname]] = np.empty(8*self.domain.local_oct_count, dtype="float32")  
+        species_data, species_counts = self.pf._handle.read_particle_chunk( \
+                self.selector, self.sfc_start, self.sfc_end, art_fields.keys() ) 
 
-        #buffer variables 
-        self.domain._handle.grid_var_fill(temp, [yt_to_art[f[1]] for f in fields])
-        
-        # dhr - make sure these are shallow copies 
-        temp2 = {}
-        for fieldtype, fieldname in fields :
-            temp2[fieldname] = temp[yt_to_art[fieldname]]
- 
-        #mask unused cells (all at once, not level-by-level)
-        self.oct_handler.fill_mask( self.domain.domain_id,
-                tr, temp2, self.mask, 0 ) 
-        
-        return tr
+        for s,f in fields :
+            af = yt_to_art[f]
+            np = sum(len(species_data[(i,af)]) for i in range(self.pf.num_species) 
+                if s == "all" or self.pf.parameters['particle_species_labels'][i] == yt_to_art[s] )
 
-    def fill_particles(self,accessed_species, selector, fields):
-        art_fields = []
-        for f in fields :
-            assert (yt_to_art.has_key(f[1])) #fields must exist in ART
-            art_fields.append(yt_to_art[f[1]])
+            tr = 
+            cp = len(tr)
+            tr.resize( cp + np )
+            for i in range(self.pf.num_species) :
+                if s == "all" or self.pf.parameters['particle_species_labels'][i] == yt_to_art[s] :
+                    np = len(species_data[(i,yt_to_art[f])])
+                    tr[cp:cp+np] = species_data[(i,yt_to_art[f])]
+                    cp += np
 
-        masked_particles = {}
-        assert ( art_fields != None )
-	self.domain._handle.particle_var_fill(accessed_species, masked_particles, selector, art_fields )
-
-	# dhr - make sure these are shallow copies
-        tr = {}
-        for fieldtype, fieldname in fields :
-            tr[fieldname] = masked_particles[yt_to_art[fieldname]]
-        return tr
-
-class ARTIOGeometryHandler(OctreeGeometryHandler):
+class ARTIOGeometryHandler(GeometryHandler):
 
     def __init__(self, pf, data_style='artio'):
         self.data_style = data_style
@@ -207,29 +223,47 @@ class ARTIOGeometryHandler(OctreeGeometryHandler):
         self.float_type = np.float64
         super(ARTIOGeometryHandler, self).__init__(pf, data_style)
 
-    def _initialize_oct_handler(self):
-        #domains are the class object ... ncpu == 1 currently 
-        #only one file/"domain" for ART
-        print "Initializing oct container"
-        self.domains = [ARTIODomainFile(self.parameter_file, i + 1)
-                        for i in range(self.parameter_file['ncpu'])]
-        # this allocates space for the oct tree note that 
-        # nn is number of root-level OCTS. These don't exist in memory. 
-        print 'domain_left_edge, domain_right_edge', self.parameter_file.domain_left_edge, self.parameter_file.domain_right_edge
-            
-        self.oct_handler = ARTIOOctreeContainer(
-            self.parameter_file.domain_dimensions/2, 
-            self.parameter_file.domain_left_edge,
-            self.parameter_file.domain_right_edge) 
-        mylog.debug("Allocating octs")
-        self.oct_handler.allocate_domains(
-            [dom.local_oct_count for dom in self.domains])
-        for dom in self.domains:
-            dom._read_grid(self.oct_handler)
+    def _setup_geometry(self):
+        mylog.debug("Initializing Geometry Handler empty for now.")
+
+    def get_smallest_dx(self):
+        """
+        Returns (in code units) the smallest cell size in the simulation.
+        """
+        return (self.parameter_file.domain_width /(2**self.max_level))
+    
+    def convert(self, unit):
+        return self.parameter_file.conversion_factors[unit]
+
+    def find_max(self, field, finest_levels = 3):
+        """
+        Returns (value, center) of location of maximum for a given field.
+        """
+        if (field, finest_levels) in self._max_locations:
+            return self._max_locations[(field, finest_levels)]
+        mv, pos = self.find_max_cell_location(field, finest_levels)
+        self._max_locations[(field, finest_levels)] = (mv, pos)
+        return mv, pos
+
+    def find_max_cell_location(self, field, finest_levels = 3):
+        source = self.all_data()
+        #print "source: ", type(source)
+        if finest_levels is not False:
+            source.min_level = self.max_level - finest_levels
+        mylog.debug("Searching for maximum value of %s", field)
+        #print type(source.quantities), source.quantities.keys()
+        max_val, maxi, mx, my, mz = \
+            source.quantities["MaxLocation"](field)
+        #print "after source.quantities"
+        mylog.info("Max Value is %0.5e at %0.16f %0.16f %0.16f",
+              max_val, mx, my, mz)
+        self.pf.parameters["Max%sValue" % (field)] = max_val
+        self.pf.parameters["Max%sPos" % (field)] = "%s" % ((mx,my,mz),)
+        return max_val, np.array((mx,my,mz), dtype='float64')
 
     def _detect_fields(self):
         self.fluid_field_list = fluid_fields
-	self.particle_field_list = particle_fields
+        self.particle_field_list = particle_fields
         self.field_list = self.fluid_field_list + self.particle_field_list
     
     def _setup_classes(self):
@@ -239,23 +273,25 @@ class ARTIOGeometryHandler(OctreeGeometryHandler):
 
     def _identify_base_chunk(self, dobj):
         if getattr(dobj, "_chunk_info", None) is None:
-            mask = dobj.selector.select_octs(self.oct_handler)
-            print 'cell count masked in called from data_structures.py'
-            masked_cell_count = self.oct_handler.count_cells(dobj.selector, mask)
-            print 'done cell count masked in called from data_structures.py'
-            print 'calling ARTIODomainSubset from data_structures.py'
-            subsets = [ARTIODomainSubset(d, mask, c)
-                       for d, c in zip(self.domains, masked_cell_count) if c > 0]
-            print 'done with domain subset'
-            dobj._chunk_info = subsets
-            dobj.size = sum(masked_cell_count)
-            dobj.shape = (dobj.size,)
-        dobj._current_chunk = list(self._chunk_all(dobj))[0]
+            print "Running selector on base grid"
+            print dobj.selector
+            list_sfc_ranges = self.pf._handle.root_sfc_ranges(dobj.selector)
+            print "Generating list of chunks"
+            dobj._chunk_info = [ARTIOChunk(self.pf, dobj.selector, start, end)
+                    for (start,end) in list_sfc_ranges]
+            print "done creating ARTIOChunks"
+        dobj._current_chunk = None
         print 'done with base chunk'
 
+    def _data_size(self, dobj, dobjs) :
+        size = 0
+        for d in dobjs :
+            size += d.data_size
+        return size
+ 
     def _chunk_all(self, dobj):
         oobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
-        yield YTDataChunk(dobj, "all", oobjs, dobj.size)
+        yield YTDataChunk(dobj, "all", oobjs, self._data_size )
 
     def _chunk_spatial(self, dobj, ngz):
         raise NotImplementedError
@@ -264,8 +300,28 @@ class ARTIOGeometryHandler(OctreeGeometryHandler):
         # _current_chunk is made from identify_base_chunk 
         #object = dobj._current_chunk.objs or dobj._current_chunk.${dobj._chunk_info}
         oobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
-        for subset in oobjs:
-            yield YTDataChunk(dobj, "io", [subset], subset.masked_cell_count)
+        for chunk in oobjs:
+            yield YTDataChunk(dobj, "io", [chunk], self._data_size )
+
+    def _read_fluid_fields(self, fields, dobj, chunk = None):
+        print 'snl in geometry_handler read_fluid_fields'
+        if len(fields) == 0: return {}, []
+        if chunk is None:
+            self._identify_base_chunk(dobj)
+        fields_to_return = {}
+        fields_to_read, fields_to_generate = self._split_fields(fields)
+        if len(fields_to_read) == 0:
+            return {}, fields_to_generate
+        fields_to_return = self.io._read_fluid_selection(self._chunk_io(dobj),
+                                                   dobj.selector,
+                                                   fields_to_read)
+        for field in fields_to_read:
+            ftype, fname = field
+            conv_factor = self.pf.field_info[fname]._convert_function(self)
+            np.multiply(fields_to_return[field], conv_factor,
+                        fields_to_return[field])
+        #mylog.debug("Don't know how to read %s", fields_to_generate)
+        return fields_to_return, fields_to_generate
 
 class ARTIOStaticOutput(StaticOutput):
     _handle = None
@@ -322,15 +378,22 @@ class ARTIOStaticOutput(StaticOutput):
         self.conversion_factors["Temperature"] = self.parameters['unit_T']*constants.wmu*(constants.gamma-1) #*cell_gas_internal_energy(cell)/cell_gas_density(cell);
         print 'note temperature conversion is currently using fixed gamma not variable'
 
-        for particle_field in particle_fields:
-            self.conversion_factors[particle_field] =  1.0
+#        for particle_field in particle_fields:
+#            self.conversion_factors[particle_field] =  1.0
         for ax in 'xyz':
             self.conversion_factors["particle_velocity_%s"%ax] = self.parameters['unit_v']
         for unit in sec_conversion.keys():
             self.time_units[unit] = 1.0 / sec_conversion[unit]
         self.conversion_factors['particle_mass'] = self.parameters['unit_m']
-        self.conversion_factors['particle_creation_time'] =  31556926.0
-        self.conversion_factors['Msun'] = 5.027e-34 
+        self.conversion_factors['particle_creation_time'] =  self.parameters['unit_t']
+        self.conversion_factors['particle_mass_msun'] = self.parameters['unit_m']/constants.Msun
+
+        #for mult_halo_profiler.py:
+        self.parameters['TopGridDimensions'] = 3*[self._handle.num_grid]
+        self.parameters['RefineBy'] = 2
+        self.parameters['DomainLeftEdge'] = 3*[0]
+        self.parameters['DomainRightEdge'] = 3*[self._handle.num_grid]
+        self.parameters['TopGridRank'] = 3 #number of dimensions
        
     def _parse_parameter_file(self):
         # hard-coded -- not provided by headers 
@@ -364,6 +427,7 @@ class ARTIOStaticOutput(StaticOutput):
             self.current_redshift = 1.0/self._handle.parameters["abox"][0] - 1.0
 
             self.parameters["initial_redshift"] = 1.0/self._handle.parameters["auni_init"][0] - 1.0
+            self.parameters["CosmologyInitialRedshift"] =  self.parameters["initial_redshift"] #for sfr
         else :
             self.cosmological_simulation = False
  
@@ -386,6 +450,7 @@ class ARTIOStaticOutput(StaticOutput):
     @classmethod
     def _is_valid(self, *args, **kwargs) :
         # a valid artio header file starts with a prefix and ends with .art
-        if not args[0].endswith(".art"): return False
+        if not args[0].endswith(".art"): 
+            return False
         return artio_is_valid(args[0][:-4])
 

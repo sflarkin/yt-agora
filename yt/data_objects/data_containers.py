@@ -447,6 +447,7 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
         for chunk in self.hierarchy._chunk(self, chunking_style, **kwargs):
             with self._chunked_read(chunk):
                 self.get_data(fields)
+                print 'in data_containers chunks surviving'
                 # NOTE: we yield before releasing the context
                 yield self
 
@@ -484,6 +485,8 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
                 particles.append((ftype, fname))
             elif (ftype, fname) not in fluids:
                 fluids.append((ftype, fname))
+	print 'fluid fields: ', fluids
+	print 'particle fields: ', particles
         # The _read method will figure out which fields it needs to get from
         # disk, and return a dict of those fields along with the fields that
         # need to be generated.

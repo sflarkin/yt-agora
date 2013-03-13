@@ -171,7 +171,6 @@ cdef class OctreeContainer:
         cdef int n = mask.shape[0]
         cdef np.ndarray[np.int64_t, ndim=1] count
         count = np.zeros(self.max_domain, 'int64')
-        # 
         cur = self.cont
         for oi in range(n):
             if oi - cur.offset >= cur.n_assigned:
