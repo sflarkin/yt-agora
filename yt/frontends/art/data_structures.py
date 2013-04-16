@@ -120,7 +120,7 @@ class ARTGeometryHandler(OctreeGeometryHandler):
             else:
                 domain._read_amr_level(self.oct_handler)
 
-    def _detect_fields_original(self):
+    def _detect_fields(self):
         self.particle_field_list = particle_fields
         self.field_list = set(fluid_fields + particle_fields +
                               particle_star_fields)
@@ -134,30 +134,6 @@ class ARTGeometryHandler(OctreeGeometryHandler):
                 self.parameter_file.particle_types.append("specie%i" % specie)
         else:
             self.parameter_file.particle_types = []
-
-    def _detect_fields(self):
-        #populate particle_field list and field_list
-        self.field_list = [('gas',f) for f in fluid_fields]
-        if "wspecies" in self.parameter_file.parameters.keys():
-            particle_field_list = [f for f in particle_fields]
-            self.parameter_file.particle_types = ["all", "darkmatter"]
-            if pf.file_particle_stars:
-                particle_field_list += particle_star_fields
-                self.parameter_file.particle_types.append("stars")
-            wspecies = self.parameter_file.parameters['wspecies']
-            nspecies = len(wspecies)
-            for specie in range(nspecies):
-                self.parameter_file.particle_types.append("specie%i" % specie)
-            self.particle_field_list = particle_field_list 
-            #maybe change this to (type, name) format?
-        else:
-            self.particle_field_list = []
-            self.parameter_file.particle_types = []
-        for particle_type in self.parameter_file.particle_types:
-            for particle_field in self.particle_field_list:
-                self.field_list.append([particle_type, particle_field])
-                self.field_list.append(["deposit_"+particle_type, 
-                                        particle_field])
 
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
@@ -248,19 +224,17 @@ class ARTStaticOutput(StaticOutput):
         particle header, star files, etc.
         """
         base_prefix, base_suffix = filename_pattern['amr']
+        possibles = glob.glob(os.path.dirname(file_amr)+"/*")
         for filetype, (prefix, suffix) in filename_pattern.iteritems():
-            if "amr" in filetype: continue
+            # if this attribute is already set skip it
             if getattr(self, "_file_"+filetype, None) is not None:
                 continue
             stripped = file_amr.replace(base_prefix, prefix)
             stripped = stripped.replace(base_suffix, suffix)
-            path = "/%s*%s"%(prefix,suffix)
-            possibles = glob.glob(os.path.dirname(file_amr)+path)
-            matches = difflib.get_close_matches(stripped, possibles, 1, 0.85)
-            if len(matches) == 0: continue
-            if matches[0] is not None:
-                mylog.info('discovered %s:%s', filetype, matches[0])
-                setattr(self, "_file_"+filetype, matches[0])
+            match, = difflib.get_close_matches(stripped, possibles, 1, 0.6)
+            if match is not None:
+                mylog.info('discovered %s:%s', filetype, match)
+                setattr(self, "_file_"+filetype, match)
             else:
                 setattr(self, "_file_"+filetype, None)
 
@@ -496,23 +470,6 @@ class ARTDomainSubset(object):
         for i in range(3):
             widths[:, i] = base_dx[i] / dds
         return widths
-
-    def deposit_particle_fields(self, ppos, pdata):
-        """
-        Given the x,y,z,particle_field data, do a particle deposition
-        using the oct_handler to accumulate values. We look up the particle
-        position again for every field, so this is inefficient
-        """
-        import pdb; pdb.set_trace()
-        fields = pdata.keys()
-        filled = {}
-        for field in fields:
-            dest = np.zeros(self.cell_count, 'float64')-1.
-            level = self.domain_level
-            oct_handler.deposit_particle_cumsum(ppos, pdata, self.mask, dest,
-                                                fields, self.domain.domain_id)
-            filled[field] = dest
-        return filled 
 
     def fill_root(self, content, ftfields):
         """
