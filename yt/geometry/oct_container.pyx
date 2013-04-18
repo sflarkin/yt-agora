@@ -709,6 +709,20 @@ cdef class RAMSESOctreeContainer(OctreeContainer):
                 count[cur.my_octs[i - cur.offset].domain - 1] += 1
         return count
 
+    def domain_and(self, np.ndarray[np.uint8_t, ndim=2, cast=True] mask,
+                   int domain_id):
+        cdef np.int64_t i, oi, n, 
+        cdef OctAllocationContainer *cur = self.domains[domain_id - 1]
+        cdef Oct *o
+        cdef np.ndarray[np.uint8_t, ndim=2] m2 = \
+                np.zeros((mask.shape[0], 8), 'uint8')
+        n = mask.shape[0]
+        for oi in range(cur.n_assigned):
+            o = &cur.my_octs[oi]
+            for i in range(8):
+                m2[o.local_ind, i] = mask[o.local_ind, i]
+        return m2
+
     def check(self, int curdom, int print_all = 0):
         cdef int dind, pi
         cdef Oct oct
@@ -1109,7 +1123,8 @@ cdef class ParticleOctreeContainer(OctreeContainer):
     @cython.cdivision(True)
     def icoords(self, int domain_id,
                 np.ndarray[np.uint8_t, ndim=2, cast=True] mask,
-                np.int64_t cell_count):
+                np.int64_t cell_count,
+                np.ndarray[np.int64_t, ndim=1] level_counts):
         #Return the integer positions of the cells
         #Limited to this domain and within the mask
         #Positions are binary; aside from the root mesh
@@ -1138,7 +1153,8 @@ cdef class ParticleOctreeContainer(OctreeContainer):
     @cython.cdivision(True)
     def ires(self, int domain_id,
                 np.ndarray[np.uint8_t, ndim=2, cast=True] mask,
-                np.int64_t cell_count):
+                np.int64_t cell_count,
+                np.ndarray[np.int64_t, ndim=1] level_counts):
         #Return the 'resolution' of each cell; ie the level
         cdef np.ndarray[np.int64_t, ndim=1] res
         res = np.empty(cell_count, dtype="int64")
@@ -1158,7 +1174,8 @@ cdef class ParticleOctreeContainer(OctreeContainer):
     @cython.cdivision(True)
     def fcoords(self, int domain_id,
                 np.ndarray[np.uint8_t, ndim=2, cast=True] mask,
-                np.int64_t cell_count):
+                np.int64_t cell_count,
+                np.ndarray[np.int64_t, ndim=1] level_counts):
         #Return the floating point unitary position of every cell
         cdef np.ndarray[np.float64_t, ndim=2] coords
         coords = np.empty((cell_count, 3), dtype="float64")
@@ -1480,4 +1497,17 @@ cdef class ParticleOctreeContainer(OctreeContainer):
                 count[o.domain] += mask[oi,i]
         return count
 
+    def domain_and(self, np.ndarray[np.uint8_t, ndim=2, cast=True] mask,
+                   int domain_id):
+        cdef np.int64_t i, oi, n, 
+        cdef Oct *o
+        cdef np.ndarray[np.uint8_t, ndim=2] m2 = \
+                np.zeros((mask.shape[0], 8), 'uint8')
+        n = mask.shape[0]
+        for oi in range(n):
+            o = self.oct_list[oi]
+            if o.domain != domain_id: continue
+            for i in range(8):
+                m2[o.local_ind, i] = mask[o.local_ind, i]
+        return m2
 
