@@ -1,0 +1,14 @@
+This directory contains the compiled yt documentation.  Development of the
+documentation happens in a mercurial repository, yt-doc, available at:
+
+http://hg.yt-project.org/yt-doc/
+
+It's written to be used with Sphinx, a tool designed for writing Python
+documentation.  Sphinx is available at this URL:
+
+http://sphinx.pocoo.org/
+
+All of the pre-built HTML files, accessible with any web browser, are available
+in the build/ directory, as well as at:
+
+http://yt-project.org/doc/index.html
