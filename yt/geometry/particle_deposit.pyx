@@ -117,12 +117,14 @@ cdef class ParticleDepositOperation:
         raise NotImplementedError
 
 cdef class CountParticles(ParticleDepositOperation):
-    cdef np.float64_t *count # float, for ease
+    cdef np.int64_t *count # float, for ease
     cdef public object ocount
     def initialize(self):
-        self.ocount = np.zeros(self.nvals, dtype="float64")
+        # Create a numpy array accessible to python
+        self.ocount = np.zeros(self.nvals, dtype="int64")
         cdef np.ndarray arr = self.ocount
-        self.count = <np.float64_t*> arr.data
+        # alias the C-view for use in cython
+        self.count = <np.int64_t*> arr.data
 
     @cython.cdivision(True)
     cdef void process(self, int dim[3],
@@ -139,131 +141,90 @@ cdef class CountParticles(ParticleDepositOperation):
         self.count[gind(ii[0], ii[1], ii[2], dim) + offset] += 1
         
     def finalize(self):
-        return self.ocount
+        return self.ocount.astype('f8')
 
 deposit_count = CountParticles
 
-"""
-# Mode functions
-ctypedef np.float64_t (*type_opt)(np.float64_t, np.float64_t)
-cdef np.float64_t opt_count(np.float64_t pdata,
-                            np.float64_t weight,
-                            np.int64_t index,
-                            np.ndarray[np.float64_t, ndim=2] data_out, 
-                            np.ndarray[np.float64_t, ndim=2] data_in):
-    data_out[index] += 1.0
+cdef class SumParticleField(ParticleDepositOperation):
+    cdef np.float64_t *sum
+    cdef public object osum
+    def initialize(self):
+        self.osum = np.zeros(self.nvals, dtype="float64")
+        cdef np.ndarray arr = self.osum
+        self.sum = <np.float64_t*> arr.data
 
-cdef np.float64_t opt_sum(np.float64_t pdata,
-                            np.float64_t weight,
-                            np.int64_t index,
-                            np.ndarray[np.float64_t, ndim=2] data_out, 
-                            np.ndarray[np.float64_t, ndim=2] data_in):
-    data_out[index] += pdata 
+    @cython.cdivision(True)
+    cdef void process(self, int dim[3],
+                      np.float64_t left_edge[3], 
+                      np.float64_t dds[3],
+                      np.int64_t offset, 
+                      np.float64_t ppos[3],
+                      np.float64_t *fields 
+                      ):
+        cdef int ii[3], i
+        for i in range(3):
+            ii[i] = <int>((ppos[i] - left_edge[i]) / dds[i])
+        self.sum[gind(ii[0], ii[1], ii[2], dim) + offset] += fields[0]
+        
+    def finalize(self):
+        return self.osum
 
-cdef np.float64_t opt_diff(np.float64_t pdata,
-                            np.float64_t weight,
-                            np.int64_t index,
-                            np.ndarray[np.float64_t, ndim=2] data_out, 
-                            np.ndarray[np.float64_t, ndim=2] data_in):
-    data_out[index] += (data_in[index] - pdata) 
+deposit_sum = SumParticleField
 
-cdef np.float64_t opt_wcount(np.float64_t pdata,
-                            np.float64_t weight,
-                            np.int64_t index,
-                            np.ndarray[np.float64_t, ndim=2] data_out, 
-                            np.ndarray[np.float64_t, ndim=2] data_in):
-    data_out[index] += weight
+cdef class StdParticleField(ParticleDepositOperation):
+    # Thanks to Britton and MJ Turk for the link
+    # to a single-pass STD
+    # http://www.cs.berkeley.edu/~mhoemmen/cs194/Tutorials/variance.pdf
+    cdef np.float64_t *mk
+    cdef np.float64_t *qk
+    cdef np.float64_t *i
+    cdef public object omk
+    cdef public object oqk
+    cdef public object oi
+    def initialize(self):
+        # we do this in a single pass, but need two scalar
+        # per cell, M_k, and Q_k and also the number of particles
+        # deposited into each one
+        # the M_k term
+        self.omk= np.zeros(self.nvals, dtype="float64")
+        cdef np.ndarray omkarr= self.omk
+        self.mk= <np.float64_t*> omkarr.data
+        # the Q_k term
+        self.oqk= np.zeros(self.nvals, dtype="float64")
+        cdef np.ndarray oqkarr= self.oqk
+        self.qk= <np.float64_t*> oqkarr.data
+        # particle count
+        self.oi = np.zeros(self.nvals, dtype="int64")
+        cdef np.ndarray oiarr = self.oi
+        self.i = <np.float64_t*> oiarr.data
 
-cdef np.float64_t opt_wsum(np.float64_t pdata,
-                            np.float64_t weight,
-                            np.int64_t index,
-                            np.ndarray[np.float64_t, ndim=2] data_out, 
-                            np.ndarray[np.float64_t, ndim=2] data_in):
-    data_out[index] += pdata * weight
+    @cython.cdivision(True)
+    cdef void process(self, int dim[3],
+                      np.float64_t left_edge[3], 
+                      np.float64_t dds[3],
+                      np.int64_t offset,
+                      np.float64_t ppos[3],
+                      np.float64_t *fields
+                      ):
+        cdef int ii[3], i, cell_index
+        cdef float k
+        for i in range(3):
+            ii[i] = <int>((ppos[i] - left_edge[i])/dds[i])
+        cell_index = gind(ii[0], ii[1], ii[2], dim) + offset
+        k = <float> self.i[cell_index]
+        if self.i[cell_index] == 0:
+            # Initialize cell values
+            self.mk[cell_index] = fields[0]
+        else:
+            self.mk[cell_index] = self.mk[cell_index] + \
+                                  (fields[0] - self.mk[cell_index]) / k
+            self.qk[cell_index] = self.qk[cell_index] + \
+                                  (k - 1.0) * (fields[0] - 
+                                             self.mk[cell_index]) ** 2.0 / k
+        self.qk[cell_index] += 1
+        
+    def finalize(self):
+        return self.sum
 
-cdef np.float64_t opt_wdiff(np.float64_t pdata,
-                            np.float64_t weight,
-                            np.int64_t index,
-                            np.ndarray[np.float64_t, ndim=2] data_out, 
-                            np.ndarray[np.float64_t, ndim=2] data_in):
-    data_out[index] += (data_in[index] - pdata) * weight
+deposit_std = StdParticleField
 
-# Selection functions
-ctypedef NOTSURE (*type_sel)(OctreeContainer, 
-                                np.ndarray[np.float64_t, ndim=1],
-                                np.float64_t)
-cdef NOTSURE select_nearest(OctreeContainer oct_handler,
-                            np.ndarray[np.float64_t, ndim=1] pos,
-                            np.float64_t radius):
-    #return only the nearest oct
-    pass
-
-
-cdef NOTSURE select_radius(OctreeContainer oct_handler,
-                            np.ndarray[np.float64_t, ndim=1] pos,
-                            np.float64_t radius):
-    #return a list of octs within the radius
-    pass
-    
-
-# Kernel functions
-ctypedef np.float64_t (*type_ker)(np.float64_t)
-cdef np.float64_t kernel_sph(np.float64_t x) nogil:
-    cdef np.float64_t kernel
-    if x <= 0.5:
-        kernel = 1.-6.*x*x*(1.-x)
-    elif x>0.5 and x<=1.0:
-        kernel = 2.*(1.-x)*(1.-x)*(1.-x)
-    else:
-        kernel = 0.
-    return kernel
-
-cdef np.float64_t kernel_null(np.float64_t x) nogil: return 0.0
-
-cdef deposit(OctreeContainer oct_handler, 
-        np.ndarray[np.float64_t, ndim=2] ppos, #positions,columns are x,y,z
-        np.ndarray[np.float64_t, ndim=2] pd, # particle fields
-        np.ndarray[np.float64_t, ndim=1] pr, # particle radius
-        np.ndarray[np.float64_t, ndim=2] data_in, #used to calc diff, same shape as data_out
-        np.ndarray[np.float64_t, ndim=2] data_out, #write deposited here
-        mode='count', selection='nearest', kernel='null'):
-    cdef type_opt fopt
-    cdef type_sel fsel
-    cdef type_ker fker
-    cdef long pi #particle index
-    cdef long nocts #number of octs in selection
-    cdef Oct oct 
-    cdef np.float64_t w
-    # Can we do this with dicts?
-    # Setup the function pointers
-    if mode == 'count':
-        fopt = opt_count
-    elif mode == 'sum':
-        fopt = opt_sum
-    elif mode == 'diff':
-        fopt = opt_diff
-    if mode == 'wcount':
-        fopt = opt_count
-    elif mode == 'wsum':
-        fopt = opt_sum
-    elif mode == 'wdiff':
-        fopt = opt_diff
-    if selection == 'nearest':
-        fsel = select_nearest
-    elif selection == 'radius':
-        fsel = select_radius
-    if kernel == 'null':
-        fker = kernel_null
-    if kernel == 'sph':
-        fker = kernel_sph
-    for pi in range(particles):
-        octs = fsel(oct_handler, ppos[pi], pr[pi])
-        for oct in octs:
-            for cell in oct.cells:
-                w = fker(pr[pi],cell) 
-                weights.append(w)
-        norm = weights.sum()
-        for w, oct in zip(weights, octs):
-            for cell in oct.cells:
-                fopt(pd[pi], w/norm, oct.index, data_in, data_out)
-"""
