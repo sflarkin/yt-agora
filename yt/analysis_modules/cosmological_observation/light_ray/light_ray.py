@@ -244,8 +244,9 @@ class LightRay(CosmologySplice):
             If True, use dynamic load balancing to create the projections.
             Default: False.
 
-        Getting the Nearest Galaxies
-        ----------------------------
+        Notes
+        -----
+
         The light ray tool will use the HaloProfiler to calculate the
         distance and mass of the nearest halo to that pixel.  In order
         to do this, a dictionary called halo_profiler_parameters is used
@@ -320,17 +321,18 @@ class LightRay(CosmologySplice):
         # Initialize data structures.
         self._data = {}
         if fields is None: fields = []
-        all_fields = [field for field in fields]
+        data_fields = fields[:]
+        all_fields = fields[:]
         all_fields.extend(['dl', 'dredshift', 'redshift'])
         if get_nearest_halo:
             all_fields.extend(['x', 'y', 'z', 'nearest_halo'])
             all_fields.extend(['nearest_halo_%s' % field \
                                for field in nearest_halo_fields])
-            fields.extend(['x', 'y', 'z'])
+            data_fields.extend(['x', 'y', 'z'])
         if get_los_velocity:
             all_fields.extend(['x-velocity', 'y-velocity',
                                'z-velocity', 'los_velocity'])
-            fields.extend(['x-velocity', 'y-velocity', 'z-velocity'])
+            data_fields.extend(['x-velocity', 'y-velocity', 'z-velocity'])
 
         all_ray_storage = {}
         for my_storage, my_segment in parallel_objects(self.light_ray_solution,
@@ -372,7 +374,7 @@ class LightRay(CosmologySplice):
                                                  (sub_ray['dts'] *
                                                   vector_length(sub_segment[0],
                                                                 sub_segment[1]))])
-                for field in fields:
+                for field in data_fields:
                     sub_data[field] = np.concatenate([sub_data[field],
                                                       (sub_ray[field])])
 
@@ -460,7 +462,7 @@ class LightRay(CosmologySplice):
     def _get_nearest_halo_properties(self, data, halo_list, fields=None):
         """
         Calculate distance to nearest object in halo list for each lixel in data.
-        Return list of distances and masses of nearest objects.
+        Return list of distances and other properties of nearest objects.
         """
 
         if fields is None: fields = []
@@ -474,17 +476,18 @@ class LightRay(CosmologySplice):
         nearest_distance = np.zeros(data['x'].shape)
         field_data = dict([(field, np.zeros(data['x'].shape)) \
                            for field in fields])
-        for index in xrange(nearest_distance.size):
-            nearest = np.argmin(periodic_distance(np.array([data['x'][index],
-                                                            data['y'][index],
-                                                            data['z'][index]]),
-                                                  halo_centers))
-            nearest_distance[index] = periodic_distance(np.array([data['x'][index],
-                                                                  data['y'][index],
-                                                                  data['z'][index]]),
-                                                        halo_centers[nearest])
-            for field in fields:
-                field_data[field][index] = halo_field_values[field][nearest]
+        if halo_centers.size > 0:
+            for index in xrange(nearest_distance.size):
+                nearest = np.argmin(periodic_distance(np.array([data['x'][index],
+                                                                data['y'][index],
+                                                                data['z'][index]]),
+                                                      halo_centers))
+                nearest_distance[index] = periodic_distance(np.array([data['x'][index],
+                                                                      data['y'][index],
+                                                                      data['z'][index]]),
+                                                            halo_centers[nearest])
+                for field in fields:
+                    field_data[field][index] = halo_field_values[field][nearest]
 
         return_data = {'nearest_halo': nearest_distance}
         for field in fields:
