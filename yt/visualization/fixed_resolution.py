@@ -172,14 +172,16 @@ class FixedResolutionBuffer(object):
         
         info['label'] = self.data_source.pf.field_info[item].display_name
         if info['label'] is None:
-            info['label'] = r'$\rm{'+item+r'}$'
+            info['label'] = r'$\rm{'+item.replace('_','\/').title()+r'}$'
         elif info['label'].find('$') == -1:
             info['label'] = info['label'].replace(' ','\/')
             info['label'] = r'$\rm{'+info['label']+r'}$'
         
+        # Try to determine the units of the data
+        units = None
         if self.data_source._type_name in ("slice", "cutting"):
             units = info['units']
-        elif self.data_source._type_name == "proj":
+        elif self.data_source._type_name in ("proj", "overlap_proj"):
             if (self.data_source.weight_field is not None or
                 self.data_source.proj_style == "mip"):
                 units = info['units']
