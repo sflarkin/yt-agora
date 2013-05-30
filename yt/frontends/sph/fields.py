@@ -33,7 +33,9 @@ from yt.data_objects.field_info_container import \
     ValidateDataField, \
     ValidateProperty, \
     ValidateSpatial, \
-    ValidateGridType
+    ValidateGridType, \
+    NullFunc, \
+    TranslationFunc
 import yt.data_objects.universal_fields
 
 OWLSFieldInfo = FieldInfoContainer.create_with_fallback(FieldInfo)
@@ -54,3 +56,62 @@ add_Tipsy_field = TipsyFieldInfo.add_field
 KnownTipsyFields = FieldInfoContainer()
 add_tipsy_field = KnownTipsyFields.add_field
 
+def _particle_functions(ptype, coord_name, mass_name, registry):
+    def particle_count(field, data):
+        pos = data[ptype, coord_name]
+        d = data.deposit(pos, method = "count")
+        return d
+    registry.add_field(("deposit", "%s_count" % ptype),
+             function = particle_count,
+             validators = [ValidateSpatial()],
+             projection_conversion = '1')
+
+    def particle_density(field, data):
+        pos = data[ptype, coord_name]
+        d = data.deposit(pos, [data[ptype, mass_name]], method = "sum")
+        d /= data["CellVolume"]
+        return d
+
+    registry.add_field(("deposit", "%s_density" % ptype),
+             function = particle_density,
+             validators = [ValidateSpatial()],
+             units = r"\mathrm{g}/\mathrm{cm}^{3}",
+             projection_conversion = 'cm')
+
+
+def _get_conv(cf):
+    def _convert(data):
+        return data.convert(cf)
+
+for ptype in ["Gas", "DarkMatter", "Stars"]:
+    _particle_functions(ptype, "Coordinates", "Mass", TipsyFieldInfo)
+    KnownTipsyFields.add_field((ptype, "Mass"), function=NullFunc,
+        particle_type = True,
+        convert_function=_get_conv("mass"),
+        units = r"\mathrm{g}")
+    KnownTipsyFields.add_field((ptype, "Velocities"), function=NullFunc,
+        particle_type = True,
+        convert_function=_get_conv("velocity"),
+        units = r"\mathrm{cm}/\mathrm{s}")
+   
+# GADGET
+# ======
+
+# Among other things we need to set up Coordinates
+
+_gadget_ptypes = ("Gas", "Halo", "Disk", "Bulge", "Stars", "Bndry")
+
+def _gadget_particle_fields(ptype):
+    def _Mass(field, data):
+        pind = _gadget_ptypes.index(ptype)
+        if data.pf["Massarr"][pind] == 0.0:
+            return data[ptype, "Masses"]
+        mass = np.ones(data[ptype, "Coordinates"].shape[0], dtype="float64")
+        mass *= data.pf["Massarr"][pind]
+        return mass
+    GadgetFieldInfo.add_field((ptype, "Mass"), function=_Mass,
+                              particle_type = True)
+
+for ptype in _gadget_ptypes:
+    _gadget_particle_fields(ptype)
+    _particle_functions(ptype, "Coordinates", "Mass", GadgetFieldInfo)
