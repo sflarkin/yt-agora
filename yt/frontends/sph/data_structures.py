@@ -45,9 +45,10 @@ from yt.data_objects.octree_subset import \
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
 from yt.utilities.physical_constants import \
+    G, \
     gravitational_constant_cgs, \
     km_per_pc
-import yt.utilities.physical_constants as pcons
+from yt.utilities.cosmology import Cosmology
 from .fields import \
     OWLSFieldInfo, \
     KnownOWLSFields, \
@@ -238,7 +239,39 @@ class GadgetBinaryDomainFile(ParticleDomainFile):
         self.field_offsets = self.io._calculate_field_offsets(
                 field_list, self.total_particles)
 
-class GadgetStaticOutput(StaticOutput):
+class ParticleStaticOutput(StaticOutput):
+    _unit_base = None
+
+    def _set_units(self):
+        self.units = {}
+        self.time_units = {}
+        self.conversion_factors = {}
+        self.units['1'] = 1.0
+        self.units['unitary'] = (self.domain_right_edge -
+                                 self.domain_left_edge).max()
+        # Check 
+        base = None
+        mpch = {}
+        mpch.update(mpc_conversion)
+        unit_base = self._unit_base or {}
+        for unit in mpc_conversion:
+            mpch['%sh' % unit] = mpch[unit] / self.hubble_constant
+            mpch['%shcm' % unit] = (mpch["%sh" % unit] / 
+                    (1 + self.current_redshift))
+            mpch['%scm' % unit] = mpch[unit] / (1 + self.current_redshift)
+        # ud == unit destination
+        # ur == unit registry
+        for ud, ur in [(self.units, mpch), (self.time_units, sec_conversion)]:
+            for unit in sorted(unit_base):
+                if unit in ur:
+                    ratio = (ur[unit] / ur['mpc'] )
+                    base = unit_base[unit] * ratio
+                    break
+            if base is None: continue
+            for unit in ur:
+                ud[unit] = ur[unit] / base
+
+class GadgetStaticOutput(ParticleStaticOutput):
     _hierarchy_class = ParticleGeometryHandler
     _domain_class = GadgetBinaryDomainFile
     _fieldinfo_fallback = GadgetFieldInfo
@@ -262,19 +295,16 @@ class GadgetStaticOutput(StaticOutput):
                     ('unused', 16, 'i') )
 
     def __init__(self, filename, data_style="gadget_binary",
-                 additional_fields = (), root_dimensions = 64):
+                 additional_fields = (), root_dimensions = 64,
+                 unit_base = None):
         self._root_dimensions = root_dimensions
         # Set up the template for domain files
         self.storage_filename = None
+        self._unit_base = unit_base
         super(GadgetStaticOutput, self).__init__(filename, data_style)
 
     def __repr__(self):
         return os.path.basename(self.parameter_filename).split(".")[0]
-
-    def _set_units(self):
-        self.units = {}
-        self.time_units = {}
-        self.conversion_factors = {}
 
     def _parse_parameter_file(self):
 
@@ -341,7 +371,7 @@ class TipsyDomainFile(ParticleDomainFile):
         io._create_dtypes(self)
 
 
-class TipsyStaticOutput(StaticOutput):
+class TipsyStaticOutput(ParticleStaticOutput):
     _hierarchy_class = ParticleGeometryHandler
     _domain_class = TipsyDomainFile
     _fieldinfo_fallback = TipsyFieldInfo
@@ -356,10 +386,11 @@ class TipsyStaticOutput(StaticOutput):
 
     def __init__(self, filename, data_style="tipsy",
                  root_dimensions = 64, endian = ">",
-                 box_size = None, hubble_constant = None,
                  field_dtypes = None,
                  domain_left_edge = None,
-                 domain_right_edge = None):
+                 domain_right_edge = None,
+                 unit_base = None,
+                 cosmology_parameters = None):
         self.endian = endian
         self._root_dimensions = root_dimensions
         # Set up the template for domain files
@@ -377,17 +408,12 @@ class TipsyStaticOutput(StaticOutput):
         if field_dtypes is None: field_dtypes = {}
         self._field_dtypes = field_dtypes
 
+        self._unit_base = unit_base or {}
+        self._cosmology_parameters = cosmology_parameters
         super(TipsyStaticOutput, self).__init__(filename, data_style)
 
     def __repr__(self):
-        return os.path.basename(self.parameter_filename).split(".")[0]
-
-    def _set_units(self):
-        self.units = {}
-        self.time_units = {}
-        self.conversion_factors = {}
-        DW = self.domain_right_edge - self.domain_left_edge
-        self.units["unitary"] = 1.0 / DW.max()
+        return os.path.basename(self.parameter_filename)
 
     def _parse_parameter_file(self):
 
@@ -418,16 +444,38 @@ class TipsyStaticOutput(StaticOutput):
 
         self.cosmological_simulation = 1
 
-        self.current_redshift = 0.0
-        self.omega_lambda = 0.0
-        self.omega_matter = 0.0
-        self.hubble_constant = 0.0
+        cosm = self._cosmology_parameters or {}
+        dcosm = dict(current_redshift = 0.0,
+                     omega_lambda = 0.0,
+                     omega_matter = 0.0,
+                     hubble_constant = 1.0)
+        for param in ['current_redshift', 'omega_lambda',
+                      'omega_matter', 'hubble_constant']:
+            pval = cosm.get(param, dcosm[param])
+            setattr(self, param, pval)
+
         self.parameters = hvals
 
         self.domain_template = self.parameter_filename
         self.domain_count = 1
 
         f.close()
+
+    def _set_units(self):
+        super(TipsyStaticOutput, self)._set_units()
+        DW = (self.domain_right_edge - self.domain_left_edge).max()
+        cosmo = Cosmology(self.hubble_constant * 100.0,
+                          self.omega_matter, self.omega_lambda)
+        length_unit = DW * self.units['cm'] # Get it in proper cm
+        density_unit = cosmo.CriticalDensity(self.current_redshift)
+        mass_unit = density_unit * length_unit**3
+        time_unit = 1.0 / np.sqrt(G*density_unit)
+        velocity_unit = length_unit / time_unit
+        self.conversion_factors["velocity"] = velocity_unit
+        self.conversion_factors["mass"] = mass_unit
+        self.conversion_factors["density"] = density_unit
+        for u in sec_conversion:
+            self.time_units[u] = time_unit * sec_conversion[u]
 
     @classmethod
     def _is_valid(self, *args, **kwargs):
