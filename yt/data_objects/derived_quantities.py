@@ -36,6 +36,11 @@ from yt.utilities.data_point_utilities import FindBindingEnergy
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelAnalysisInterface, parallel_objects
 from yt.utilities.lib import Octree
+from yt.utilities.physical_constants import \
+    gravitational_constant_cgs, \
+    mass_sun_cgs, \
+    HUGE
+
 
 __CUDA_BLOCK_SIZE = 256
 
@@ -60,7 +65,10 @@ class DerivedQuantity(ParallelAnalysisInterface):
         e = FieldDetector(flat = True)
         e.NumberOfParticles = 1
         fields = e.requested
-        self.func(e, *args, **kwargs)
+        try:
+            self.func(e, *args, **kwargs)
+        except:
+            mylog.error("Could not preload for quantity %s, IO speed may suffer", self.__name__)
         retvals = [ [] for i in range(self.n_ret)]
         chunks = self._data_source.chunks([], chunking_style="io")
         for ds in parallel_objects(chunks, -1):
@@ -263,8 +271,7 @@ def _combBaryonSpinParameter(data, j_mag, m_enc, e_term_pre, weight):
     M = m_enc.sum()
     J = np.sqrt(((j_mag.sum(axis=0))**2.0).sum())/W
     E = np.sqrt(e_term_pre.sum()/W)
-    G = 6.67e-8 # cm^3 g^-1 s^-2
-    spin = J * E / (M*1.989e33*G)
+    spin = J * E / (M * mass_sun_cgs * gravitational_constant_cgs)
     return spin
 add_quantity("BaryonSpinParameter", function=_BaryonSpinParameter,
              combine_function=_combBaryonSpinParameter, n_ret=4)
@@ -348,7 +355,7 @@ def _IsBound(data, truncate = True, include_thermal_energy = False,
     # Gravitational potential energy
     # We only divide once here because we have velocity in cgs, but radius is
     # in code.
-    G = 6.67e-8 / data.convert("cm") # cm^3 g^-1 s^-2
+    G = gravitational_constant_cgs / data.convert("cm") # cm^3 g^-1 s^-2
     # Check for periodicity of the clump.
     two_root = 2. * np.array(data.pf.domain_width) / np.array(data.pf.domain_dimensions)
     domain_period = data.pf.domain_right_edge - data.pf.domain_left_edge
@@ -570,15 +577,15 @@ def _Extrema(data, fields, non_zero = False, filter=None):
     mins, maxs = [], []
     for field in fields:
         if data[field].size < 1:
-            mins.append(1e90)
-            maxs.append(-1e90)
+            mins.append(HUGE)
+            maxs.append(-HUGE)
             continue
         if filter is None:
             if non_zero:
                 nz_filter = data[field]>0.0
                 if not nz_filter.any():
-                    mins.append(1e90)
-                    maxs.append(-1e90)
+                    mins.append(HUGE)
+                    maxs.append(-HUGE)
                     continue
             else:
                 nz_filter = None
@@ -593,8 +600,8 @@ def _Extrema(data, fields, non_zero = False, filter=None):
                 mins.append(np.nanmin(data[field][nz_filter]))
                 maxs.append(np.nanmax(data[field][nz_filter]))
             else:
-                mins.append(1e90)
-                maxs.append(-1e90)
+                mins.append(HUGE)
+                maxs.append(-HUGE)
     return len(fields), mins, maxs
 def _combExtrema(data, n_fields, mins, maxs):
     mins, maxs = np.atleast_2d(mins, maxs)
@@ -626,7 +633,7 @@ def _MaxLocation(data, field):
     This function returns the location of the maximum of a set
     of fields.
     """
-    ma, maxi, mx, my, mz = -1e90, -1, -1, -1, -1
+    ma, maxi, mx, my, mz = -HUGE, -1, -1, -1, -1
     if data[field].size > 0:
         maxi = np.argmax(data[field])
         ma = data[field][maxi]
@@ -644,7 +651,7 @@ def _MinLocation(data, field):
     This function returns the location of the minimum of a set
     of fields.
     """
-    ma, mini, mx, my, mz = 1e90, -1, -1, -1, -1
+    ma, mini, mx, my, mz = HUGE, -1, -1, -1, -1
     if data[field].size > 0:
         mini = np.argmin(data[field])
         ma = data[field][mini]
@@ -678,3 +685,37 @@ def _combTotalQuantity(data, n_fields, totals):
     return [np.sum(totals[:,i]) for i in range(n_fields)]
 add_quantity("TotalQuantity", function=_TotalQuantity,
                 combine_function=_combTotalQuantity, n_ret=2)
+
+def _ParticleDensityCenter(data,nbins=3,particle_type="all"):
+    """
+    Find the center of the particle density
+    by histogramming the particles iteratively.
+    """
+    pos = [data[(particle_type,"particle_position_%s"%ax)] for ax in "xyz"]
+    pos = np.array(pos).T
+    mas = data[(particle_type,"particle_mass")]
+    calc_radius= lambda x,y:np.sqrt(np.sum((x-y)**2.0,axis=1))
+    density = 0
+    if pos.shape[0]==0:
+        return -1.0,[-1.,-1.,-1.]
+    while pos.shape[0] > 1:
+        table,bins=np.histogramdd(pos,bins=nbins, weights=mas)
+        bin_size = min((np.max(bins,axis=1)-np.min(bins,axis=1))/nbins)
+        centeridx = np.where(table==table.max())
+        le = np.array([bins[0][centeridx[0][0]],
+                       bins[1][centeridx[1][0]],
+                       bins[2][centeridx[2][0]]])
+        re = np.array([bins[0][centeridx[0][0]+1],
+                       bins[1][centeridx[1][0]+1],
+                       bins[2][centeridx[2][0]+1]])
+        center = 0.5*(le+re)
+        idx = calc_radius(pos,center)<bin_size
+        pos, mas = pos[idx],mas[idx]
+        density = max(density,mas.sum()/bin_size**3.0)
+    return density, center
+def _combParticleDensityCenter(data,densities,centers):
+    i = np.argmax(densities)
+    return densities[i],centers[i]
+
+add_quantity("ParticleDensityCenter",function=_ParticleDensityCenter,
+             combine_function=_combParticleDensityCenter,n_ret=2)

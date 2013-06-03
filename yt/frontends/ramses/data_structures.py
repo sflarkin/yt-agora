@@ -35,6 +35,8 @@ from yt.geometry.geometry_handler import \
     GeometryHandler, YTDataChunk
 from yt.data_objects.static_output import \
     StaticOutput
+from yt.data_objects.octree_subset import \
+    OctreeSubset
 
 from .definitions import ramses_header
 from yt.utilities.definitions import \
@@ -94,7 +96,12 @@ class RAMSESDomainFile(object):
                              self.amr_header['ncpu']):
                 header = ( ('file_ilevel', 1, 'I'),
                            ('file_ncache', 1, 'I') )
-                hvals = fpu.read_attrs(f, header)
+                try:
+                    hvals = fpu.read_attrs(f, header, "=")
+                except AssertionError:
+                    print "You are running with the wrong number of fields."
+                    print "Please specify these in the load command."
+                    raise
                 if hvals['file_ncache'] == 0: continue
                 assert(hvals['file_ilevel'] == level+1)
                 if cpu + 1 == self.domain_id and level >= min_level:
@@ -111,6 +118,9 @@ class RAMSESDomainFile(object):
             self.particle_field_offsets = {}
             return
         f = open(self.part_fn, "rb")
+        f.seek(0, os.SEEK_END)
+        flen = f.tell()
+        f.seek(0)
         hvals = {}
         attrs = ( ('ncpu', 1, 'I'),
                   ('ndim', 1, 'I'),
@@ -138,11 +148,15 @@ class RAMSESDomainFile(object):
         if hvals["nstar_tot"] > 0:
             particle_fields += [("particle_age", "d"),
                                 ("particle_metallicity", "d")]
-        field_offsets = {particle_fields[0][0]: f.tell()}
-        for field, vtype in particle_fields[1:]:
-            fpu.skip(f, 1)
+        field_offsets = {}
+        _pfields = {}
+        for field, vtype in particle_fields:
+            if f.tell() >= flen: break
             field_offsets[field] = f.tell()
+            _pfields[field] = vtype
+            fpu.skip(f, 1)
         self.particle_field_offsets = field_offsets
+        self.particle_field_types = _pfields
 
     def _read_amr_header(self):
         hvals = {}
@@ -240,42 +254,7 @@ class RAMSESDomainFile(object):
         self.select(selector)
         return self.count(selector)
 
-class RAMSESDomainSubset(object):
-    def __init__(self, domain, mask, cell_count):
-        self.mask = mask
-        self.domain = domain
-        self.oct_handler = domain.pf.h.oct_handler
-        self.cell_count = cell_count
-        level_counts = self.oct_handler.count_levels(
-            self.domain.pf.max_level, self.domain.domain_id, mask)
-        assert(level_counts.sum() == cell_count)
-        level_counts[1:] = level_counts[:-1]
-        level_counts[0] = 0
-        self.level_counts = np.add.accumulate(level_counts)
-
-    def select_icoords(self, dobj):
-        return self.oct_handler.icoords(self.domain.domain_id, self.mask,
-                                        self.cell_count,
-                                        self.level_counts.copy())
-
-    def select_fcoords(self, dobj):
-        return self.oct_handler.fcoords(self.domain.domain_id, self.mask,
-                                        self.cell_count,
-                                        self.level_counts.copy())
-
-    def select_fwidth(self, dobj):
-        # Recall domain_dimensions is the number of cells, not octs
-        base_dx = 1.0/self.domain.pf.domain_dimensions
-        widths = np.empty((self.cell_count, 3), dtype="float64")
-        dds = (2**self.ires(dobj))
-        for i in range(3):
-            widths[:,i] = base_dx[i] / dds
-        return widths
-
-    def select_ires(self, dobj):
-        return self.oct_handler.ires(self.domain.domain_id, self.mask,
-                                     self.cell_count,
-                                     self.level_counts.copy())
+class RAMSESDomainSubset(OctreeSubset):
 
     def fill(self, content, fields):
         # Here we get a copy of the file, which we skip through and read the
@@ -376,8 +355,16 @@ class RAMSESGeometryHandler(OctreeGeometryHandler):
         oobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
         yield YTDataChunk(dobj, "all", oobjs, dobj.size)
 
-    def _chunk_spatial(self, dobj, ngz):
-        raise NotImplementedError
+    def _chunk_spatial(self, dobj, ngz, sort = None):
+        sobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
+        for i,og in enumerate(sobjs):
+            if ngz > 0:
+                g = og.retrieve_ghost_zones(ngz, [], smoothed=True)
+            else:
+                g = og
+            size = og.cell_count
+            if size == 0: continue
+            yield YTDataChunk(dobj, "spatial", [g], size)
 
     def _chunk_io(self, dobj):
         oobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
@@ -416,15 +403,24 @@ class RAMSESStaticOutput(StaticOutput):
         self.time_units['1'] = 1
         self.units['1'] = 1.0
         self.units['unitary'] = 1.0 / (self.domain_right_edge - self.domain_left_edge).max()
-        self.conversion_factors["Density"] = self.parameters['unit_d']
+        rho_u = self.parameters['unit_d']
+        self.conversion_factors["Density"] = rho_u
         vel_u = self.parameters['unit_l'] / self.parameters['unit_t']
+        self.conversion_factors["Pressure"] = rho_u*vel_u**2
         self.conversion_factors["x-velocity"] = vel_u
         self.conversion_factors["y-velocity"] = vel_u
         self.conversion_factors["z-velocity"] = vel_u
+        # Necessary to get the length units in, which are needed for Mass
+        self.conversion_factors['mass'] = rho_u * self.parameters['unit_l']**3
 
     def _setup_nounits_units(self):
+        # Note that unit_l *already* converts to proper!
+        unit_l = self.parameters['unit_l']
         for unit in mpc_conversion.keys():
-            self.units[unit] = self.parameters['unit_l'] * mpc_conversion[unit] / mpc_conversion["cm"]
+            self.units[unit] = unit_l * mpc_conversion[unit] / mpc_conversion["cm"]
+            self.units['%sh' % unit] = self.units[unit] * self.hubble_constant
+            self.units['%shcm' % unit] = (self.units['%sh' % unit] /
+                                          (1 + self.current_redshift))
         for unit in sec_conversion.keys():
             self.time_units[unit] = self.parameters['unit_t'] / sec_conversion[unit]
 
@@ -473,19 +469,18 @@ class RAMSESStaticOutput(StaticOutput):
         self.domain_right_edge = np.ones(3, dtype='float64')
         # This is likely not true, but I am not sure how to otherwise
         # distinguish them.
-        mylog.warning("No current mechanism of distinguishing cosmological simulations in RAMSES!")
+        mylog.warning("RAMSES frontend assumes all simulations are cosmological!")
         self.cosmological_simulation = 1
         self.periodicity = (True, True, True)
         self.current_redshift = (1.0 / rheader["aexp"]) - 1.0
         self.omega_lambda = rheader["omega_l"]
         self.omega_matter = rheader["omega_m"]
-        self.hubble_constant = rheader["H0"]
+        self.hubble_constant = rheader["H0"] / 100.0 # This is H100
         self.max_level = rheader['levelmax'] - rheader['levelmin']
 
     @classmethod
     def _is_valid(self, *args, **kwargs):
         if not os.path.basename(args[0]).startswith("info_"): return False
         fn = args[0].replace("info_", "amr_").replace(".txt", ".out00001")
-        print fn
         return os.path.exists(fn)
 
