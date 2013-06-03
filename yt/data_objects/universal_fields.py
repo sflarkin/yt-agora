@@ -1,4 +1,5 @@
 """
+
 The basic field info container resides here.  These classes, code specific and
 universal, are the means by which we access fields across YT, both derived and
 native.
@@ -47,15 +48,16 @@ from field_info_container import \
     NeedsParameter
 
 from yt.utilities.physical_constants import \
-     mh, \
-     me, \
-     sigma_thompson, \
-     clight, \
-     kboltz, \
-     G, \
-     rho_crit_now, \
-     speed_of_light_cgs, \
-     km_per_cm, keV_per_K
+    mass_sun_cgs, \
+    mh, \
+    me, \
+    sigma_thompson, \
+    clight, \
+    kboltz, \
+    G, \
+    rho_crit_now, \
+    speed_of_light_cgs, \
+    km_per_cm, keV_per_K
 
 from yt.utilities.math_utils import \
     get_sph_r_component, \
@@ -88,9 +90,8 @@ add_field("OnesOverDx", function=_OnesOverDx,
           display_field=False)
 
 def _Zeros(field, data):
-    return np.zeros(data.ActiveDimensions, dtype='float64')
+    return np.zeros(data.shape, dtype='float64')
 add_field("Zeros", function=_Zeros,
-          validators=[ValidateSpatial(0)],
           projection_conversion="unitary",
           display_field = False)
 
@@ -99,7 +100,8 @@ def _Ones(field, data):
 add_field("Ones", function=_Ones,
           projection_conversion="unitary",
           display_field = False)
-add_field("CellsPerBin", function=_Ones, display_field = False)
+add_field("CellsPerBin", function=_Ones,
+          display_field = False)
 
 def _SoundSpeed(field, data):
     if data.pf["EOSType"] == 1:
@@ -378,7 +380,7 @@ add_field("JeansMassMsun",function=JeansMassMsun,units=r"\rm{Msun}")
 def _CellMass(field, data):
     return data["Density"] * data["CellVolume"]
 def _convertCellMassMsun(data):
-    return 5.027854e-34 # g^-1
+    return 1.0 / mass_sun_cgs # g^-1
 add_field("CellMass", function=_CellMass, units=r"\rm{g}")
 add_field("CellMassMsun", units=r"M_{\odot}",
           function=_CellMass,
@@ -457,6 +459,7 @@ def _convertConvergence(data):
     # lens to source
     DLS = data.pf.parameters['cosmology_calculator'].AngularDiameterDistance(
         data.pf.current_redshift, data.pf.parameters['lensing_source_redshift'])
+    # TODO: convert 1.5e14 to constants
     return (((DL * DLS) / DS) * (1.5e14 * data.pf.omega_matter * 
                                 (data.pf.hubble_constant / speed_of_light_cgs)**2 *
                                 (1 + data.pf.current_redshift)))
@@ -519,7 +522,7 @@ def _XRayEmissivity(field, data):
     return ((data["Density"].astype('float64')**2.0) \
             *data["Temperature"]**0.5)
 def _convertXRayEmissivity(data):
-    return 2.168e60
+    return 2.168e60 #TODO: convert me to constants
 add_field("XRayEmissivity", function=_XRayEmissivity,
           convert_function=_convertXRayEmissivity,
           projection_conversion="1")
@@ -754,8 +757,9 @@ def get_radius(data, field_prefix):
     for i, ax in enumerate('xyz'):
         np.subtract(data["%s%s" % (field_prefix, ax)], center[i], r)
         if data.pf.periodicity[i] == True:
-            np.subtract(DW[i], r, rdw)
             np.abs(r, r)
+            np.subtract(r, DW[i], rdw)
+            np.abs(rdw, rdw)
             np.minimum(r, rdw, r)
         np.power(r, 2.0, r)
         np.add(radius, r, radius)
@@ -925,8 +929,8 @@ def _MeanMolecularWeight(field,data):
 add_field("MeanMolecularWeight",function=_MeanMolecularWeight,units=r"")
 
 def _JeansMassMsun(field,data):
-    MJ_constant = (((5*kboltz)/(G*mh))**(1.5)) * \
-    (3/(4*3.1415926535897931))**(0.5) / 1.989e33
+    MJ_constant = (((5.0 * kboltz) / (G * mh)) ** (1.5)) * \
+    (3.0 / (4.0 * np.pi)) ** (0.5) / mass_sun_cgs
 
     return (MJ_constant *
             ((data["Temperature"]/data["MeanMolecularWeight"])**(1.5)) *
@@ -946,7 +950,7 @@ def _pdensity(field, data):
                  data["particle_position_x"].size,
                  blank, np.array(data.LeftEdge).astype(np.float64),
                  np.array(data.ActiveDimensions).astype(np.int32),
-                 np.float64(data['dx']))
+                 just_one(data['dx']))
     return blank
 add_field("particle_density", function=_pdensity,
           validators=[ValidateGridType()], convert_function=_convertDensity,

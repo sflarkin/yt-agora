@@ -210,6 +210,8 @@ class YTDataContainer(object):
         """
         Deletes a field
         """
+        if key  not in self.field_data:
+            key = self._determine_fields(key)[0]
         del self.field_data[key]
 
     def _generate_field(self, field):
@@ -226,17 +228,18 @@ class YTDataContainer(object):
     def _generate_fluid_field(self, field):
         # First we check the validator
         ftype, fname = field
+        finfo = self.pf._get_field_info(ftype, fname)
         if self._current_chunk is None or \
            self._current_chunk.chunk_type != "spatial":
             gen_obj = self
         else:
             gen_obj = self._current_chunk.objs[0]
         try:
-            self.pf.field_info[fname].check_available(gen_obj)
+            finfo.check_available(gen_obj)
         except NeedsGridType as ngt_exception:
             rv = self._generate_spatial_fluid(field, ngt_exception.ghost_zones)
         else:
-            rv = self.pf.field_info[fname](gen_obj)
+            rv = finfo(gen_obj)
         return rv
 
     def _generate_spatial_fluid(self, field, ngz):
@@ -247,7 +250,13 @@ class YTDataContainer(object):
                 for i,chunk in enumerate(self.chunks(field, "spatial", ngz = 0)):
                     mask = self._current_chunk.objs[0].select(self.selector)
                     if mask is None: continue
-                    data = self[field][mask]
+                    data = self[field]
+                    if len(data.shape) == 4:
+                        # This is how we keep it consistent between oct ordering
+                        # and grid ordering.
+                        data = data.T[mask.T]
+                    else:
+                        data = data[mask]
                     rv[ind:ind+data.size] = data
                     ind += data.size
         else:
@@ -453,7 +462,7 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
     def _identify_dependencies(self, fields_to_get):
         inspected = 0
         fields_to_get = fields_to_get[:]
-        for ftype, field in itertools.cycle(fields_to_get):
+        for field in itertools.cycle(fields_to_get):
             if inspected >= len(fields_to_get): break
             inspected += 1
             if field not in self.pf.field_dependencies: continue
@@ -511,6 +520,11 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
                         if f not in fields_to_generate:
                             fields_to_generate.append(f)
 
+    def deposit(self, positions, fields, op):
+        assert(self._current_chunk.chunk_type == "spatial")
+        fields = ensure_list(fields)
+        self.hierarchy._deposit_particle_fields(self, positions, fields, op)
+
     @contextmanager
     def _field_lock(self):
         self._locked = True
@@ -525,11 +539,13 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
         old_size, self.size = self.size, chunk.data_size
         old_chunk, self._current_chunk = self._current_chunk, chunk
         old_locked, self._locked = self._locked, False
-        #self.shape = (self.size,)
+        if not self._spatial:
+            self.shape = (self.size,)
         yield
         self.field_data = old_field_data
         self.size = old_size
-        #self.shape = (old_size,)
+        if not self._spatial:
+            self.shape = (old_size,)
         self._current_chunk = old_chunk
         self._locked = old_locked
 

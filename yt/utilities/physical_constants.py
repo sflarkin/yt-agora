@@ -42,7 +42,7 @@ mpc_per_rsun  = 2.253962e-14
 mpc_per_miles = 5.21552871e-20
 mpc_per_cm    = 3.24077929e-25
 kpc_per_cm    = mpc_per_cm / mpc_per_kpc
-km_per_pc     = 1.3806504e13
+km_per_pc     = 3.08567758e13
 km_per_m      = 1e-3
 km_per_cm     = 1e-5
 pc_per_cm     = 3.24077929e-19
@@ -85,3 +85,7 @@ clight = speed_of_light_cgs
 kboltz = boltzmann_constant_cgs
 hcgs = planck_constant_cgs
 sigma_thompson = cross_section_thompson_cgs
+
+# Miscellaneous
+HUGE = 1.0e90
+TINY = 1.0e-40
