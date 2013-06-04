@@ -53,6 +53,9 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
     parallel_blocking_call, \
     parallel_root_only, \
     parallel_objects
+from yt.utilities.physical_constants import \
+    mass_sun_cgs, \
+    rho_crit_now
 from yt.visualization.fixed_resolution import \
     FixedResolutionBuffer
 from yt.visualization.image_writer import write_image
@@ -594,8 +597,7 @@ class HaloProfiler(ParallelAnalysisInterface):
             try:
                 profile = BinnedProfile1D(sphere, self.n_profile_bins, "RadiusMpc",
                                                 r_min, halo['r_max'],
-                                                log_space=True, lazy_reader=True,
-                                                end_collect=True)
+                                                log_space=True, end_collect=True)
             except EmptyProfileData:
                 mylog.error("Caught EmptyProfileData exception, returning None for this halo.")
                 return None
@@ -686,15 +688,14 @@ class HaloProfiler(ParallelAnalysisInterface):
                 elif self.velocity_center[1] == 'sphere':
                     mylog.info('Calculating sphere bulk velocity.')
                     sphere.set_field_parameter('bulk_velocity',
-                                               sphere.quantities['BulkVelocity'](lazy_reader=True,
-                                                                                 preload=False))
+                                               sphere.quantities['BulkVelocity']())
                 else:
                     mylog.error("Invalid parameter: velocity_center.")
                     return None
             elif self.velocity_center[0] == 'max':
                 mylog.info('Setting bulk velocity with value at max %s.' % self.velocity_center[1])
-                max_val, maxi, mx, my, mz, mg = sphere.quantities['MaxLocation'](self.velocity_center[1],
-                                                                                 lazy_reader=True)
+                max_val, maxi, mx, my, mz, mg = sphere.quantities['MaxLocation'](self.velocity_center[1])
+                                                                                 
                 max_grid = self.pf.h.grids[mg]
                 max_cell = np.unravel_index(maxi, max_grid.ActiveDimensions)
                 sphere.set_field_parameter('bulk_velocity', [max_grid['x-velocity'][max_cell],
@@ -826,7 +827,7 @@ class HaloProfiler(ParallelAnalysisInterface):
                 y_axis = coords[1]
 
                 for hp in self.projection_fields:
-                    projections.append(self.pf.h.proj(w, hp['field'],
+                    projections.append(self.pf.h.proj(hp['field'], w,
                                                       weight_field=hp['weight_field'],
                                                       source=region, center=halo['center'],
                                                       serialize=False))
@@ -958,12 +959,11 @@ class HaloProfiler(ParallelAnalysisInterface):
         if 'ActualOverdensity' in profile.keys():
             return
 
-        rho_crit_now = 1.8788e-29 * self.pf.hubble_constant**2 # g cm^-3
-        Msun2g = 1.989e33
-        rho_crit = rho_crit_now * ((1.0 + self.pf.current_redshift)**3.0)
+        rhocritnow = rho_crit_now * self.pf.hubble_constant**2 # g cm^-3
+        rho_crit = rhocritnow * ((1.0 + self.pf.current_redshift)**3.0)
         if not self.use_critical_density: rho_crit *= self.pf.omega_matter
 
-        profile['ActualOverdensity'] = (Msun2g * profile['TotalMassMsun']) / \
+        profile['ActualOverdensity'] = (mass_sun_cgs * profile['TotalMassMsun']) / \
             profile['CellVolume'] / rho_crit
 
     def _check_for_needed_profile_fields(self):

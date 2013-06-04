@@ -13,7 +13,8 @@ Homepage: http://yt-project.org/
 Author: Nathan Goldbaum <goldbaum@ucolick.org>
 Affiliation: UC Santa Cruz
 License:
-  Copyright (C) 2008-2011 Matthew Turk, JS Oishi, Stephen Skory.  All Rights Reserved.
+  Copyright (C) 2008-2012 Matthew Turk, JS Oishi, Stephen Skory, Anthony Scopatz.  
+  All Rights Reserved.
 
   This file is part of yt.
 
@@ -359,16 +360,15 @@ class GridBoundaryCallback(PlotCallback):
             pxs, pys = np.mgrid[-1:1:3j,-1:1:3j]
         else:
             pxs, pys = np.mgrid[0:0:1j,0:0:1j]
-        GLE = plot.data.grid_left_edge
-        GRE = plot.data.grid_right_edge
-        grid_levels = plot.data.grid_levels[:,0]
+        GLE = plot.data.pf.h.grid_left_edge
+        GRE = plot.data.pf.h.grid_right_edge
+        grid_levels = plot.data.pf.h.grid_levels[:,0]
         min_level = self.min_level
-        max_level = self.max_level
+        max_level = self.min_level
         if min_level is None:
             min_level = 0
         if max_level is None:
             max_level = plot.data.pf.h.max_level
-
         for px_off, py_off in zip(pxs.ravel(), pys.ravel()):
             pxo = px_off * dom[px_index]
             pyo = py_off * dom[py_index]

@@ -29,47 +29,76 @@ import numpy as np
 from yt.utilities.io_handler import \
     BaseIOHandler
 from yt.utilities.logger import ytLogger as mylog
+import yt.utilities.fortran_utils as fpu
+import cStringIO
 
 class IOHandlerRAMSES(BaseIOHandler):
     _data_style = "ramses"
 
-    def __init__(self, ramses_tree, *args, **kwargs):
-        self.ramses_tree = ramses_tree
-        BaseIOHandler.__init__(self, *args, **kwargs)
-
-    def _read_data(self, grid, field):
-        tr = np.zeros(grid.ActiveDimensions, dtype='float64')
-        filled = np.zeros(grid.ActiveDimensions, dtype='int32')
-        to_fill = grid.ActiveDimensions.prod()
-        grids = [grid]
-        l_delta = 0
-        varindex = self.ramses_tree.field_ind[field]
-        while to_fill > 0 and len(grids) > 0:
-            next_grids = []
-            for g in grids:
-                to_fill -= self.ramses_tree.read_grid(varindex, field,
-                        grid.get_global_startindex(), grid.ActiveDimensions,
-                        tr, filled, g.Level, 2**l_delta, g.locations)
-                next_grids += g.Parent
-            grids = next_grids
-            l_delta += 1
+    def _read_fluid_selection(self, chunks, selector, fields, size):
+        # Chunks in this case will have affiliated domain subset objects
+        # Each domain subset will contain a hydro_offset array, which gives
+        # pointers to level-by-level hydro information
+        tr = dict((f, np.empty(size, dtype='float64')) for f in fields)
+        cp = 0
+        for chunk in chunks:
+            for subset in chunk.objs:
+                # Now we read the entire thing
+                f = open(subset.domain.hydro_fn, "rb")
+                # This contains the boundary information, so we skim through
+                # and pick off the right vectors
+                content = cStringIO.StringIO(f.read())
+                rv = subset.fill(content, fields)
+                for ft, f in fields:
+                    mylog.debug("Filling %s with %s (%0.3e %0.3e) (%s:%s)",
+                        f, subset.cell_count, rv[f].min(), rv[f].max(),
+                        cp, cp+subset.cell_count)
+                    tr[(ft, f)][cp:cp+subset.cell_count] = rv.pop(f)
+                cp += subset.cell_count
         return tr
 
-    def preload(self, grids, sets):
-        if len(grids) == 0: return
-        domain_keys = defaultdict(list)
-        pf_field_list = grids[0].pf.h.field_list
-        sets = [dset for dset in list(sets) if dset in pf_field_list]
-        exc = self._read_exception
-        for g in grids:
-            domain_keys[g.domain].append(g)
-        for domain, grids in domain_keys.items():
-            mylog.debug("Starting read of domain %s (%s)", domain, sets)
-            for field in sets:
-                for g in grids:
-                    self.queue[g.id][field] = self._read_data(g, field)
-                print "Clearing", field, domain
-                self.ramses_tree.clear_tree(field, domain - 1)
-        mylog.debug("Finished read of %s", sets)
+    def _read_particle_selection(self, chunks, selector, fields):
+        size = 0
+        masks = {}
+        chunks = list(chunks)
+        pos_fields = [("all","particle_position_%s" % ax) for ax in "xyz"]
+        for chunk in chunks:
+            for subset in chunk.objs:
+                # We read the whole thing, then feed it back to the selector
+                selection = self._read_particle_subset(subset, pos_fields)
+                mask = selector.select_points(
+                    selection["all", "particle_position_x"],
+                    selection["all", "particle_position_y"],
+                    selection["all", "particle_position_z"])
+                if mask is None: continue
+                #print "MASK", mask
+                size += mask.sum()
+                masks[id(subset)] = mask
+        # Now our second pass
+        tr = {}
+        pos = 0
+        for chunk in chunks:
+            for subset in chunk.objs:
+                selection = self._read_particle_subset(subset, fields)
+                mask = masks.pop(id(subset), None)
+                if mask is None: continue
+                count = mask.sum()
+                for field in fields:
+                    ti = selection.pop(field)[mask]
+                    if field not in tr:
+                        dt = subset.domain.particle_field_types[field[1]]
+                        tr[field] = np.empty(size, dt)
+                    tr[field][pos:pos+count] = ti
+                pos += count
+        return tr
 
-    def modify(self, data): return data
+    def _read_particle_subset(self, subset, fields):
+        f = open(subset.domain.part_fn, "rb")
+        foffsets = subset.domain.particle_field_offsets
+        tr = {}
+        #for field in sorted(fields, key=lambda a:foffsets[a]):
+        for field in fields:
+            f.seek(foffsets[field[1]])
+            dt = subset.domain.particle_field_types[field[1]]
+            tr[field] = fpu.read_vector(f, dt)
+        return tr

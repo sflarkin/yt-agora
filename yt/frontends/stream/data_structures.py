@@ -32,8 +32,8 @@ from yt.funcs import *
 from yt.config import ytcfg
 from yt.data_objects.grid_patch import \
     AMRGridPatch
-from yt.data_objects.hierarchy import \
-    AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+    GridGeometryHandler
 from yt.data_objects.static_output import \
     StaticOutput
 from yt.utilities.logger import ytLogger as mylog
@@ -132,7 +132,7 @@ class StreamHandler(object):
         else :
             return False
         
-class StreamHierarchy(AMRHierarchy):
+class StreamHierarchy(GridGeometryHandler):
 
     grid = StreamGrid
 
@@ -143,32 +143,10 @@ class StreamHierarchy(AMRHierarchy):
         self.stream_handler = pf.stream_handler
         self.float_type = "float64"
         self.directory = os.getcwd()
-        AMRHierarchy.__init__(self, pf, data_style)
-
-    def _initialize_data_storage(self):
-        pass
+        GridGeometryHandler.__init__(self, pf, data_style)
 
     def _count_grids(self):
         self.num_grids = self.stream_handler.num_grids
-
-    def _setup_unknown_fields(self):
-        for field in self.field_list:
-            if field in self.parameter_file.field_info: continue
-            mylog.info("Adding %s to list of fields", field)
-            cf = None
-            if self.parameter_file.has_key(field):
-                def external_wrapper(f):
-                    def _convert_function(data):
-                        return data.convert(f)
-                    return _convert_function
-                cf = external_wrapper(field)
-            ptype = self.stream_handler.get_particle_type(field)
-            # Note that we call add_field on the field_info directly.  This
-            # will allow the same field detection mechanism to work for 1D, 2D
-            # and 3D fields.
-            self.pf.field_info.add_field(
-                    field, lambda a, b: None, particle_type = ptype,
-                    convert_function=cf, take_log=False)
 
     def _parse_hierarchy(self):
         self.grid_dimensions = self.stream_handler.dimensions
@@ -223,33 +201,15 @@ class StreamHierarchy(AMRHierarchy):
                 child._parent_id = i
 
     def _initialize_grid_arrays(self):
-        AMRHierarchy._initialize_grid_arrays(self)
+        GridGeometryHandler._initialize_grid_arrays(self)
         self.grid_procs = np.zeros((self.num_grids,1),'int32')
-
-    def save_data(self, *args, **kwargs):
-        pass
-
-    def _detect_fields(self):
-        self.field_list = list(set(self.stream_handler.get_fields()))
-
-    def _setup_derived_fields(self):
-        self.derived_field_list = []
-        for field in self.parameter_file.field_info:
-            try:
-                fd = self.parameter_file.field_info[field].get_dependencies(
-                            pf = self.parameter_file)
-            except:
-                continue
-            available = np.all([f in self.field_list for f in fd.requested])
-            if available: self.derived_field_list.append(field)
-        for field in self.field_list:
-            if field not in self.derived_field_list:
-                self.derived_field_list.append(field)
 
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
-        self.object_types.sort()
+        GridGeometryHandler._setup_classes(self, dd)
+
+    def _detect_fields(self):
+        self.field_list = list(set(self.stream_handler.get_fields()))
 
     def _populate_grid_objects(self):
         for g in self.grids:
@@ -272,6 +232,7 @@ class StreamHierarchy(AMRHierarchy):
         """
         
         particle_types = set_particle_types(data[0])
+        ftype = "all"
 
         for key in data[0].keys() :
             if key is "number_of_particles": continue
@@ -279,16 +240,18 @@ class StreamHierarchy(AMRHierarchy):
             if key not in self.field_list:
                 self.field_list.append(key)
                 
-        self._setup_unknown_fields()
-
         for i, grid in enumerate(self.grids) :
             if data[i].has_key("number_of_particles") :
                 grid.NumberOfParticles = data[i].pop("number_of_particles")
-            for key in data[i].keys() :
-                if key in grid.keys() : grid.field_data.pop(key, None)
-                self.stream_handler.fields[grid.id][key] = data[i][key]
+            for fname in data[i]:
+                if fname in grid.field_data:
+                    grid.field_data.pop(fname, None)
+                elif (ftype, fname) in grid.field_data:
+                    grid.field_data.pop( ("all", fname) )
+                self.stream_handler.fields[grid.id][fname] = data[i][fname]
             
         self._detect_fields()
+        self._setup_unknown_fields()
                 
 class StreamStaticOutput(StaticOutput):
     _hierarchy_class = StreamHierarchy
@@ -296,7 +259,7 @@ class StreamStaticOutput(StaticOutput):
     _fieldinfo_known = KnownStreamFields
     _data_style = 'stream'
 
-    def __init__(self, stream_handler):
+    def __init__(self, stream_handler, storage_filename = None):
         #if parameter_override is None: parameter_override = {}
         #self._parameter_override = parameter_override
         #if conversion_override is None: conversion_override = {}
@@ -368,11 +331,9 @@ def assign_particle_data(pf, pdata) :
     
     if pf.h.num_grids > 1 :
 
-        try :
-            x = pdata["particle_position_x"]
-            y = pdata["particle_position_y"]
-            z = pdata["particle_position_z"]
-        except:
+        try:
+            x, y, z = (pdata["all","particle_position_%s" % ax] for ax in 'xyz')
+        except KeyError:
             raise KeyError("Cannot decompose particle data without position fields!")
         
         particle_grids, particle_grid_inds = pf.h.find_points(x,y,z)
@@ -526,6 +487,14 @@ def load_uniform_grid(data, domain_dimensions, sim_unit_to_cm, bbox=None,
     # Now figure out where the particles go
 
     if number_of_particles > 0 :
+        if ("all", "particle_position_x") not in pdata:
+            pdata_ftype = {}
+            for f in [k for k in sorted(pdata)]:
+                if not hasattr(pdata[f], "shape"): continue
+                mylog.debug("Reassigning '%s' to ('all','%s')", f, f)
+                pdata_ftype["all",f] = pdata.pop(f)
+            pdata_ftype.update(pdata)
+            pdata = pdata_ftype
         assign_particle_data(spf, pdata)
     
     return spf
@@ -721,6 +690,15 @@ def refine_amr(base_pf, refinement_criteria, fluid_operators, max_level,
 
     # Now reassign particle data to grids
 
-    if number_of_particles > 0 : assign_particle_data(pf, pdata)
+    if number_of_particles > 0:
+        if ("all", "particle_position_x") not in pdata:
+            pdata_ftype = {}
+            for f in [k for k in sorted(pdata)]:
+                if not hasattr(pdata[f], "shape"): continue
+                mylog.debug("Reassigning '%s' to ('all','%s')", f, f)
+                pdata_ftype["all",f] = pdata.pop(f)
+            pdata_ftype.update(pdata)
+            pdata = pdata_ftype
+        assign_particle_data(pf, pdata)
     
     return pf

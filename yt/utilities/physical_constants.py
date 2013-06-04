@@ -88,3 +88,7 @@ kboltz = boltzmann_constant_cgs
 hcgs = planck_constant_cgs
 sigma_thompson = cross_section_thompson_cgs
 Na = 1 / amu_cgs
+
+# Miscellaneous
+HUGE = 1.0e90
+TINY = 1.0e-40

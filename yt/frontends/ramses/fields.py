@@ -25,6 +25,8 @@ License:
 
 from yt.data_objects.field_info_container import \
     FieldInfoContainer, \
+    NullFunc, \
+    TranslationFunc, \
     FieldInfo, \
     ValidateParameter, \
     ValidateDataField, \
@@ -32,13 +34,17 @@ from yt.data_objects.field_info_container import \
     ValidateSpatial, \
     ValidateGridType
 import yt.data_objects.universal_fields
+from yt.utilities.physical_constants import \
+    boltzmann_constant_cgs, \
+    mass_hydrogen_cgs, \
+    mass_sun_cgs
+import numpy as np
 
+RAMSESFieldInfo = FieldInfoContainer.create_with_fallback(FieldInfo, "RFI")
+add_field = RAMSESFieldInfo.add_field
 
 KnownRAMSESFields = FieldInfoContainer()
 add_ramses_field = KnownRAMSESFields.add_field
-
-RAMSESFieldInfo = FieldInfoContainer.create_with_fallback(FieldInfo)
-add_field = RAMSESFieldInfo.add_field
 
 known_ramses_fields = [
     "Density",
@@ -50,21 +56,125 @@ known_ramses_fields = [
 ]
 
 for f in known_ramses_fields:
-    if f not in RAMSESFieldInfo:
-        add_field(f, function=lambda a,b: None, take_log=True,
+    if f not in KnownRAMSESFields:
+        add_ramses_field(f, function=NullFunc, take_log=True,
                   validators = [ValidateDataField(f)])
+
+def dx(field, data):
+    return data.fwidth[:,0]
+add_field("dx", function=dx)
+
+def dy(field, data):
+    return data.fwidth[:,1]
+add_field("dy", function=dy)
+
+def dz(field, data):
+    return data.fwidth[:,2]
+add_field("dz", function=dz)
 
 def _convertDensity(data):
     return data.convert("Density")
-RAMSESFieldInfo["Density"]._units = r"\rm{g}/\rm{cm}^3"
-RAMSESFieldInfo["Density"]._projected_units = r"\rm{g}/\rm{cm}^2"
-RAMSESFieldInfo["Density"]._convert_function=_convertDensity
+KnownRAMSESFields["Density"]._units = r"\rm{g}/\rm{cm}^3"
+KnownRAMSESFields["Density"]._projected_units = r"\rm{g}/\rm{cm}^2"
+KnownRAMSESFields["Density"]._convert_function=_convertDensity
+
+def _convertPressure(data):
+    return data.convert("Pressure")
+KnownRAMSESFields["Pressure"]._units=r"\rm{dyne}/\rm{cm}^{2}/\mu"
+KnownRAMSESFields["Pressure"]._convert_function=_convertPressure
 
 def _convertVelocity(data):
     return data.convert("x-velocity")
 for ax in ['x','y','z']:
-    f = RAMSESFieldInfo["%s-velocity" % ax]
+    f = KnownRAMSESFields["%s-velocity" % ax]
     f._units = r"\rm{cm}/\rm{s}"
     f._convert_function = _convertVelocity
     f.take_log = False
 
+known_ramses_particle_fields = [
+    "particle_position_x",
+    "particle_position_y",
+    "particle_position_z",
+    "particle_velocity_x",
+    "particle_velocity_y",
+    "particle_velocity_z",
+    "particle_mass",
+    "particle_identifier",
+    "particle_refinement_level",
+    "particle_age",
+    "particle_metallicity",
+]
+
+for f in known_ramses_particle_fields:
+    if f not in KnownRAMSESFields:
+        add_ramses_field(f, function=NullFunc, take_log=True,
+                  validators = [ValidateDataField(f)],
+                  particle_type = True)
+
+for ax in 'xyz':
+    KnownRAMSESFields["particle_velocity_%s" % ax]._convert_function = \
+        _convertVelocity
+
+def _convertParticleMass(data):
+    return data.convert("mass")
+
+KnownRAMSESFields["particle_mass"]._convert_function = \
+        _convertParticleMass
+KnownRAMSESFields["particle_mass"]._units = r"\mathrm{g}"
+
+def _convertParticleMassMsun(data):
+    return 1.0/mass_sun_cgs
+add_field("ParticleMass", function=TranslationFunc("particle_mass"), 
+          particle_type=True)
+add_field("ParticleMassMsun",
+          function=TranslationFunc("particle_mass"), 
+          particle_type=True, convert_function=_convertParticleMassMsun)
+
+def _Temperature(field, data):
+    rv = data["Pressure"]/data["Density"]
+    rv *= mass_hydrogen_cgs/boltzmann_constant_cgs
+    return rv
+add_field("Temperature", function=_Temperature, units=r"\rm{K}")
+
+
+# We now set up a couple particle fields.  This should eventually be abstracted
+# into a single particle field function that adds them all on and is used
+# across frontends, but that will need to wait until moving to using
+# Coordinates, or vector fields.
+
+def particle_count(field, data):
+    pos = np.column_stack([data["particle_position_%s" % ax] for ax in 'xyz'])
+    d = data.deposit(pos, method = "count")
+    return d
+RAMSESFieldInfo.add_field(("deposit", "%s_count" % "all"),
+         function = particle_count,
+         validators = [ValidateSpatial()],
+         display_name = "\\mathrm{%s Count}" % "all",
+         projection_conversion = '1')
+
+def particle_mass(field, data):
+    pos = np.column_stack([data["particle_position_%s" % ax] for ax in 'xyz'])
+    d = data.deposit(pos, [data["ParticleMass"]], method = "sum")
+    return d
+
+RAMSESFieldInfo.add_field(("deposit", "%s_mass" % "all"),
+         function = particle_mass,
+         validators = [ValidateSpatial()],
+         display_name = "\\mathrm{%s Mass}" % "all",
+         units = r"\mathrm{g}",
+         projected_units = r"\mathrm{g}\/\mathrm{cm}",
+         projection_conversion = 'cm')
+
+def particle_density(field, data):
+    pos = np.column_stack([data["particle_position_%s" % ax] for ax in 'xyz'])
+    d = data.deposit(pos, [data["ParticleMass"]], method = "sum")
+    d /= data["CellVolume"]
+    return d
+
+RAMSESFieldInfo.add_field(("deposit", "%s_density" % "all"),
+         function = particle_density,
+         validators = [ValidateSpatial()],
+         display_name = "\\mathrm{%s Density}" % "all",
+         units = r"\mathrm{g}/\mathrm{cm}^{3}",
+         projected_units = r"\mathrm{g}/\mathrm{cm}^{-2}",
+         projection_conversion = 'cm')
