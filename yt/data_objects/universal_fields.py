@@ -48,6 +48,7 @@ from field_info_container import \
     NullFunc
 
 from yt.utilities.physical_constants import \
+     mass_sun_cgs, \
      mh, \
      me, \
      sigma_thompson, \
@@ -70,51 +71,6 @@ from yt.utilities.math_utils import \
     get_sph_theta, get_sph_phi, \
     periodic_dist, euclidean_dist
      
-# Note that, despite my newfound efforts to comply with PEP-8,
-# I violate it here in order to keep the name/func_name relationship
-
-def _dx(field, data):
-    return data.dds[0]
-    return np.ones(data.ActiveDimensions, dtype='float64') * data.dds[0]
-add_field('dx', function=_dx, display_field=False,
-          validators=[ValidateSpatial(0)])
-
-def _dy(field, data):
-    return data.dds[1]
-    return np.ones(data.ActiveDimensions, dtype='float64') * data.dds[1]
-add_field('dy', function=_dy, display_field=False,
-          validators=[ValidateSpatial(0)])
-
-def _dz(field, data):
-    return data.dds[2]
-    return np.ones(data.ActiveDimensions, dtype='float64') * data.dds[2]
-add_field('dz', function=_dz,
-          display_field=False, validators=[ValidateSpatial(0)])
-
-def _coordX(field, data):
-    dim = data.ActiveDimensions[0]
-    return (np.ones(data.ActiveDimensions, dtype='float64')
-                   * np.arange(data.ActiveDimensions[0])[:,None,None]
-            +0.5) * data['dx'] + data.LeftEdge[0]
-add_field('x', function=_coordX, display_field=False,
-          validators=[ValidateSpatial(0)])
-
-def _coordY(field, data):
-    dim = data.ActiveDimensions[1]
-    return (np.ones(data.ActiveDimensions, dtype='float64')
-                   * np.arange(data.ActiveDimensions[1])[None,:,None]
-            +0.5) * data['dy'] + data.LeftEdge[1]
-add_field('y', function=_coordY, display_field=False,
-          validators=[ValidateSpatial(0)])
-
-def _coordZ(field, data):
-    dim = data.ActiveDimensions[2]
-    return (np.ones(data.ActiveDimensions, dtype='float64')
-                   * np.arange(data.ActiveDimensions[2])[None,None,:]
-            +0.5) * data['dz'] + data.LeftEdge[2]
-add_field('z', function=_coordZ, display_field=False,
-          validators=[ValidateSpatial(0)])
-
 def _GridLevel(field, data):
     return np.ones(data.ActiveDimensions)*(data.Level)
 add_field("GridLevel", function=_GridLevel,
@@ -134,19 +90,17 @@ add_field("OnesOverDx", function=_OnesOverDx,
           display_field=False)
 
 def _Zeros(field, data):
-    return np.zeros(data.ActiveDimensions, dtype='float64')
+    return np.zeros(data.shape, dtype='float64')
 add_field("Zeros", function=_Zeros,
-          validators=[ValidateSpatial(0)],
           projection_conversion="unitary",
           display_field = False)
 
 def _Ones(field, data):
-    return np.ones(data.ActiveDimensions, dtype='float64')
+    return np.ones(data.shape, dtype='float64')
 add_field("Ones", function=_Ones,
-          validators=[ValidateSpatial(0)],
           projection_conversion="unitary",
           display_field = False)
-add_field("CellsPerBin", function=_Ones, validators=[ValidateSpatial(0)],
+add_field("CellsPerBin", function=_Ones,
           display_field = False)
 
 def _SoundSpeed(field, data):
@@ -426,7 +380,7 @@ add_field("JeansMassMsun",function=JeansMassMsun,units=r"\rm{Msun}")
 def _CellMass(field, data):
     return data["Density"] * data["CellVolume"]
 def _convertCellMassMsun(data):
-    return 5.027854e-34 # g^-1
+    return 1.0 / mass_sun_cgs # g^-1
 add_field("CellMass", function=_CellMass, units=r"\rm{g}")
 add_field("CellMassMsun", units=r"M_{\odot}",
           function=_CellMass,
@@ -441,7 +395,7 @@ add_field("CellMassCode",
           convert_function=_convertCellMassCode)
 
 def _TotalMass(field,data):
-    return (data["Density"]+data["particle_density"]) * data["CellVolume"]
+    return (data["Density"]+data["Dark_Matter_Density"]) * data["CellVolume"]
 add_field("TotalMass", function=_TotalMass, units=r"\rm{g}")
 add_field("TotalMassMsun", units=r"M_{\odot}",
           function=_TotalMass,
@@ -505,6 +459,7 @@ def _convertConvergence(data):
     # lens to source
     DLS = data.pf.parameters['cosmology_calculator'].AngularDiameterDistance(
         data.pf.current_redshift, data.pf.parameters['lensing_source_redshift'])
+    # TODO: convert 1.5e14 to constants
     return (((DL * DLS) / DS) * (1.5e14 * data.pf.omega_matter * 
                                 (data.pf.hubble_constant / speed_of_light_cgs)**2 *
                                 (1 + data.pf.current_redshift)))
@@ -567,7 +522,7 @@ def _XRayEmissivity(field, data):
     return ((data["Density"].astype('float64')**2.0) \
             *data["Temperature"]**0.5)
 def _convertXRayEmissivity(data):
-    return 2.168e60
+    return 2.168e60 #TODO: convert me to constants
 add_field("XRayEmissivity", function=_XRayEmissivity,
           convert_function=_convertXRayEmissivity,
           projection_conversion="1")
@@ -974,22 +929,14 @@ def _MeanMolecularWeight(field,data):
 add_field("MeanMolecularWeight",function=_MeanMolecularWeight,units=r"")
 
 def _JeansMassMsun(field,data):
-    MJ_constant = (((5*kboltz)/(G*mh))**(1.5)) * \
-    (3/(4*3.1415926535897931))**(0.5) / 1.989e33
+    MJ_constant = (((5.0 * kboltz) / (G * mh)) ** (1.5)) * \
+    (3.0 / (4.0 * np.pi)) ** (0.5) / mass_sun_cgs
 
     return (MJ_constant *
             ((data["Temperature"]/data["MeanMolecularWeight"])**(1.5)) *
             (data["Density"]**(-0.5)))
 add_field("JeansMassMsun",function=_JeansMassMsun,
           units=r"\rm{M_{\odot}}")
-
-# We add these fields so that the field detector can use them
-for field in ["particle_position_%s" % ax for ax in "xyz"] + \
-             ["ParticleMass"]:
-    # This marker should let everyone know not to use the fields, but NullFunc
-    # should do that, too.
-    add_field(field, function=NullFunc, particle_type = True,
-        units=r"UNDEFINED")
 
 def _pdensity(field, data):
     blank = np.zeros(data.ActiveDimensions, dtype='float64')
@@ -1001,7 +948,7 @@ def _pdensity(field, data):
                  data["particle_position_x"].size,
                  blank, np.array(data.LeftEdge).astype(np.float64),
                  np.array(data.ActiveDimensions).astype(np.int32),
-                 np.float64(data['dx']))
+                 just_one(data['dx']))
     np.divide(blank, data["CellVolume"], blank)
     return blank
 add_field("particle_density", function=_pdensity,

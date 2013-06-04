@@ -7,7 +7,7 @@ Author: Nathan Goldbaum <goldbaum@ucolick.org>
 Affiliation: UCSC Astronomy
 Homepage: http://yt-project.org/
 License:
-  Copyright (C) 2010-2013 J. S. Oishi., Nathan Goldbaum  All Rights Reserved.
+  Copyright (C) 2010-2011 J. S. Oishi.  All Rights Reserved.
 
   This file is part of yt.
 
@@ -60,7 +60,8 @@ from yt.utilities.lib import write_png_to_string
 from yt.utilities.definitions import \
     x_dict, x_names, \
     y_dict, y_names, \
-    axis_names, axis_labels, \
+    axis_names, \
+    axis_labels, \
     formatted_length_unit_names
 from yt.utilities.math_utils import \
     ortho_find
@@ -597,7 +598,8 @@ class PWViewer(PlotWindow):
         self._colormaps = defaultdict(lambda: 'algae')
         self.setup_callbacks()
         for field in self._frb.data.keys():
-            if self.pf.field_info[field].take_log:
+            finfo = self.data_source.pf._get_field_info(*field)
+            if finfo.take_log:
                 self._field_transform[field] = log_transform
             else:
                 self._field_transform[field] = linear_transform
@@ -620,7 +622,7 @@ class PWViewer(PlotWindow):
             fields = self.plots.keys()
         else:
             fields = [field]
-        for field in fields:
+        for field in self._field_check(fields):
             if log:
                 self._field_transform[field] = log_transform
             else:
@@ -628,7 +630,8 @@ class PWViewer(PlotWindow):
 
     @invalidate_plot
     def set_transform(self, field, name):
-        if name not in field_transforms:
+        field = self._field_check(field)
+        if name not in field_transforms: 
             raise KeyError(name)
         self._field_transform[field] = field_transforms[name]
 
@@ -646,11 +649,11 @@ class PWViewer(PlotWindow):
 
         """
 
-        if field is 'all':
+        if field == 'all':
             fields = self.plots.keys()
         else:
             fields = [field]
-        for field in fields:
+        for field in self._field_check(fields):
             self._colorbar_valid = False
             self._colormaps[field] = cmap_name
 
@@ -684,7 +687,7 @@ class PWViewer(PlotWindow):
             fields = self.plots.keys()
         else:
             fields = [field]
-        for field in fields:
+        for field in self._field_check(fields):
             myzmin = zmin
             myzmax = zmax
             if zmin == 'min':
@@ -760,6 +763,13 @@ class PWViewer(PlotWindow):
                 except KeyError:
                     raise YTUnitNotRecognized(un)
         self._axes_unit_names = unit_name
+
+    def _field_check(self, field):
+        field = self.data_source._determine_fields(field)
+        if isinstance(field, (list, tuple)):
+            return field
+        else:
+            return field[0]
 
 class PWViewerMPL(PWViewer):
     """Viewer using matplotlib as a backend via the WindowPlotMPL.
@@ -1026,7 +1036,7 @@ class PWViewerMPL(PWViewer):
         else:
             fields = [field]
 
-        for field in fields:
+        for field in self._field_check(fields):
             self._colorbar_valid = False
             self._colormaps[field] = cmap
             if isinstance(cmap, types.StringTypes):
@@ -1069,12 +1079,16 @@ class PWViewerMPL(PWViewer):
         if 'Cutting' in self.data_source.__class__.__name__:
             type = 'OffAxisSlice'
         for k, v in self.plots.iteritems():
+            if isinstance(k, types.TupleType):
+                k = k[1]
             if axis:
                 n = "%s_%s_%s_%s" % (name, type, axis, k)
             else:
                 # for cutting planes
                 n = "%s_%s_%s" % (name, type, k)
             if weight:
+                if isinstance(weight, tuple):
+                    weight = weight[1]
                 n += "_%s" % (weight)
             names.append(v.save(n,mpl_kwargs))
         return names
@@ -1227,8 +1241,11 @@ class SlicePlot(PWViewerMPL):
         if axes_unit is None and units != ('1', '1'):
             axes_unit = units
         if field_parameters is None: field_parameters = {}
-        slc = pf.h.slice(axis, center[axis], center=center, fields=fields, **field_parameters)
-        PWViewerMPL.__init__(self, slc, bounds, origin=origin, fontsize=fontsize)
+        slc = pf.h.slice(axis, center[axis],
+            field_parameters = field_parameters, center=center)
+        slc.get_data(fields)
+        PWViewerMPL.__init__(self, slc, bounds, origin=origin,
+                             fontsize=fontsize)
         self.set_axes_unit(axes_unit)
 
 class ProjectionPlot(PWViewerMPL):
@@ -1335,7 +1352,7 @@ class ProjectionPlot(PWViewerMPL):
     _frb_generator = FixedResolutionBuffer
 
     def __init__(self, pf, axis, fields, center='c', width=None, axes_unit=None,
-                 weight_field=None, max_level=None, origin='center-window', fontsize=18,
+                 weight_field=None, max_level=None, origin='center-window', fontsize=18, 
                  field_parameters=None, data_source=None):
         ts = self._initialize_dataset(pf)
         self.ts = ts
@@ -1345,9 +1362,10 @@ class ProjectionPlot(PWViewerMPL):
         if axes_unit is None  and units != ('1', '1'):
             axes_unit = units
         if field_parameters is None: field_parameters = {}
-        proj = pf.h.proj(axis, fields, weight_field=weight_field, max_level=max_level,
-                         center=center, source=data_source, **field_parameters)
-        PWViewerMPL.__init__(self, proj, bounds, origin=origin, fontsize=fontsize)
+        proj = pf.h.proj(fields, axis, weight_field=weight_field,
+                         center=center, data_source=data_source, field_parameters = field_parameters)
+        PWViewerMPL.__init__(self,proj,bounds,origin=origin,
+                             fontsize=fontsize)
         self.set_axes_unit(axes_unit)
 
 class OffAxisSlicePlot(PWViewerMPL):
@@ -1403,11 +1421,13 @@ class OffAxisSlicePlot(PWViewerMPL):
         if axes_unit is None and units != ('1', '1'):
             axes_unit = units
         if field_parameters is None: field_parameters = {}
-        cutting = pf.h.cutting(normal, center, fields=fields, north_vector=north_vector, **field_parameters)
+        cutting = pf.h.cutting(normal, center,
+                              field_parameters = field_parameters)
+        cutting.get_data(fields)
         # Hard-coding the origin keyword since the other two options
         # aren't well-defined for off-axis data objects
-        PWViewerMPL.__init__(self, cutting, bounds, origin='center-window', periodic=False,
-                             oblique=True, fontsize=fontsize)
+        PWViewerMPL.__init__(self,cutting,bounds,origin='center-window',periodic=False,oblique=True,
+                             fontsize=fontsize)
         self.set_axes_unit(axes_unit)
 
 class OffAxisProjectionDummyDataSource(object):
@@ -1423,6 +1443,8 @@ class OffAxisProjectionDummyDataSource(object):
         self.axis = 4 # always true for oblique data objects
         self.normal_vector = normal_vector
         self.width = width
+        self.dd = pf.h.all_data()
+        fields = self.dd._determine_fields(fields)
         self.fields = fields
         self.interpolated = interpolated
         self.resolution = resolution
@@ -1432,6 +1454,9 @@ class OffAxisProjectionDummyDataSource(object):
         self.le = le
         self.re = re
         self.north_vector = north_vector
+
+    def _determine_fields(self, *args):
+        return self.dd._determine_fields(*args)
 
 class OffAxisProjectionPlot(PWViewerMPL):
     r"""Creates an off axis projection plot from a parameter file
@@ -1684,13 +1709,15 @@ class PWViewerExtJS(PWViewer):
     def get_field_units(self, field, strip_mathml = True):
         ds = self._frb.data_source
         pf = self.pf
+        field = self._check_field(field)
+        finfo = self.data_source.pf._get_field_info(*field)
         if ds._type_name in ("slice", "cutting"):
-            units = pf.field_info[field].get_units()
-        elif ds._type_name == "proj" and (ds.weight_field is not None or
+            units = finfo.get_units()
+        elif ds._type_name == "proj" and (ds.weight_field is not None or 
                                         ds.proj_style == "mip"):
-            units = pf.field_info[field].get_units()
+            units = finfo.get_units()
         elif ds._type_name == "proj":
-            units = pf.field_info[field].get_projected_units()
+            units = finfo.get_projected_units()
         else:
             units = ""
         if strip_mathml:
@@ -1747,9 +1774,11 @@ class PWViewerExtJS(PWViewer):
 
     @invalidate_data
     def set_current_field(self, field):
+        field = self._check_field(field)
         self._current_field = field
         self._frb[field]
-        if self.pf.field_info[field].take_log:
+        finfo = self.data_source.pf._get_field_info(*field)
+        if finfo.take_log:
             self._field_transform[field] = log_transform
         else:
             self._field_transform[field] = linear_transform

@@ -3,6 +3,8 @@ ART-specific IO
 
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
+Author: Chris Moody <matthewturk@gmail.com>
+Affiliation: UCSC
 Homepage: http://yt-project.org/
 License:
   Copyright (C) 2007-2011 Matthew Turk.  All Rights Reserved.
@@ -25,454 +27,529 @@ License:
 
 import numpy as np
 import struct
-
 import os
 import os.path
 
 from yt.utilities.io_handler import \
     BaseIOHandler
-
-from yt.utilities.io_handler import \
-    BaseIOHandler
 import yt.utilities.lib as au
-
+from yt.utilities.fortran_utils import *
+from yt.utilities.logger import ytLogger as mylog
 from yt.frontends.art.definitions import *
+from yt.utilities.physical_constants import sec_per_year
+
 
 class IOHandlerART(BaseIOHandler):
     _data_style = "art"
+    tb, ages = None, None
 
-    def __init__(self, filename, nhydro_vars, level_info, level_offsets,
-                 *args, **kwargs):
-        BaseIOHandler.__init__(self, *args, **kwargs)
-        self.filename = filename
-        self.nhydro_vars = nhydro_vars
-        self.level_info = level_info
-        self.level_offsets = level_offsets
-        self.level_data = {}
+    def _read_fluid_selection(self, chunks, selector, fields, size):
+        # Chunks in this case will have affiliated domain subset objects
+        # Each domain subset will contain a hydro_offset array, which gives
+        # pointers to level-by-level hydro information
+        tr = dict((f, np.empty(size, dtype='float64')) for f in fields)
+        cp = 0
+        for chunk in chunks:
+            for subset in chunk.objs:
+                # Now we read the entire thing
+                f = open(subset.domain.pf._file_amr, "rb")
+                # This contains the boundary information, so we skim through
+                # and pick off the right vectors
+                if subset.domain_level == 0:
+                    rv = subset.fill_root(f, fields)
+                else:
+                    rv = subset.fill_level(f, fields)
+                for ft, f in fields:
+                    mylog.debug("Filling L%i %s with %s (%0.3e %0.3e) (%s:%s)",
+                                subset.domain_level,
+                                f, subset.cell_count, rv[f].min(), rv[f].max(),
+                                cp, cp+subset.cell_count)
+                    tr[(ft, f)][cp:cp+subset.cell_count] = rv.pop(f)
+                cp += subset.cell_count
+        return tr
 
-    def preload_level(self, level,field=None):
-        """ Reads in the full ART tree. From the ART source:
-            iOctLv :    >0   - level of an oct
-            iOctPr :         - parent of an oct
-            iOctCh :    >0   - pointer to an oct of children
-                        0   - there are no children; the cell is a leaf
-            iOctNb :    >0   - pointers to neighbouring cells 
-            iOctPs :         - coordinates of Oct centers
-            
-            iOctLL1:         - doubly linked list of octs
-            iOctLL2:         - doubly linked list of octs
-            
-            tl - current  time moment for level L
-            tlold - previous time moment for level L
-            dtl - dtime0/2**iTimeBin
-            dtlold -  previous time step for level L
-            iSO - sweep order
-            
-            hvar(1,*) - gas density 
-            hvar(2,*) - gas energy 
-            hvar(3,*) - x-momentum 
-            hvar(4,*) - y-momentum
-            hvar(5,*) - z-momentum
-            hvar(6,*) - pressure
-            hvar(7,*) - Gamma
-            hvar(8,*) - internal energy 
+    def _read_particle_selection(self, chunks, selector, fields):
+        tr = {}
+        fields_read = []
+        for chunk in chunks:
+            level = chunk.objs[0].domain.domain_level
+            pf = chunk.objs[0].domain.pf
+            masks = {}
+            ws, ls = pf.parameters["wspecies"], pf.parameters["lspecies"]
+            sizes = np.diff(np.concatenate(([0], ls)))
+            ptmax = ws[-1]
+            npt = ls[-1]
+            nstars = ls[-1]-ls[-2]
+            file_particle = pf._file_particle_data
+            file_stars = pf._file_particle_stars
+            ftype_old = None
+            for field in fields:
+                if field in fields_read:
+                    continue
+                ftype, fname = field
+                pbool, idxa, idxb = _determine_field_size(pf, ftype, ls, ptmax)
+                npa = idxb-idxa
+                if not ftype_old == ftype:
+                    Nrow = pf.parameters["Nrow"]
+                    rp = lambda ax: read_particles(
+                        file_particle, Nrow, idxa=idxa,
+                        idxb=idxb, field=ax)
+                    x, y, z = (rp(ax) for ax in 'xyz')
+                    dd = pf.domain_dimensions[0]
+                    off = 1.0/dd
+                    x, y, z = (t.astype('f8')/dd - off for t in (x, y, z))
+                    mask = selector.select_points(x, y, z)
+                    size = mask.sum()
+                for i, ax in enumerate('xyz'):
+                    if fname.startswith("particle_position_%s" % ax):
+                        tr[field] = vars()[ax]
+                    if fname.startswith("particle_velocity_%s" % ax):
+                        tr[field] = rp('v'+ax)
+                if fname == "particle_mass":
+                    a = 0
+                    data = np.zeros(npa, dtype='f8')
+                    for ptb, size, m in zip(pbool, sizes, ws):
+                        if ptb:
+                            data[a:a+size] = m
+                            a += size
+                    tr[field] = data
+                elif fname == "particle_index":
+                    tr[field] = np.arange(idxa, idxb).astype('int64')
+                elif fname == "particle_type":
+                    a = 0
+                    data = np.zeros(npa, dtype='int')
+                    for i, (ptb, size) in enumerate(zip(pbool, sizes)):
+                        if ptb:
+                            data[a:a+size] = i
+                            a += size
+                    tr[field] = data
+                if pbool[-1] and fname in particle_star_fields:
+                    data = read_star_field(file_stars, field=fname)
+                    temp = tr.get(field, np.zeros(npa, 'f8'))
+                    if nstars > 0:
+                        temp[-nstars:] = data
+                    tr[field] = temp
+                if fname == "particle_creation_time":
+                    self.tb, self.ages, data = interpolate_ages(
+                        tr[field][-nstars:],
+                        file_stars,
+                        self.tb,
+                        self.ages,
+                        pf.current_time)
+                    temp = tr.get(field, np.zeros(npa, 'f8'))
+                    temp[-nstars:] = data
+                    tr[field] = temp
+                    del data
+                tr[field] = tr[field][mask].astype('f8')
+                ftype_old = ftype
+                fields_read.append(field)
+        if tr == {}:
+            tr = dict((f, np.array([])) for f in fields)
+        return tr
 
-            var (1,*) - total density 
-            var (2,*) - potential (new)
-            var (3,*) - potential (old)
-            
-            
-            
-        """
-        
-        if level in self.level_data: return
-        if level == 0:
-            self.preload_root_level()
-            return
-        f = open(self.filename, 'rb')
-        f.seek(self.level_offsets[level])
-        ncells = 8*self.level_info[level]
-        nvals = ncells * (self.nhydro_vars + 6) # 2 vars, 2 pads
-        arr = np.fromfile(f, dtype='>f', count=nvals)
-        arr = arr.reshape((self.nhydro_vars+6, ncells), order="F")
-        assert np.all(arr[0,:]==arr[-1,:]) #pads must be equal
-        arr = arr[3:-1,:] #skip beginning pad, idc, iOctCh, + ending pad
-        if field==None:
-            self.level_data[level] = arr.astype('float32')
-        else:
-            self.level_data[level] = arr.astype('float32')
-        del arr
 
-    def preload_root_level(self):
-        f = open(self.filename, 'rb')
-        f.seek(self.level_offsets[0] + 4) # Ditch the header
-        ncells = self.level_info[0]
-        nhvals = ncells * (self.nhydro_vars) # 0 vars, 0 pads
-        hvar = np.fromfile(f, dtype='>f', count=nhvals).astype("float32")
-        hvar = hvar.reshape((self.nhydro_vars, ncells), order="F")
-        np.fromfile(f,dtype='>i',count=2) #throw away the pads
-        nvars = ncells * (2) # 0 vars, 0 pads
-        var = np.fromfile(f, dtype='>f', count=nvars).astype("float32")
-        var = var.reshape((2, ncells), order="F")
-        arr = np.concatenate((hvar,var))
-        self.level_data[0] = arr
+def _determine_field_size(pf, field, lspecies, ptmax):
+    pbool = np.zeros(len(lspecies), dtype="bool")
+    idxas = np.concatenate(([0, ], lspecies[:-1]))
+    idxbs = lspecies
+    if "specie" in field:
+        index = int(field.replace("specie", ""))
+        pbool[index] = True
+    elif field == "stars":
+        pbool[-1] = True
+    elif field == "darkmatter":
+        pbool[0:-1] = True
+    else:
+        pbool[:] = True
+    idxa, idxb = idxas[pbool][0], idxbs[pbool][-1]
+    return pbool, idxa, idxb
 
-    def clear_level(self, level):
-        self.level_data.pop(level, None)
 
-    def _read_particle_field(self, grid, field):
-        dat = getattr(grid,field,None)
-        if dat is not None: 
-            return dat
-        starfield = field.replace('star','particle')
-        dat = getattr(grid,starfield,None)
-        if dat is not None:
-            psi = grid.pf.particle_star_index
-            idx = grid.particle_type==psi
-            return dat[idx]
-        raise KeyError
-        
-    def _read_data(self, grid, field):
-        if field in particle_fields:
-            return self._read_particle_field(grid, field)
-        pf = grid.pf
-        field_id = grid.pf.h.field_list.index(field)
-        if grid.Level == 0: # We only have one root grid
-            self.preload_level(0)
-            tr = self.level_data[0][field_id,:].reshape(
-                    pf.domain_dimensions, order="F").copy()
-            return tr.swapaxes(0, 2).astype("float64")
-        tr = np.zeros(grid.ActiveDimensions, dtype='float32')
-        grids = [grid]
-        l_delta = 0
-        filled = np.zeros(grid.ActiveDimensions, dtype='uint8')
-        to_fill = grid.ActiveDimensions.prod()
-        while to_fill > 0 and len(grids) > 0:
-            next_grids = []
-            for g in grids:
-                self.preload_level(g.Level,field=field_id)
-                #print "Filling %s from %s (%s)" % (grid, g, g.Level)
-                to_fill -= au.read_art_grid(field_id, 
-                        grid.get_global_startindex(), grid.ActiveDimensions,
-                        tr, filled, self.level_data[g.Level],
-                        g.Level, 2**l_delta, g.locations)
-                next_grids += g.Parent
-            grids = next_grids
-            l_delta += 1
-        return tr.astype("float64")
+def interpolate_ages(data, file_stars, interp_tb=None, interp_ages=None,
+                     current_time=None):
+    if interp_tb is None:
+        tdum, adum = read_star_field(file_stars,
+                                     field="tdum")
+        # timestamp of file should match amr timestamp
+        if current_time:
+            tdiff = b2t(tdum)-current_time/(sec_per_year*1e9)
+            if np.abs(tdiff) < 1e-4:
+                mylog.info("Timestamp mismatch in star " +
+                           "particle header")
+        mylog.info("Interpolating ages")
+        interp_tb, interp_ages = b2t(data)
+    temp = np.interp(data, interp_tb, interp_ages)
+    temp *= 1.0e9*sec_per_year
+    return interp_tb, interp_ages, temp
 
-def _count_art_octs(f, offset, 
-                   MinLev, MaxLevelNow):
-    level_oct_offsets= [0,]
-    level_child_offsets= [0,]
+
+def _count_art_octs(f, offset,
+                    MinLev, MaxLevelNow):
+    level_oct_offsets = [0, ]
+    level_child_offsets = [0, ]
     f.seek(offset)
-    nchild,ntot=8,0
+    nchild, ntot = 8, 0
     Level = np.zeros(MaxLevelNow+1 - MinLev, dtype='int64')
     iNOLL = np.zeros(MaxLevelNow+1 - MinLev, dtype='int64')
     iHOLL = np.zeros(MaxLevelNow+1 - MinLev, dtype='int64')
     for Lev in xrange(MinLev + 1, MaxLevelNow+1):
         level_oct_offsets.append(f.tell())
 
-        #Get the info for this level, skip the rest
-        #print "Reading oct tree data for level", Lev
-        #print 'offset:',f.tell()
-        Level[Lev], iNOLL[Lev], iHOLL[Lev] = struct.unpack(
-           '>iii', _read_record(f))
-        #print 'Level %i : '%Lev, iNOLL
-        #print 'offset after level record:',f.tell()
+        # Get the info for this level, skip the rest
+        # print "Reading oct tree data for level", Lev
+        # print 'offset:',f.tell()
+        Level[Lev], iNOLL[Lev], iHOLL[Lev] = read_vector(f, 'i', '>')
+        # print 'Level %i : '%Lev, iNOLL
+        # print 'offset after level record:',f.tell()
         iOct = iHOLL[Lev] - 1
         nLevel = iNOLL[Lev]
         nLevCells = nLevel * nchild
         ntot = ntot + nLevel
 
-        #Skip all the oct hierarchy data
-        ns = _read_record_size(f)
+        # Skip all the oct hierarchy data
+        ns = peek_record_size(f, endian='>')
         size = struct.calcsize('>i') + ns + struct.calcsize('>i')
         f.seek(f.tell()+size * nLevel)
 
         level_child_offsets.append(f.tell())
-        #Skip the child vars data
-        ns = _read_record_size(f)
+        # Skip the child vars data
+        ns = peek_record_size(f, endian='>')
         size = struct.calcsize('>i') + ns + struct.calcsize('>i')
         f.seek(f.tell()+size * nLevel*nchild)
 
-        #find nhydrovars
+        # find nhydrovars
         nhydrovars = 8+2
     f.seek(offset)
     return nhydrovars, iNOLL, level_oct_offsets, level_child_offsets
 
-def _read_art_level_info(f, level_oct_offsets,level,coarse_grid=128):
+
+def _read_art_level_info(f, level_oct_offsets, level, coarse_grid=128,
+                         ncell0=None, root_level=None):
     pos = f.tell()
     f.seek(level_oct_offsets[level])
-    #Get the info for this level, skip the rest
-    junk, nLevel, iOct = struct.unpack(
-       '>iii', _read_record(f))
-    
-    #fortran indices start at 1
-    
-    #Skip all the oct hierarchy data
-    le     = np.zeros((nLevel,3),dtype='int64')
-    fl     = np.ones((nLevel,6),dtype='int64')
-    iocts  = np.zeros(nLevel+1,dtype='int64')
-    idxa,idxb = 0,0
-    chunk = long(1e6) #this is ~111MB for 15 dimensional 64 bit arrays
-    left = nLevel
-    while left > 0 :
-        this_chunk = min(chunk,left)
-        idxb=idxa+this_chunk
-        data = np.fromfile(f,dtype='>i',count=this_chunk*15)
-        data=data.reshape(this_chunk,15)
-        left-=this_chunk
-        le[idxa:idxb,:] = data[:,1:4]
-        fl[idxa:idxb,1] = np.arange(idxa,idxb)
-        #pad byte is last, LL2, then ioct right before it
-        iocts[idxa:idxb] = data[:,-3] 
-        idxa=idxa+this_chunk
-    del data
-    
-    #ioct always represents the index of the next variable
-    #not the current, so shift forward one index
-    #the last index isn't used
-    ioctso = iocts.copy()
-    iocts[1:]=iocts[:-1] #shift
-    iocts = iocts[:nLevel] #chop off the last index
-    iocts[0]=iOct #starting value
+    # Get the info for this level, skip the rest
+    junk, nLevel, iOct = read_vector(f, 'i', '>')
 
-    #now correct iocts for fortran indices start @ 1
+    # fortran indices start at 1
+
+    # Skip all the oct hierarchy data
+    le = np.zeros((nLevel, 3), dtype='int64')
+    fl = np.ones((nLevel, 6), dtype='int64')
+    iocts = np.zeros(nLevel+1, dtype='int64')
+    idxa, idxb = 0, 0
+    chunk = long(1e6)  # this is ~111MB for 15 dimensional 64 bit arrays
+    left = nLevel
+    while left > 0:
+        this_chunk = min(chunk, left)
+        idxb = idxa+this_chunk
+        data = np.fromfile(f, dtype='>i', count=this_chunk*15)
+        data = data.reshape(this_chunk, 15)
+        left -= this_chunk
+        le[idxa:idxb, :] = data[:, 1:4]
+        fl[idxa:idxb, 1] = np.arange(idxa, idxb)
+        # pad byte is last, LL2, then ioct right before it
+        iocts[idxa:idxb] = data[:, -3]
+        idxa = idxa+this_chunk
+    del data
+
+    # emulate fortran code
+    #     do ic1 = 1 , nLevel
+    #       read(19) (iOctPs(i,iOct),i=1,3),(iOctNb(i,iOct),i=1,6),
+    #&                iOctPr(iOct), iOctLv(iOct), iOctLL1(iOct),
+    #&                iOctLL2(iOct)
+    #       iOct = iOctLL1(iOct)
+
+    # ioct always represents the index of the next variable
+    # not the current, so shift forward one index
+    # the last index isn't used
+    ioctso = iocts.copy()
+    iocts[1:] = iocts[:-1]  # shift
+    iocts = iocts[:nLevel]  # chop off the last, unused, index
+    iocts[0] = iOct  # starting value
+
+    # now correct iocts for fortran indices start @ 1
     iocts = iocts-1
 
     assert np.unique(iocts).shape[0] == nLevel
-    
-    #ioct tries to access arrays much larger than le & fl
-    #just make sure they appear in the right order, skipping
-    #the empty space in between
-    idx = np.argsort(iocts)
-    
-    #now rearrange le & fl in order of the ioct
-    le = le[idx]
-    fl = fl[idx]
 
+    # left edges are expressed as if they were on
+    # level 15, so no matter what level max(le)=2**15
+    # correct to the yt convention
+    # le = le/2**(root_level-1-level)-1
 
-    #left edges are expressed as if they were on 
-    #level 15, so no matter what level max(le)=2**15 
-    #correct to the yt convention
-    #le = le/2**(root_level-1-level)-1
+    # try to find the root_level first
+    def cfc(root_level, level, le):
+        d_x = 1.0/(2.0**(root_level-level+1))
+        fc = (d_x * le) - 2**(level-1)
+        return fc
+    if root_level is None:
+        root_level = np.floor(np.log2(le.max()*1.0/coarse_grid))
+        root_level = root_level.astype('int64')
+        for i in range(10):
+            fc = cfc(root_level, level, le)
+            go = np.diff(np.unique(fc)).min() < 1.1
+            if go:
+                break
+            root_level += 1
+    else:
+        fc = cfc(root_level, level, le)
+    unitary_center = fc/(coarse_grid*2.0**(level-1))
+    assert np.all(unitary_center < 1.0)
 
-    #try to find the root_level first
-    root_level=np.floor(np.log2(le.max()*1.0/coarse_grid))
-    root_level = root_level.astype('int64')
+    # again emulate the fortran code
+    # This is all for calculating child oct locations
+    # iC_ = iC + nbshift
+    # iO = ishft ( iC_ , - ndim )
+    # id = ishft ( 1, MaxLevel - iOctLv(iO) )
+    # j  = iC_ + 1 - ishft( iO , ndim )
+    # Posx   = d_x * (iOctPs(1,iO) + sign ( id , idelta(j,1) ))
+    # Posy   = d_x * (iOctPs(2,iO) + sign ( id , idelta(j,2) ))
+    # Posz   = d_x * (iOctPs(3,iO) + sign ( id , idelta(j,3) ))
+    # idelta = [[-1,  1, -1,  1, -1,  1, -1,  1],
+              #[-1, -1,  1,  1, -1, -1,  1,  1],
+              #[-1, -1, -1, -1,  1,  1,  1,  1]]
+    # idelta = np.array(idelta)
+    # if ncell0 is None:
+        # ncell0 = coarse_grid**3
+    # nchild = 8
+    # ndim = 3
+    # nshift = nchild -1
+    # nbshift = nshift - ncell0
+    # iC = iocts #+ nbshift
+    # iO = iC >> ndim #possibly >>
+    # id = 1 << (root_level - level)
+    # j = iC + 1 - ( iO << 3)
+    # delta = np.abs(id)*idelta[:,j-1]
 
-    #try without the -1
-    le = le/2**(root_level+1-level)-1
-
-    #now read the hvars and vars arrays
-    #we are looking for iOctCh
-    #we record if iOctCh is >0, in which it is subdivided
-    iOctCh  = np.zeros((nLevel+1,8),dtype='bool')
-    
-    
-    
+    # try without the -1
+    # le = le/2**(root_level+1-level)
+    # now read the hvars and vars arrays
+    # we are looking for iOctCh
+    # we record if iOctCh is >0, in which it is subdivided
+    # iOctCh  = np.zeros((nLevel+1,8),dtype='bool')
     f.seek(pos)
-    return le,fl,nLevel,root_level
+    return unitary_center, fl, iocts, nLevel, root_level
+
+def get_ranges(skip, count, field, words=6, real_size=4, np_per_page=4096**2, 
+                  num_pages=1):
+    #translate every particle index into a file position ranges
+    ranges = []
+    arr_size = np_per_page * real_size
+    page_size = words * np_per_page * real_size
+    idxa, idxb = 0, 0
+    posa, posb = 0, 0
+    left = count
+    for page in range(num_pages):
+        idxb += np_per_page
+        for i, fname in enumerate(['x', 'y', 'z', 'vx', 'vy', 'vz']):
+            posb += arr_size
+            if i == field or fname == field:
+                if skip < np_per_page and count > 0:
+                    left_in_page = np_per_page - skip
+                    this_count = min(left_in_page, count)
+                    count -= this_count
+                    start = posa + skip * real_size
+                    end = posa + this_count * real_size
+                    ranges.append((start, this_count))
+                    skip = 0
+                    assert end <= posb
+                else:
+                    skip -= np_per_page
+            posa += arr_size
+        idxa += np_per_page
+    assert count == 0
+    return ranges
 
 
-def read_particles(file,Nrow):
-    words = 6 # words (reals) per particle: x,y,z,vx,vy,vz
-    real_size = 4 # for file_particle_data; not always true?
-    np_per_page = Nrow**2 # defined in ART a_setup.h
+def read_particles(file, Nrow, idxa, idxb, field):
+    words = 6  # words (reals) per particle: x,y,z,vx,vy,vz
+    real_size = 4  # for file_particle_data; not always true?
+    np_per_page = Nrow**2  # defined in ART a_setup.h, # of particles/page
     num_pages = os.path.getsize(file)/(real_size*words*np_per_page)
+    data = np.array([], 'f4')
+    fh = open(file, 'r')
+    skip, count = idxa, idxb - idxa
+    kwargs = dict(words=words, real_size=real_size, 
+                  np_per_page=np_per_page, num_pages=num_pages)
+    ranges = get_ranges(skip, count, field, **kwargs)
+    data = None
+    for seek, this_count in ranges:
+        fh.seek(seek)
+        temp = np.fromfile(fh, count=this_count, dtype='>f4')
+        if data is None:
+            data = temp
+        else:
+            data = np.concatenate((data, temp))
+    fh.close()
+    return data
 
-    f = np.fromfile(file, dtype='>f4').astype('float32') # direct access
-    pages = np.vsplit(np.reshape(f, (num_pages, words, np_per_page)), num_pages)
-    data = np.squeeze(np.dstack(pages)).T # x,y,z,vx,vy,vz
-    return data[:,0:3],data[:,3:]
 
-def read_stars(file):
-    fh = open(file,'rb')
-    tdum,adum   = _read_frecord(fh,'>d')
-    nstars      = _read_frecord(fh,'>i')
-    ws_old, ws_oldi = _read_frecord(fh,'>d')
-    mass    = _read_frecord(fh,'>f') 
-    imass   = _read_frecord(fh,'>f') 
-    tbirth  = _read_frecord(fh,'>f') 
-    if fh.tell() < os.path.getsize(file):
-        metallicity1 = _read_frecord(fh,'>f') 
-    if fh.tell() < os.path.getsize(file):
-        metallicity2 = _read_frecord(fh,'>f')     
-    assert fh.tell() == os.path.getsize(file)
-    return  nstars, mass, imass, tbirth, metallicity1, metallicity2,\
-            ws_old,ws_oldi,tdum,adum
+def read_star_field(file, field=None):
+    data = {}
+    with open(file, 'rb') as fh:
+        for dtype, variables in star_struct:
+            found = field in variables or field == variables
+            if found:
+                data[field] = read_vector(fh, dtype[1], dtype[0])
+            else:
+                skip(fh, endian='>')
+    return data.pop(field)
 
-def _read_child_mask_level(f, level_child_offsets,level,nLevel,nhydro_vars):
+
+def _read_child_mask_level(f, level_child_offsets, level, nLevel, nhydro_vars):
     f.seek(level_child_offsets[level])
-    nvals = nLevel * (nhydro_vars + 6) # 2 vars, 2 pads
-    ioctch = np.zeros(nLevel,dtype='uint8')
-    idc = np.zeros(nLevel,dtype='int32')
-    
+    nvals = nLevel * (nhydro_vars + 6)  # 2 vars, 2 pads
+    ioctch = np.zeros(nLevel, dtype='uint8')
+    idc = np.zeros(nLevel, dtype='int32')
+
     chunk = long(1e6)
     left = nLevel
     width = nhydro_vars+6
-    a,b=0,0
+    a, b = 0, 0
     while left > 0:
-        chunk = min(chunk,left)
+        chunk = min(chunk, left)
         b += chunk
         arr = np.fromfile(f, dtype='>i', count=chunk*width)
         arr = arr.reshape((width, chunk), order="F")
-        assert np.all(arr[0,:]==arr[-1,:]) #pads must be equal
-        idc[a:b]    = arr[1,:]-1 #fix fortran indexing
-        ioctch[a:b] = arr[2,:]==0 #if it is above zero, then refined available
-        #zero in the mask means there is refinement available
-        a=b
+        assert np.all(arr[0, :] == arr[-1, :])  # pads must be equal
+        idc[a:b] = arr[1, :]-1  # fix fortran indexing
+        ioctch[a:b] = arr[
+            2, :] == 0  # if it is above zero, then refined available
+        # zero in the mask means there is refinement available
+        a = b
         left -= chunk
-    assert left==0
-    return idc,ioctch
-    
-nchem=8+2
-dtyp = np.dtype(">i4,>i8,>i8"+",>%sf4"%(nchem)+ \
-                ",>%sf4"%(2)+",>i4")
-def _read_art_child(f, level_child_offsets,level,nLevel,field):
-    pos=f.tell()
-    f.seek(level_child_offsets[level])
-    arr = np.fromfile(f, dtype='>f', count=nLevel * 8)
-    arr = arr.reshape((nLevel,16), order="F")
-    arr = arr[3:-1,:].astype("float64")
-    f.seek(pos)
-    return arr[field,:]
+    assert left == 0
+    return idc, ioctch
 
-def _skip_record(f):
-    s = struct.unpack('>i', f.read(struct.calcsize('>i')))
-    f.seek(s[0], 1)
-    s = struct.unpack('>i', f.read(struct.calcsize('>i')))
-
-def _read_frecord(f,fmt):
-    s1 = struct.unpack('>i', f.read(struct.calcsize('>i')))[0]
-    count = s1/np.dtype(fmt).itemsize
-    ss = np.fromfile(f,fmt,count=count)
-    s2 = struct.unpack('>i', f.read(struct.calcsize('>i')))[0]
-    assert s1==s2
-    return ss
+nchem = 8+2
+dtyp = np.dtype(">i4,>i8,>i8"+",>%sf4" % (nchem) +
+                ",>%sf4" % (2)+",>i4")
 
 
-def _read_record(f,fmt=None):
-    s = struct.unpack('>i', f.read(struct.calcsize('>i')))[0]
-    ss = f.read(s)
-    s = struct.unpack('>i', f.read(struct.calcsize('>i')))
-    if fmt is not None:
-        return struct.unpack(ss,fmt)
-    return ss
+def _read_child_level(
+    f, level_child_offsets, level_oct_offsets, level_info, level,
+    fields, domain_dimensions, ncell0, nhydro_vars=10, nchild=8,
+        noct_range=None):
+    # emulate the fortran code for reading cell data
+    # read ( 19 ) idc, iOctCh(idc), (hvar(i,idc),i=1,nhvar),
+    #    &                 (var(i,idc), i=2,3)
+    # contiguous 8-cell sections are for the same oct;
+    # ie, we don't write out just the 0 cells, then the 1 cells
+    # optionally, we only read noct_range to save memory
+    left_index, fl, octs, nocts, root_level = _read_art_level_info(f,
+                                                                   level_oct_offsets, level, coarse_grid=domain_dimensions[0])
+    if noct_range is None:
+        nocts = level_info[level]
+        ncells = nocts*8
+        f.seek(level_child_offsets[level])
+        arr = np.fromfile(f, dtype=hydro_struct, count=ncells)
+        assert np.all(arr['pad1'] == arr['pad2'])  # pads must be equal
+        # idc = np.argsort(arr['idc']) #correct fortran indices
+        # translate idc into icell, and then to iOct
+        icell = (arr['idc'] >> 3) << 3
+        iocts = (icell-ncell0)/nchild  # without a F correction, theres a +1
+        # assert that the children are read in the same order as the octs
+        assert np.all(octs == iocts[::nchild])
+    else:
+        start, end = noct_range
+        nocts = min(end-start, level_info[level])
+        end = start + nocts
+        ncells = nocts*8
+        skip = np.dtype(hydro_struct).itemsize*start*8
+        f.seek(level_child_offsets[level]+skip)
+        arr = np.fromfile(f, dtype=hydro_struct, count=ncells)
+        assert np.all(arr['pad1'] == arr['pad2'])  # pads must be equal
+    source = {}
+    for field in fields:
+        sh = (nocts, 8)
+        source[field] = np.reshape(arr[field], sh, order='C').astype('float64')
+    return source
 
-def _read_record_size(f):
-    pos = f.tell()
-    s = struct.unpack('>i', f.read(struct.calcsize('>i')))
-    f.seek(pos)
-    return s[0]
 
-def _read_struct(f,structure,verbose=False):
-    vals = {}
-    for format,name in structure:
-        size = struct.calcsize(format)
-        (val,) = struct.unpack(format,f.read(size))
-        vals[name] = val
-        if verbose: print "%s:\t%s\t (%d B)" %(name,val,f.tell())
-    return vals
+def _read_root_level(f, level_offsets, level_info, nhydro_vars=10):
+    nocts = level_info[0]
+    f.seek(level_offsets[0])  # Ditch the header
+    hvar = read_vector(f, 'f', '>')
+    var = read_vector(f, 'f', '>')
+    hvar = hvar.reshape((nhydro_vars, nocts*8), order="F")
+    var = var.reshape((2, nocts*8), order="F")
+    arr = np.concatenate((hvar, var))
+    return arr
 
-
-
-#All of these functions are to convert from hydro time var to 
-#proper time
+# All of these functions are to convert from hydro time var to
+# proper time
 sqrt = np.sqrt
 sign = np.sign
 
-def find_root(f,a,b,tol=1e-6):
+
+def find_root(f, a, b, tol=1e-6):
     c = (a+b)/2.0
     last = -np.inf
-    assert(sign(f(a)) != sign(f(b)))  
+    assert(sign(f(a)) != sign(f(b)))
     while np.abs(f(c)-last) > tol:
-        last=f(c)
-        if sign(last)==sign(f(b)):
-            b=c
+        last = f(c)
+        if sign(last) == sign(f(b)):
+            b = c
         else:
-            a=c
+            a = c
         c = (a+b)/2.0
     return c
 
-def quad(fintegrand,xmin,xmax,n=1e4):
-    spacings = np.logspace(np.log10(xmin),np.log10(xmax),n)
+
+def quad(fintegrand, xmin, xmax, n=1e4):
+    spacings = np.logspace(np.log10(xmin), np.log10(xmax), n)
     integrand_arr = fintegrand(spacings)
-    val = np.trapz(integrand_arr,dx=np.diff(spacings))
+    val = np.trapz(integrand_arr, dx=np.diff(spacings))
     return val
 
-def a2b(at,Om0=0.27,Oml0=0.73,h=0.700):
+
+def a2b(at, Om0=0.27, Oml0=0.73, h=0.700):
     def f_a2b(x):
         val = 0.5*sqrt(Om0) / x**3.0
-        val /= sqrt(Om0/x**3.0 +Oml0 +(1.0 - Om0-Oml0)/x**2.0)
+        val /= sqrt(Om0/x**3.0 + Oml0 + (1.0 - Om0-Oml0)/x**2.0)
         return val
-    #val, err = si.quad(f_a2b,1,at)
-    val = quad(f_a2b,1,at)
+    # val, err = si.quad(f_a2b,1,at)
+    val = quad(f_a2b, 1, at)
     return val
 
-def b2a(bt,**kwargs):
-    #converts code time into expansion factor 
-    #if Om0 ==1and OmL == 0 then b2a is (1 / (1-td))**2
-    #if bt < -190.0 or bt > -.10:  raise 'bt outside of range'
-    f_b2a = lambda at: a2b(at,**kwargs)-bt
-    return find_root(f_b2a,1e-4,1.1)
-    #return so.brenth(f_b2a,1e-4,1.1)
-    #return brent.brent(f_b2a)
 
-def a2t(at,Om0=0.27,Oml0=0.73,h=0.700):
-    integrand = lambda x : 1./(x*sqrt(Oml0+Om0*x**-3.0))
-    #current_time,err = si.quad(integrand,0.0,at,epsabs=1e-6,epsrel=1e-6)
-    current_time = quad(integrand,1e-4,at)
-    #spacings = np.logspace(-5,np.log10(at),1e5)
-    #integrand_arr = integrand(spacings)
-    #current_time = np.trapz(integrand_arr,dx=np.diff(spacings))
+def b2a(bt, **kwargs):
+    # converts code time into expansion factor
+    # if Om0 ==1and OmL == 0 then b2a is (1 / (1-td))**2
+    # if bt < -190.0 or bt > -.10:  raise 'bt outside of range'
+    f_b2a = lambda at: a2b(at, **kwargs)-bt
+    return find_root(f_b2a, 1e-4, 1.1)
+    # return so.brenth(f_b2a,1e-4,1.1)
+    # return brent.brent(f_b2a)
+
+
+def a2t(at, Om0=0.27, Oml0=0.73, h=0.700):
+    integrand = lambda x: 1./(x*sqrt(Oml0+Om0*x**-3.0))
+    # current_time,err = si.quad(integrand,0.0,at,epsabs=1e-6,epsrel=1e-6)
+    current_time = quad(integrand, 1e-4, at)
+    # spacings = np.logspace(-5,np.log10(at),1e5)
+    # integrand_arr = integrand(spacings)
+    # current_time = np.trapz(integrand_arr,dx=np.diff(spacings))
     current_time *= 9.779/h
     return current_time
 
-def b2t(tb,n = 1e2,logger=None,**kwargs):
-    tb = np.array(tb)
-    if type(tb) == type(1.1): 
-        return a2t(b2a(tb))
-    if tb.shape == (): 
-        return a2t(b2a(tb))
-    if len(tb) < n: n= len(tb)
-    age_min = a2t(b2a(tb.max(),**kwargs),**kwargs)
-    age_max = a2t(b2a(tb.min(),**kwargs),**kwargs)
-    tbs  = -1.*np.logspace(np.log10(-tb.min()),
-                          np.log10(-tb.max()),n)
-    ages = []
-    for i,tbi in enumerate(tbs):
-        ages += a2t(b2a(tbi)),
-        if logger: logger(i)
-    ages = np.array(ages)
-    fb2t = np.interp(tb,tbs,ages)
-    #fb2t = interp1d(tbs,ages)
-    return fb2t
 
-def spread_ages(ages,logger=None,spread=1.0e7*365*24*3600):
-    #stars are formed in lumps; spread out the ages linearly
-    da= np.diff(ages)
-    assert np.all(da<=0)
-    #ages should always be decreasing, and ordered so
-    agesd = np.zeros(ages.shape)
-    idx, = np.where(da<0)
-    idx+=1 #mark the right edges
-    #spread this age evenly out to the next age
-    lidx=0
-    lage=0
-    for i in idx:
-        n = i-lidx #n stars affected
-        rage = ages[i]
-        lage = max(rage-spread,0.0)
-        agesd[lidx:i]=np.linspace(lage,rage,n)
-        lidx=i
-        #lage=rage
-        if logger: logger(i)
-    #we didn't get the last iter
-    i=ages.shape[0]-1
-    n = i-lidx #n stars affected
-    rage = ages[i]
-    lage = max(rage-spread,0.0)
-    agesd[lidx:i]=np.linspace(lage,rage,n)
-    return agesd
+def b2t(tb, n=1e2, logger=None, **kwargs):
+    tb = np.array(tb)
+    if isinstance(tb, type(1.1)):
+        return a2t(b2a(tb))
+    if tb.shape == ():
+        return a2t(b2a(tb))
+    if len(tb) < n:
+        n = len(tb)
+    age_min = a2t(b2a(tb.max(), **kwargs), **kwargs)
+    age_max = a2t(b2a(tb.min(), **kwargs), **kwargs)
+    tbs = -1.*np.logspace(np.log10(-tb.min()),
+                          np.log10(-tb.max()), n)
+    ages = []
+    for i, tbi in enumerate(tbs):
+        ages += a2t(b2a(tbi)),
+        if logger:
+            logger(i)
+    ages = np.array(ages)
+    return tbs, ages
