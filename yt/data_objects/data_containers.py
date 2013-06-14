@@ -228,17 +228,18 @@ class YTDataContainer(object):
     def _generate_fluid_field(self, field):
         # First we check the validator
         ftype, fname = field
+        finfo = self.pf._get_field_info(ftype, fname)
         if self._current_chunk is None or \
            self._current_chunk.chunk_type != "spatial":
             gen_obj = self
         else:
             gen_obj = self._current_chunk.objs[0]
         try:
-            self.pf.field_info[fname].check_available(gen_obj)
+            finfo.check_available(gen_obj)
         except NeedsGridType as ngt_exception:
             rv = self._generate_spatial_fluid(field, ngt_exception.ghost_zones)
         else:
-            rv = self.pf.field_info[fname](gen_obj)
+            rv = finfo(gen_obj)
         return rv
 
     def _generate_spatial_fluid(self, field, ngz):
@@ -249,7 +250,13 @@ class YTDataContainer(object):
                 for i,chunk in enumerate(self.chunks(field, "spatial", ngz = 0)):
                     mask = self._current_chunk.objs[0].select(self.selector)
                     if mask is None: continue
-                    data = self[field][mask]
+                    data = self[field]
+                    if len(data.shape) == 4:
+                        # This is how we keep it consistent between oct ordering
+                        # and grid ordering.
+                        data = data.T[mask.T]
+                    else:
+                        data = data[mask]
                     rv[ind:ind+data.size] = data
                     ind += data.size
         else:
@@ -359,10 +366,9 @@ class YTDataContainer(object):
                      [self.field_parameters])
         return (_reconstruct_object, args)
 
-    def __repr__(self, clean = False):
+    def __repr__(self):
         # We'll do this the slow way to be clear what's going on
-        if clean: s = "%s: " % (self.__class__.__name__)
-        else: s = "%s (%s): " % (self.__class__.__name__, self.pf)
+        s = "%s (%s): " % (self.__class__.__name__, self.pf)
         s += ", ".join(["%s=%s" % (i, getattr(self,i))
                        for i in self._con_args])
         return s
@@ -469,8 +475,23 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
         if fields is None: return
         fields = self._determine_fields(fields)
         # Now we collect all our fields
-        fields_to_get = [f for f in fields if f not in self.field_data]
-        if len(fields_to_get) == 0:
+        # Here is where we need to perform a validation step, so that if we
+        # have a field requested that we actually *can't* yet get, we put it
+        # off until the end.  This prevents double-reading fields that will
+        # need to be used in spatial fields later on.
+        fields_to_get = []
+        # This will be pre-populated with spatial fields
+        fields_to_generate = [] 
+        for field in self._determine_fields(fields):
+            if field in self.field_data: continue
+            finfo = self.pf._get_field_info(*field)
+            try:
+                finfo.check_available(self)
+            except NeedsGridType:
+                fields_to_generate.append(field)
+                continue
+            fields_to_get.append(field)
+        if len(fields_to_get) == 0 and fields_to_generate == 0:
             return
         elif self._locked == True:
             raise GenerationInProgress(fields)
@@ -494,12 +515,18 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
         read_particles, gen_particles = self.hierarchy._read_particle_fields(
                                         particles, self, self._current_chunk)
         self.field_data.update(read_particles)
-        fields_to_generate = gen_fluids + gen_particles
+        fields_to_generate += gen_fluids + gen_particles
         self._generate_fields(fields_to_generate)
 
     def _generate_fields(self, fields_to_generate):
         index = 0
         with self._field_lock():
+            # At this point, we assume that any fields that are necessary to
+            # *generate* a field are in fact already available to us.  Note
+            # that we do not make any assumption about whether or not the
+            # fields have a spatial requirement.  This will be checked inside
+            # _generate_field, at which point additional dependencies may
+            # actually be noted.
             while any(f not in self.field_data for f in fields_to_generate):
                 field = fields_to_generate[index % len(fields_to_generate)]
                 index += 1
@@ -528,13 +555,6 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
         self.field_data = old_field_data
         self._current_chunk = old_chunk
         self._locked = old_locked
-
-#    @property   
-#    def size(self) :
-#        if self._current_chunk is None :
-##            self.hierarchy._identify_base_chunk(self)
-#            return 0
-#        return self._current_chunk.data_size
 
     @property
     def icoords(self):
@@ -578,7 +598,7 @@ class YTSelectionContainer2D(YTSelectionContainer):
     _spatial = False
     def __init__(self, axis, pf, field_parameters):
         ParallelAnalysisInterface.__init__(self)
-        self.axis = axis
+        self.axis = fix_axis(axis)
         super(YTSelectionContainer2D, self).__init__(
             pf, field_parameters)
         self.set_field_parameter("axis", axis)
@@ -963,30 +983,52 @@ class YTSelectionContainer3D(YTSelectionContainer):
         the container, so this may vary very slightly
         from what might be expected from the geometric volume.
         """
-#        return self.quantities["TotalQuantity"]("CellVolume")[0] * \
-#            (self.pf[unit] / self.pf['cm']) ** 3.0
-        print 'data_containers.py bad fix to volume to prevent data_size like issue for ARTIO'
-        return 1
+        return self.quantities["TotalQuantity"]("CellVolume")[0] * \
+            (self.pf[unit] / self.pf['cm']) ** 3.0
+
+# Many of these items are set up specifically to ensure that
+# we are not breaking old pickle files.  This means we must only call the
+# _reconstruct_object and that we cannot mandate any additional arguments to
+# the reconstruction function.
+#
+# In the future, this would be better off being set up to more directly
+# reference objects or retain state, perhaps with a context manager.
+#
+# One final detail: time series or multiple parameter files in a single pickle
+# seems problematic.
+
+class ReconstructedObject(tuple):
+    pass
+
+def _check_nested_args(arg, ref_pf):
+    if not isinstance(arg, (tuple, list, ReconstructedObject)):
+        return arg
+    elif isinstance(arg, ReconstructedObject) and ref_pf == arg[0]:
+        return arg[1]
+    narg = [_check_nested_args(a, ref_pf) for a in arg]
+    return narg
+
+def _get_pf_by_hash(hash):
+    from yt.data_objects.static_output import _cached_pfs
+    for pf in _cached_pfs.values():
+        if pf._hash() == hash: return pf
+    return None
 
 def _reconstruct_object(*args, **kwargs):
     pfid = args[0]
     dtype = args[1]
+    pf = _get_pf_by_hash(pfid)
+    if not pf:
+        pfs = ParameterFileStore()
+        pf = pfs.get_pf_hash(pfid)
     field_parameters = args[-1]
     # will be much nicer when we can do pfid, *a, fp = args
-    args, new_args = args[2:-1], []
-    for arg in args:
-        if iterable(arg) and len(arg) == 2 \
-           and not isinstance(arg, types.DictType) \
-           and isinstance(arg[1], YTDataContainer):
-            new_args.append(arg[1])
-        else: new_args.append(arg)
-    pfs = ParameterFileStore()
-    pf = pfs.get_pf_hash(pfid)
+    args = args[2:-1]
+    new_args = [_check_nested_args(a, pf) for a in args]
     cls = getattr(pf.h, dtype)
     obj = cls(*new_args)
     obj.field_parameters.update(field_parameters)
-    return pf, obj
-
+    return ReconstructedObject((pf, obj))
 
 class YTSelectedIndicesBase(YTSelectionContainer3D):
     """An arbitrarily defined data container that allows for selection
@@ -1243,7 +1285,7 @@ class YTBooleanRegionBase(YTSelectionContainer3D):
             if region in ["OR", "AND", "NOT", "(", ")"]:
                 s += region
             else:
-                s += region.__repr__(clean = True)
+                s += region.__repr__()
             if i < (len(self.regions) - 1): s += ", "
         s += "]"
         return s
