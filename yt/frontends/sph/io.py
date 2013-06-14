@@ -32,6 +32,9 @@ from yt.utilities.io_handler import \
     BaseIOHandler
 
 from yt.utilities.fortran_utils import read_record
+from yt.utilities.lib.geometry_utils import get_morton_indices
+
+from yt.geometry.oct_container import _ORDER_MAX, ParticleRegions
 
 _vector_fields = ("Coordinates", "Velocity", "Velocities")
 
@@ -50,8 +53,8 @@ class IOHandlerOWLS(BaseIOHandler):
         for ftype, fname in fields:
             ptf[ftype].append(fname)
         for chunk in chunks: # Will be OWLS domains
-            for subset in chunk.objs:
-                f = h5py.File(subset.domain.domain_filename, "r")
+            for data_file in chunk.objs:
+                f = h5py.File(data_file.filename, "r")
                 # This double-reads
                 for ptype, field_list in sorted(ptf.items()):
                     coords = f["/%s/Coordinates" % ptype][:].astype("float64")
@@ -70,8 +73,8 @@ class IOHandlerOWLS(BaseIOHandler):
             rv[field] = np.empty(shape, dtype="float64")
             ind[field] = 0
         for chunk in chunks: # Will be OWLS domains
-            for subset in chunk.objs:
-                f = h5py.File(subset.domain.domain_filename, "r")
+            for data_file in chunk.objs:
+                f = h5py.File(data_file.filename, "r")
                 for ptype, field_list in sorted(ptf.items()):
                     g = f["/%s" % ptype]
                     coords = g["Coordinates"][:].astype("float64")
@@ -89,23 +92,32 @@ class IOHandlerOWLS(BaseIOHandler):
                 f.close()
         return rv
 
-    def _initialize_octree(self, domain, octree):
-        f = h5py.File(domain.domain_filename, "r")
+    def _initialize_index(self, data_file, regions):
+        f = h5py.File(data_file.filename, "r")
+        pcount = f["/Header"].attrs["NumPart_ThisFile"][:].sum()
+        morton = np.empty(pcount, dtype='uint64')
+        DLE = data_file.pf.domain_left_edge
+        DRE = data_file.pf.domain_right_edge
+        dx = (DRE - DLE) / 2**_ORDER_MAX
+        ind = 0
         for key in f.keys():
             if not key.startswith("PartType"): continue
             pos = f[key]["Coordinates"][:].astype("float64")
-            octree.add(pos, domain.domain_id)
+            regions.add_data_file(pos, data_file.file_id)
+            pos = np.floor((pos - DLE)/dx).astype("uint64")
+            morton[ind:ind+pos.shape[0]] = get_morton_indices(pos)
         f.close()
+        return morton
 
-    def _count_particles(self, domain):
-        f = h5py.File(domain.domain_filename, "r")
-        np = f["/Header"].attrs["NumPart_ThisFile"][:]
+    def _count_particles(self, data_file):
+        f = h5py.File(data_file.filename, "r")
+        pcount = f["/Header"].attrs["NumPart_ThisFile"][:]
         f.close()
-        npart = dict(("PartType%s" % (i), v) for i, v in enumerate(np)) 
+        npart = dict(("PartType%s" % (i), v) for i, v in enumerate(pcount)) 
         return npart
 
-    def _identify_fields(self, domain):
-        f = h5py.File(domain.domain_filename, "r")
+    def _identify_fields(self, data_file):
+        f = h5py.File(data_file.filename, "r")
         fields = []
         for key in f.keys():
             if not key.startswith("PartType"): continue
@@ -163,8 +175,10 @@ class IOHandlerGadgetBinary(BaseIOHandler):
         rv = {}
         # We first need a set of masks for each particle type
         ptf = defaultdict(list)
+        ptall = []
         psize = defaultdict(lambda: 0)
         chunks = list(chunks)
+        pf = chunks[0].objs[0].domain.pf
         ptypes = set()
         for ftype, fname in fields:
             ptf[ftype].append(fname)
@@ -231,7 +245,7 @@ class IOHandlerGadgetBinary(BaseIOHandler):
             arr = arr.reshape((count/3, 3), order="C")
         return arr.astype("float64")
 
-    def _initialize_octree(self, domain, octree):
+    def _initialize_index(self, domain, octree):
         count = sum(domain.total_particles.values())
         dt = [("px", "float32"), ("py", "float32"), ("pz", "float32")]
         with open(domain.domain_filename, "rb") as f:
@@ -339,7 +353,7 @@ class IOHandlerTipsyBinary(BaseIOHandler):
             else:
                 rv[field] = np.empty(size, dtype="float64")
                 if size == 0: continue
-                rv[field][:] = vals[field]
+                rv[field][:] = vals[field][mask]
         return rv
 
     def _read_particle_selection(self, chunks, selector, fields):
@@ -371,28 +385,49 @@ class IOHandlerTipsyBinary(BaseIOHandler):
                 f.close()
         return rv
 
-    def _initialize_octree(self, domain, octree):
-        with open(domain.domain_filename, "rb") as f:
-            f.seek(domain.pf._header_offset)
-            for ptype in self._ptypes:
+    def _initialize_index(self, data_file, regions):
+        pf = data_file.pf
+        morton = np.empty(sum(data_file.total_particles.values()),
+                          dtype="uint64")
+        ind = 0
+        DLE, DRE = pf.domain_left_edge, pf.domain_right_edge
+        dx = (DRE - DLE) / (2**_ORDER_MAX)
+        with open(data_file.filename, "rb") as f:
+            f.seek(pf._header_offset)
+            for iptype, ptype in enumerate(self._ptypes):
                 # We'll just add the individual types separately
-                count = domain.total_particles[ptype]
+                count = data_file.total_particles[ptype]
                 if count == 0: continue
                 pp = np.fromfile(f, dtype = self._pdtypes[ptype],
                                  count = count)
-                pos = np.empty((count, 3), dtype="float64")
-                mylog.info("Adding %0.3e %s particles", count, ptype)
-                pos[:,0] = pp['Coordinates']['x']
-                pos[:,1] = pp['Coordinates']['y']
-                pos[:,2] = pp['Coordinates']['z']
-                mylog.debug("Spanning: %0.3e .. %0.3e in x",
-                            pos[:,0].min(), pos[:,0].max())
-                mylog.debug("Spanning: %0.3e .. %0.3e in y",
-                            pos[:,1].min(), pos[:,1].max())
-                mylog.debug("Spanning: %0.3e .. %0.3e in z",
-                            pos[:,2].min(), pos[:,2].max())
-                del pp
-                octree.add(pos, domain.domain_id)
+                mis = np.empty(3, dtype="float64")
+                mas = np.empty(3, dtype="float64")
+                for axi, ax in enumerate('xyz'):
+                    mi = pp["Coordinates"][ax].min()
+                    ma = pp["Coordinates"][ax].max()
+                    mylog.debug("Spanning: %0.3e .. %0.3e in %s", mi, ma, ax)
+                    mis[axi] = mi
+                    mas[axi] = ma
+                if np.any(mis < pf.domain_left_edge) or \
+                   np.any(mas > pf.domain_right_edge):
+                    raise YTDomainOverflow(mis, mas,
+                                           pf.domain_left_edge,
+                                           pf.domain_right_edge)
+                fpos = np.empty((count, 3), dtype="float64")
+                fpos[:,0] = pp["Coordinates"]["x"]
+                fpos[:,1] = pp["Coordinates"]["y"]
+                fpos[:,2] = pp["Coordinates"]["z"]
+                regions.add_data_file(fpos, data_file.file_id)
+                del fpos
+                pos = np.empty((count, 3), dtype="uint64")
+                for axi, ax in enumerate("xyz"):
+                    coords = pp['Coordinates'][ax].astype("float64")
+                    coords = np.floor((coords - DLE[axi])/dx[axi])
+                    pos[:,axi] = coords
+                morton[ind:ind+count] = get_morton_indices(pos)
+                del pp, pos
+        mylog.info("Adding %0.3e particles", morton.size)
+        return morton
 
     def _count_particles(self, domain):
         npart = {
@@ -412,10 +447,12 @@ class IOHandlerTipsyBinary(BaseIOHandler):
         for ptype, field in self._fields:
             pfields = []
             if tp[ptype] == 0: continue
+            dtbase = domain.pf._field_dtypes.get(field, 'f')
+            ff = "%s%s" % (domain.pf.endian, dtbase)
             if field in _vector_fields:
-                dt = (field, [('x', '>f'), ('y', '>f'), ('z', '>f')])
+                dt = (field, [('x', ff), ('y', ff), ('z', ff)])
             else:
-                dt = (field, '>f')
+                dt = (field, ff)
             pds.setdefault(ptype, []).append(dt)
             field_list.append((ptype, field))
         for ptype in pds:
