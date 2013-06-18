@@ -37,6 +37,9 @@ from yt.data_objects.field_info_container import \
     NullFunc, \
     TranslationFunc
 import yt.data_objects.universal_fields
+from yt.data_objects.particle_fields import \
+    particle_deposition_functions, \
+    particle_scalar_functions
 from yt.utilities.physical_constants import \
     mass_sun_cgs
 
@@ -57,84 +60,6 @@ add_Tipsy_field = TipsyFieldInfo.add_field
 
 KnownTipsyFields = FieldInfoContainer()
 add_tipsy_field = KnownTipsyFields.add_field
-
-def _particle_functions(ptype, coord_name, mass_name, registry):
-    def particle_count(field, data):
-        pos = data[ptype, coord_name]
-        d = data.deposit(pos, method = "count")
-        return d
-    registry.add_field(("deposit", "%s_count" % ptype),
-             function = particle_count,
-             validators = [ValidateSpatial()],
-             display_name = "\\mathrm{%s Count}" % ptype,
-             projection_conversion = '1')
-
-    def particle_mass(field, data):
-        pos = data[ptype, coord_name]
-        d = data.deposit(pos, [data[ptype, mass_name]], method = "sum")
-        return d
-
-    registry.add_field(("deposit", "%s_mass" % ptype),
-             function = particle_mass,
-             validators = [ValidateSpatial()],
-             display_name = "\\mathrm{%s Mass}" % ptype,
-             units = r"\mathrm{g}",
-             projected_units = r"\mathrm{g}\/\mathrm{cm}",
-             projection_conversion = 'cm')
-
-    def particle_density(field, data):
-        pos = data[ptype, coord_name]
-        d = data.deposit(pos, [data[ptype, mass_name]], method = "sum")
-        d /= data["CellVolume"]
-        return d
-
-    registry.add_field(("deposit", "%s_density" % ptype),
-             function = particle_density,
-             validators = [ValidateSpatial()],
-             display_name = "\\mathrm{%s Density}" % ptype,
-             units = r"\mathrm{g}/\mathrm{cm}^{3}",
-             projected_units = r"\mathrm{g}/\mathrm{cm}^{2}",
-             projection_conversion = 'cm')
-
-    # Now some translation functions.
-
-    registry.add_field((ptype, "ParticleMass"),
-            function = TranslationFunc((ptype, mass_name)),
-            particle_type = True,
-            units = r"\mathrm{g}")
-
-    def _ParticleMassMsun(field, data):
-        return data[ptype, mass_name].copy()
-    def _conv_Msun(data):
-        return 1.0/mass_sun_cgs
-
-    registry.add_field((ptype, "ParticleMassMsun"),
-            function = _ParticleMassMsun,
-            convert_function = _conv_Msun,
-            particle_type = True,
-            units = r"\mathrm{M}_\odot")
-
-    # For 'all', which is a special field, we skip adding a few types.
-    
-    if ptype == "all": return
-
-    # Now we have to set up the various velocity and coordinate things.  In the
-    # future, we'll actually invert this and use the 3-component items
-    # elsewhere, and stop using these.
-    
-    # Note that we pass in _ptype here so that it's defined inside the closure.
-    def _get_coord_funcs(axi, _ptype):
-        def _particle_velocity(field, data):
-            return data[_ptype, "Velocities"][:,axi]
-        def _particle_position(field, data):
-            return data[_ptype, "Coordinates"][:,axi]
-        return _particle_velocity, _particle_position
-    for axi, ax in enumerate("xyz"):
-        v, p = _get_coord_funcs(axi, ptype)
-        registry.add_field((ptype, "particle_velocity_%s" % ax),
-            particle_type = True, function = v)
-        registry.add_field((ptype, "particle_position_%s" % ax),
-            particle_type = True, function = p)
 
 # Here are helper functions for things like vector fields and so on.
 
@@ -177,8 +102,11 @@ for ptype in ["Gas", "DarkMatter", "Stars"]:
         units = r"\mathrm{cm}/\mathrm{s}")
     # Note that we have to do this last so that TranslationFunc operates
     # correctly.
-    _particle_functions(ptype, "Coordinates", "Mass", TipsyFieldInfo)
-_particle_functions("all", "Coordinates", "Mass", TipsyFieldInfo)
+    particle_deposition_functions(ptype, "Coordinates", "Mass",
+                                  TipsyFieldInfo)
+    particle_scalar_functions(ptype, "Coordinates", "Velocities",
+                              TipsyFieldInfo)
+particle_deposition_functions("all", "Coordinates", "Mass", TipsyFieldInfo)
 
 for fname in ["Coordinates", "Velocities", "ParticleIDs", "Mass",
               "Epsilon", "Phi"]:
@@ -232,10 +160,11 @@ for ptype in _gadget_ptypes:
         particle_type = True,
         convert_function=_get_conv("velocity"),
         units = r"\mathrm{cm}/\mathrm{s}")
-    _particle_functions(ptype, "Coordinates", "Mass", GadgetFieldInfo)
+    particle_deposition_functions(ptype, "Coordinates", "Mass", GadgetFieldInfo)
+    particle_scalar_functions(ptype, "Coordinates", "Velocities", GadgetFieldInfo)
     KnownGadgetFields.add_field((ptype, "Coordinates"), function=NullFunc,
         particle_type = True)
-_particle_functions("all", "Coordinates", "Mass", GadgetFieldInfo)
+particle_deposition_functions("all", "Coordinates", "Mass", GadgetFieldInfo)
 
 # Now we have to manually apply the splits for "all", since we don't want to
 # use the splits defined above.
@@ -247,3 +176,61 @@ for iname, oname in [("Coordinates", "particle_position_"),
         GadgetFieldInfo.add_field(("all", oname + ax), function=func,
                 particle_type = True)
 
+# OWLS
+# ====
+
+# I am optimistic that some day we will be able to get rid of much of this, and
+# make OWLS a subclass of Gadget fields.
+
+_owls_ptypes = ("PartType0", "PartType1", "PartType2", "PartType3",
+                "PartType4")
+
+for fname in ["Coordinates", "Velocities", "ParticleIDs",
+              # Note: Mass, not Masses
+              "Mass"]:
+    func = _field_concat(fname)
+    OWLSFieldInfo.add_field(("all", fname), function=func,
+            particle_type = True)
+
+def _owls_particle_fields(ptype):
+    def _Mass(field, data):
+        pind = _owls_ptypes.index(ptype)
+        if data.pf["MassTable"][pind] == 0.0:
+            raise RuntimeError
+        mass = np.ones(data[ptype, "ParticleIDs"].shape[0], dtype="float64")
+        # Note that this is an alias, which is why we need to apply conversion
+        # here.  Otherwise we'd have an asymmetry.
+        mass *= data.pf["MassTable"][pind] 
+        return mass
+    OWLSFieldInfo.add_field((ptype, "Mass"), function=_Mass,
+                            convert_function = _get_conv("mass"),
+                            particle_type = True)
+
+for ptype in _owls_ptypes:
+    # Note that this adds a "Known" Mass field and a "Derived" Mass field.
+    # This way the "Known" will get used, and if it's not there, it will use
+    # the derived.
+    KnownOWLSFields.add_field((ptype, "Mass"), function=NullFunc,
+        particle_type = True,
+        convert_function=_get_conv("mass"),
+        units = r"\mathrm{g}")
+    _owls_particle_fields(ptype)
+    KnownOWLSFields.add_field((ptype, "Velocities"), function=NullFunc,
+        particle_type = True,
+        convert_function=_get_conv("velocity"),
+        units = r"\mathrm{cm}/\mathrm{s}")
+    particle_deposition_functions(ptype, "Coordinates", "Mass", OWLSFieldInfo)
+    particle_scalar_functions(ptype, "Coordinates", "Velocities", OWLSFieldInfo)
+    KnownOWLSFields.add_field((ptype, "Coordinates"), function=NullFunc,
+        particle_type = True)
+particle_deposition_functions("all", "Coordinates", "Mass", OWLSFieldInfo)
+
+# Now we have to manually apply the splits for "all", since we don't want to
+# use the splits defined above.
+
+for iname, oname in [("Coordinates", "particle_position_"),
+                     ("Velocities", "particle_velocity_")]:
+    for axi, ax in enumerate("xyz"):
+        func = _field_concat_slice(iname, axi)
+        OWLSFieldInfo.add_field(("all", oname + ax), function=func,
+                particle_type = True)
