@@ -32,7 +32,7 @@ import copy
 
 from yt.funcs import *
 
-from yt.utilities.lib import CICDeposit_3, obtain_rvec, obtain_rv_vec
+from yt.utilities.lib import obtain_rvec, obtain_rv_vec
 from yt.utilities.cosmology import Cosmology
 from field_info_container import \
     add_field, \
@@ -44,9 +44,11 @@ from field_info_container import \
     NeedsOriginalGrid, \
     NeedsDataField, \
     NeedsProperty, \
-    NeedsParameter
+    NeedsParameter, \
+    NullFunc
 
 from yt.utilities.physical_constants import \
+     mass_sun_cgs, \
     mh, \
     me, \
     sigma_thompson, \
@@ -72,80 +74,34 @@ from yt.utilities.math_utils import \
 # Note that, despite my newfound efforts to comply with PEP-8,
 # I violate it here in order to keep the name/func_name relationship
 
-def _dx(field, data):
-    return np.ones(data.ActiveDimensions, dtype=np.float64) * data.dds[0]
+def _GridIndices(field, data):
+    return np.ones(data["Ones"].shape)*(data.id-data._id_offset)
+add_field("GridIndices", function=_GridIndices,
+          validators=[ValidateGridType(),
+                      ValidateSpatial(0)], take_log=False)
 
-add_field('dx', function=_dx, display_field=False,
-          validators=[ValidateSpatial(0)])
-
-def _dy(field, data):
-    return np.ones(data.ActiveDimensions, dtype=np.float64) * data.dds[1]
-
-add_field('dy', function=_dy, display_field=False,
-          validators=[ValidateSpatial(0)])
-
-def _dz(field, data):
-    return np.ones(data.ActiveDimensions, dtype=np.float64) * data.dds[2]
-
-add_field('dz', function=_dz,
-          display_field=False, validators=[ValidateSpatial(0)])
-
-def _coord_x(field, data):
-    dim = data.ActiveDimensions[0]
-    return ( ( np.ones(data.ActiveDimensions, dtype=np.float64)
-               * np.arange(data.ActiveDimensions[0])[:, None, None] + 0.5 )
-             * data['dx'] + data.LeftEdge[0] )
-
-add_field('x', function=_coord_x, display_field=False,
-          validators=[ValidateSpatial(0)])
-
-def _coord_y(field, data):
-    dim = data.ActiveDimensions[1]
-    return ( ( np.ones(data.ActiveDimensions, dtype=np.float64)
-               * np.arange(data.ActiveDimensions[1])[None, :, None] + 0.5 )
-             * data['dy'] + data.LeftEdge[1] )
-
-add_field('y', function=_coord_y, display_field=False,
-          validators=[ValidateSpatial(0)])
-
-def _coord_z(field, data):
-    dim = data.ActiveDimensions[2]
-    return ( ( np.ones(data.ActiveDimensions, dtype=np.float64)
-               * np.arange(data.ActiveDimensions[2])[None, None, :] + 0.5 )
-             * data['dz'] + data.LeftEdge[2] )
-
-add_field('z', function=_coord_z, display_field=False,
-          validators=[ValidateSpatial(0)])
-
-def _grid_level(field, data):
-    return np.ones(data.ActiveDimensions) * data.Level
-
-add_field("grid_level", function=_grid_level,
-          validators=[ValidateGridType(), ValidateSpatial(0)])
-
-def _grid_indices(field, data):
-    return np.ones(data["ones"].shape) * (data.id - data._id_offset)
-
-add_field("grid_indices", function=_grid_indices, take_log=False,
-          validators=[ValidateGridType(), ValidateSpatial(0)])
-
-def _ones_over_dx(field, data):
-    return np.ones(data["ones"].shape, dtype=data["density"].dtype) / data['dx']
-
-add_field("ones_over_dx", function=_ones_over_dx, display_field=False)
-
-def _ones(field, data):
-    return np.ones(data.shape, dtype=np.float64)
-
-add_field("ones", function=_ones, projection_conversion="unitary",
+def _OnesOverDx(field, data):
+    return np.ones(data["Ones"].shape,
+                   dtype=data["Density"].dtype)/data['dx']
+add_field("OnesOverDx", function=_OnesOverDx,
           display_field=False)
-add_field("cells_per_bin", function=_ones, display_field=False)
+
+def _Zeros(field, data):
+    return np.zeros(data.shape, dtype='float64')
+add_field("Zeros", function=_Zeros,
+          projection_conversion="unitary",
+          display_field = False)
 
 def _zeros(field, data):
     return np.zeros(data.shape, dtype=np.float64)
 
+def _ones(field, data):
+    return np.ones(data.shape, dtype=np.float64)
+
 add_field("zeros", function=_zeros, projection_conversion="unitary",
           display_field=False)
+add_field("CellsPerBin", function=_ones,
+          display_field = False)
 
 def _sound_speed(field, data):
     if data.pf["eos_type"] == 1:
@@ -399,7 +355,7 @@ def _cell_mass(field, data):
 add_field("cell_mass", function=_cell_mass, units="g")
 
 def _total_mass(field, data):
-    return (data["density"] + data["dark_matter_density"]) * data["cell_volume"]
+    return (data["density"] + data["particle_density"])*data["cell_volume"]
 
 add_field("total_mass", function=_total_mass, units="g")
 
@@ -466,6 +422,7 @@ def _convertConvergence(data):
     # lens to source
     DLS = data.pf.parameters['cosmology_calculator'].AngularDiameterDistance(
         data.pf.current_redshift, data.pf.parameters['lensing_source_redshift'])
+    # TODO: convert 1.5e14 to constants
     return (((DL * DLS) / DS) * (1.5e14 * data.pf.omega_matter *
                                 (data.pf.hubble_constant / speed_of_light_cgs)**2 *
                                 (1 + data.pf.current_redshift)))
@@ -523,7 +480,7 @@ def _xray_emissivity(field, data):
              * data["temperature"]**0.5 )
 
 def _convert_xray_emissivity(data):
-    return 2.168e60
+    return 2.168e60  #TODO: cnvert me to constants
 
 add_field("xray_emissivity", function=_xray_emissivity,
           convert_function=_convert_xray_emissivity,
@@ -765,8 +722,9 @@ def get_radius(data, field_prefix):
     for i, ax in enumerate('xyz'):
         np.subtract(data["%s%s" % (field_prefix, ax)], center[i], r)
         if data.pf.periodicity[i] == True:
-            np.subtract(DW[i], r, rdw)
             np.abs(r, r)
+            np.subtract(r, DW[i], rdw)
+            np.abs(rdw, rdw)
             np.minimum(r, rdw, r)
         np.power(r, 2.0, r)
         np.add(radius, r, radius)
@@ -891,9 +849,10 @@ def _CuttingPlaneVelocityX(field, data):
     bulk_velocity = data.get_field_parameter("bulk_velocity")
     if bulk_velocity == None:
         bulk_velocity = np.zeros(3)
-    v_vec = np.array([data["%s-velocity" % ax] for ax in 'xyz']) \
-                - bulk_velocity[...,np.newaxis]
-    return np.dot(x_vec, v_vec)
+    v_vec = np.array([data["%s-velocity" % ax] - bv \
+                for ax, bv in zip('xyz', bulk_velocity)])
+    v_vec = np.rollaxis(v_vec, 0, len(v_vec.shape))
+    return np.sum(x_vec * v_vec, axis=-1)
 add_field("CuttingPlaneVelocityX",
           function=_CuttingPlaneVelocityX,
           validators=[ValidateParameter("cp_%s_vec" % ax)
@@ -904,9 +863,10 @@ def _CuttingPlaneVelocityY(field, data):
     bulk_velocity = data.get_field_parameter("bulk_velocity")
     if bulk_velocity == None:
         bulk_velocity = np.zeros(3)
-    v_vec = np.array([data["%s-velocity" % ax] for ax in 'xyz']) \
-                - bulk_velocity[...,np.newaxis]
-    return np.dot(y_vec, v_vec)
+    v_vec = np.array([data["%s-velocity" % ax] - bv \
+                for ax, bv in zip('xyz', bulk_velocity)])
+    v_vec = np.rollaxis(v_vec, 0, len(v_vec.shape))
+    return np.sum(y_vec * v_vec, axis=-1)
 add_field("CuttingPlaneVelocityY",
           function=_CuttingPlaneVelocityY,
           validators=[ValidateParameter("cp_%s_vec" % ax)
@@ -936,8 +896,8 @@ def _MeanMolecularWeight(field,data):
 add_field("MeanMolecularWeight",function=_MeanMolecularWeight,units=r"")
 
 def _JeansMassMsun(field,data):
-    MJ_constant = (((5*kboltz)/(G*mh))**(1.5)) * \
-    (3/(4*3.1415926535897931))**(0.5) / 1.989e33
+    MJ_constant = (((5.0 * kboltz) / (G * mh)) ** (1.5)) * \
+    (3.0 / (4.0 * np.pi)) ** (0.5) / mass_sun_cgs
 
     return (MJ_constant *
             ((data["Temperature"]/data["MeanMolecularWeight"])**(1.5)) *
@@ -945,23 +905,20 @@ def _JeansMassMsun(field,data):
 add_field("JeansMassMsun",function=_JeansMassMsun,
           units="Msun")
 
-def _convertDensity(data):
-    return data.convert("Density")
+# We add these fields so that the field detector can use them
+for field in ["particle_position_%s" % ax for ax in "xyz"]:
+    # This marker should let everyone know not to use the fields, but NullFunc
+    # should do that, too.
+    add_field(field, function=NullFunc, particle_type = True,
+        units=r"UNDEFINED")
+
 def _pdensity(field, data):
-    blank = np.zeros(data.ActiveDimensions, dtype='float32')
-    if data["particle_position_x"].size == 0: return blank
-    CICDeposit_3(data["particle_position_x"].astype(np.float64),
-                 data["particle_position_y"].astype(np.float64),
-                 data["particle_position_z"].astype(np.float64),
-                 data["particle_mass"].astype(np.float32),
-                 data["particle_position_x"].size,
-                 blank, np.array(data.LeftEdge).astype(np.float64),
-                 np.array(data.ActiveDimensions).astype(np.int32),
-                 np.float64(data['dx']))
-    return blank
+    pmass = data[('deposit','all_mass')]
+    np.divide(pmass, data["CellVolume"], pmass)
+    return pmass
 add_field("particle_density", function=_pdensity,
-          validators=[ValidateGridType()], convert_function=_convertDensity,
-          display_name=r"\mathrm{Particle}\/\mathrm{Density})")
+          validators=[ValidateGridType()],
+          display_name=r"\mathrm{Particle}\/\mathrm{Density}")
 
 def _MagneticEnergy(field,data):
     """This assumes that your front end has provided Bx, By, Bz in
@@ -997,7 +954,7 @@ def _MagneticPressure(field,data):
     return data['MagneticEnergy']
 add_field("MagneticPressure",
           function=_MagneticPressure,
-          display_name=r"\rm{Magnetic}\/\rm{Energy}",
+          display_name=r"\rm{Magnetic}\/\rm{Pressure}",
           units="erg / cm**3")
 
 def _BPoloidal(field,data):
