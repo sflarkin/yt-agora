@@ -32,6 +32,10 @@ from yt.utilities.io_handler import \
     BaseIOHandler
 
 from yt.utilities.fortran_utils import read_record
+from yt.utilities.lib.geometry_utils import get_morton_indices, \
+    get_morton_indices_unravel
+
+from yt.geometry.oct_container import _ORDER_MAX
 
 _vector_fields = ("Coordinates", "Velocity", "Velocities")
 
@@ -49,16 +53,24 @@ class IOHandlerOWLS(BaseIOHandler):
         chunks = list(chunks)
         for ftype, fname in fields:
             ptf[ftype].append(fname)
-        for chunk in chunks: # Will be OWLS domains
-            for subset in chunk.objs:
-                f = h5py.File(subset.domain.domain_filename, "r")
-                # This double-reads
-                for ptype, field_list in sorted(ptf.items()):
-                    coords = f["/%s/Coordinates" % ptype][:].astype("float64")
-                    psize[ptype] += selector.count_points(
-                        coords[:,0], coords[:,1], coords[:,2])
-                    del coords
-                f.close()
+        # For this type of file, we actually have something slightly different.
+        # We are given a list of ParticleDataChunks, which is composed of
+        # individual ParticleOctreeSubsets.  The data_files attribute on these
+        # may in fact overlap.  So we will iterate over a union of all the
+        # data_files.
+        data_files = set([])
+        for chunk in chunks:
+            for obj in chunk.objs:
+                data_files.update(obj.data_files)
+        for data_file in data_files:
+            f = h5py.File(data_file.filename, "r")
+            # This double-reads
+            for ptype, field_list in sorted(ptf.items()):
+                coords = f["/%s/Coordinates" % ptype][:].astype("float64")
+                psize[ptype] += selector.count_points(
+                    coords[:,0], coords[:,1], coords[:,2])
+                del coords
+            f.close()
         # Now we have all the sizes, and we can allocate
         ind = {}
         for field in fields:
@@ -69,43 +81,52 @@ class IOHandlerOWLS(BaseIOHandler):
                 shape = psize[field[0]]
             rv[field] = np.empty(shape, dtype="float64")
             ind[field] = 0
-        for chunk in chunks: # Will be OWLS domains
-            for subset in chunk.objs:
-                f = h5py.File(subset.domain.domain_filename, "r")
-                for ptype, field_list in sorted(ptf.items()):
-                    g = f["/%s" % ptype]
-                    coords = g["Coordinates"][:].astype("float64")
-                    mask = selector.select_points(
-                                coords[:,0], coords[:,1], coords[:,2])
-                    del coords
-                    if mask is None: continue
-                    for field in field_list:
-                        data = g[field][:][mask,...]
-                        my_ind = ind[ptype, field]
-                        mylog.debug("Filling from %s to %s with %s",
-                            my_ind, my_ind+data.shape[0], field)
-                        rv[ptype, field][my_ind:my_ind + data.shape[0],...] = data
-                        ind[ptype, field] += data.shape[0]
-                f.close()
+        for data_file in data_files:
+            f = h5py.File(data_file.filename, "r")
+            for ptype, field_list in sorted(ptf.items()):
+                g = f["/%s" % ptype]
+                coords = g["Coordinates"][:].astype("float64")
+                mask = selector.select_points(
+                            coords[:,0], coords[:,1], coords[:,2])
+                del coords
+                if mask is None: continue
+                for field in field_list:
+                    data = g[field][:][mask,...]
+                    my_ind = ind[ptype, field]
+                    mylog.debug("Filling from %s to %s with %s",
+                        my_ind, my_ind+data.shape[0], field)
+                    rv[ptype, field][my_ind:my_ind + data.shape[0],...] = data
+                    ind[ptype, field] += data.shape[0]
+            f.close()
         return rv
 
-    def _initialize_octree(self, domain, octree):
-        f = h5py.File(domain.domain_filename, "r")
+    def _initialize_index(self, data_file, regions):
+        f = h5py.File(data_file.filename, "r")
+        pcount = f["/Header"].attrs["NumPart_ThisFile"][:].sum()
+        morton = np.empty(pcount, dtype='uint64')
+        DLE = data_file.pf.domain_left_edge
+        DRE = data_file.pf.domain_right_edge
+        dx = (DRE - DLE) / 2**_ORDER_MAX
+        ind = 0
         for key in f.keys():
             if not key.startswith("PartType"): continue
             pos = f[key]["Coordinates"][:].astype("float64")
-            octree.add(pos, domain.domain_id)
+            regions.add_data_file(pos, data_file.file_id)
+            pos = np.floor((pos - DLE)/dx).astype("uint64")
+            morton[ind:ind+pos.shape[0]] = get_morton_indices(pos)
+            ind += pos.shape[0]
         f.close()
+        return morton
 
-    def _count_particles(self, domain):
-        f = h5py.File(domain.domain_filename, "r")
-        np = f["/Header"].attrs["NumPart_ThisFile"][:]
+    def _count_particles(self, data_file):
+        f = h5py.File(data_file.filename, "r")
+        pcount = f["/Header"].attrs["NumPart_ThisFile"][:]
         f.close()
-        npart = dict(("PartType%s" % (i), v) for i, v in enumerate(np)) 
+        npart = dict(("PartType%s" % (i), v) for i, v in enumerate(pcount)) 
         return npart
 
-    def _identify_fields(self, domain):
-        f = h5py.File(domain.domain_filename, "r")
+    def _identify_fields(self, data_file):
+        f = h5py.File(data_file.filename, "r")
         fields = []
         for key in f.keys():
             if not key.startswith("PartType"): continue
@@ -166,26 +187,28 @@ class IOHandlerGadgetBinary(BaseIOHandler):
         ptall = []
         psize = defaultdict(lambda: 0)
         chunks = list(chunks)
-        pf = chunks[0].objs[0].domain.pf
         ptypes = set()
         for ftype, fname in fields:
             ptf[ftype].append(fname)
             ptypes.add(ftype)
         ptypes = list(ptypes)
         ptypes.sort(key = lambda a: self._ptypes.index(a))
+        data_files = set([])
         for chunk in chunks:
-            for subset in chunk.objs:
-                poff = subset.domain.field_offsets
-                tp = subset.domain.total_particles
-                f = open(subset.domain.domain_filename, "rb")
-                for ptype in ptypes:
-                    f.seek(poff[ptype, "Coordinates"], os.SEEK_SET)
-                    pos = self._read_field_from_file(f,
-                                tp[ptype], "Coordinates")
-                    psize[ptype] += selector.count_points(
-                        pos[:,0], pos[:,1], pos[:,2])
-                    del pos
-                f.close()
+            for obj in chunk.objs:
+                data_files.update(obj.data_files)
+        for data_file in data_files:
+            poff = data_file.field_offsets
+            tp = data_file.total_particles
+            f = open(data_file.filename, "rb")
+            for ptype in ptypes:
+                f.seek(poff[ptype, "Coordinates"], os.SEEK_SET)
+                pos = self._read_field_from_file(f,
+                            tp[ptype], "Coordinates")
+                psize[ptype] += selector.count_points(
+                    pos[:,0], pos[:,1], pos[:,2])
+                del pos
+            f.close()
         ind = {}
         for field in fields:
             mylog.debug("Allocating %s values for %s", psize[field[0]], field)
@@ -195,29 +218,28 @@ class IOHandlerGadgetBinary(BaseIOHandler):
                 shape = psize[field[0]]
             rv[field] = np.empty(shape, dtype="float64")
             ind[field] = 0
-        for chunk in chunks: 
-            for subset in chunk.objs:
-                poff = subset.domain.field_offsets
-                tp = subset.domain.total_particles
-                f = open(subset.domain.domain_filename, "rb")
-                for ptype, field_list in sorted(ptf.items()):
-                    f.seek(poff[ptype, "Coordinates"], os.SEEK_SET)
-                    pos = self._read_field_from_file(f,
-                                tp[ptype], "Coordinates")
-                    mask = selector.select_points(
-                        pos[:,0], pos[:,1], pos[:,2])
-                    del pos
-                    if mask is None: continue
-                    for field in field_list:
-                        f.seek(poff[ptype, field], os.SEEK_SET)
-                        data = self._read_field_from_file(f, tp[ptype], field)
-                        data = data[mask]
-                        my_ind = ind[ptype, field]
-                        mylog.debug("Filling from %s to %s with %s",
-                            my_ind, my_ind+data.shape[0], field)
-                        rv[ptype, field][my_ind:my_ind + data.shape[0],...] = data
-                        ind[ptype, field] += data.shape[0]
-                f.close()
+        for data_file in data_files:
+            poff = data_file.field_offsets
+            tp = data_file.total_particles
+            f = open(data_file.filename, "rb")
+            for ptype, field_list in sorted(ptf.items()):
+                f.seek(poff[ptype, "Coordinates"], os.SEEK_SET)
+                pos = self._read_field_from_file(f,
+                            tp[ptype], "Coordinates")
+                mask = selector.select_points(
+                    pos[:,0], pos[:,1], pos[:,2])
+                del pos
+                if mask is None: continue
+                for field in field_list:
+                    f.seek(poff[ptype, field], os.SEEK_SET)
+                    data = self._read_field_from_file(f, tp[ptype], field)
+                    data = data[mask]
+                    my_ind = ind[ptype, field]
+                    mylog.debug("Filling from %s to %s with %s",
+                        my_ind, my_ind+data.shape[0], field)
+                    rv[ptype, field][my_ind:my_ind + data.shape[0],...] = data
+                    ind[ptype, field] += data.shape[0]
+            f.close()
         return rv
 
     def _read_field_from_file(self, f, count, name):
@@ -233,23 +255,30 @@ class IOHandlerGadgetBinary(BaseIOHandler):
             arr = arr.reshape((count/3, 3), order="C")
         return arr.astype("float64")
 
-    def _initialize_octree(self, domain, octree):
-        count = sum(domain.total_particles.values())
+    def _initialize_index(self, data_file, regions):
+        count = sum(data_file.total_particles.values())
         dt = [("px", "float32"), ("py", "float32"), ("pz", "float32")]
-        with open(domain.domain_filename, "rb") as f:
+        DLE = data_file.pf.domain_left_edge
+        DRE = data_file.pf.domain_right_edge
+        dx = (DRE - DLE) / 2**_ORDER_MAX
+        with open(data_file.filename, "rb") as f:
             f.seek(self._header_offset)
             # The first total_particles * 3 values are positions
             pp = np.fromfile(f, dtype = dt, count = count)
-        pos = np.empty((count, 3), dtype="float64")
-        pos[:,0] = pp['px']
-        pos[:,1] = pp['py']
-        pos[:,2] = pp['pz']
+        pos = np.column_stack([pp['px'], pp['py'], pp['pz']]).astype("float64")
         del pp
-        octree.add(pos, domain.domain_id)
+        regions.add_data_file(pos, data_file.file_id)
+        lx = np.floor((pos[:,0] - DLE[0])/dx[0]).astype("uint64")
+        ly = np.floor((pos[:,1] - DLE[1])/dx[1]).astype("uint64")
+        lz = np.floor((pos[:,2] - DLE[2])/dx[2]).astype("uint64")
+        del pos
+        morton = get_morton_indices_unravel(lx, ly, lz)
+        del lx, ly, lz
+        return morton
 
-    def _count_particles(self, domain):
+    def _count_particles(self, data_file):
         npart = dict((self._ptypes[i], v)
-            for i, v in enumerate(domain.header["Npart"])) 
+            for i, v in enumerate(data_file.header["Npart"])) 
         return npart
 
     _header_offset = 256
@@ -354,74 +383,92 @@ class IOHandlerTipsyBinary(BaseIOHandler):
             ptypes.add(ftype)
         ptypes = list(ptypes)
         ptypes.sort(key = lambda a: self._ptypes.index(a))
+        data_files = set([])
         for chunk in chunks:
-            for subset in chunk.objs:
-                poff = subset.domain.field_offsets
-                tp = subset.domain.total_particles
-                f = open(subset.domain.domain_filename, "rb")
-                for ptype in ptypes:
-                    f.seek(poff[ptype], os.SEEK_SET)
-                    p = np.fromfile(f, self._pdtypes[ptype], count=tp[ptype])
-                    mask = selector.select_points(
-                        p['Coordinates']['x'].astype("float64"),
-                        p['Coordinates']['y'].astype("float64"),
-                        p['Coordinates']['z'].astype("float64"))
-                    tf = self._fill_fields(ptf[ptype], p, mask)
-                    for field in tf:
-                        rv[ptype, field] = tf[field]
-                    del p, tf
-                f.close()
+            for obj in chunk.objs:
+                data_files.update(obj.data_files)
+        for data_file in data_files:
+            poff = data_file.field_offsets
+            tp = data_file.total_particles
+            f = open(data_file.filename, "rb")
+            for ptype in ptypes:
+                f.seek(poff[ptype], os.SEEK_SET)
+                p = np.fromfile(f, self._pdtypes[ptype], count=tp[ptype])
+                mask = selector.select_points(
+                    p['Coordinates']['x'].astype("float64"),
+                    p['Coordinates']['y'].astype("float64"),
+                    p['Coordinates']['z'].astype("float64"))
+                tf = self._fill_fields(ptf[ptype], p, mask)
+                for field in tf:
+                    rv[ptype, field] = tf[field]
+                del p, tf
+            f.close()
         return rv
 
-    def _initialize_octree(self, domain, octree):
-        pf = domain.pf
-        with open(domain.domain_filename, "rb") as f:
-            f.seek(domain.pf._header_offset)
-            for ptype in self._ptypes:
+    def _initialize_index(self, data_file, regions):
+        pf = data_file.pf
+        morton = np.empty(sum(data_file.total_particles.values()),
+                          dtype="uint64")
+        ind = 0
+        DLE, DRE = pf.domain_left_edge, pf.domain_right_edge
+        dx = (DRE - DLE) / (2**_ORDER_MAX)
+        with open(data_file.filename, "rb") as f:
+            f.seek(pf._header_offset)
+            for iptype, ptype in enumerate(self._ptypes):
                 # We'll just add the individual types separately
-                count = domain.total_particles[ptype]
+                count = data_file.total_particles[ptype]
                 if count == 0: continue
                 pp = np.fromfile(f, dtype = self._pdtypes[ptype],
                                  count = count)
-                pos = np.empty((count, 3), dtype="float64")
-                mylog.info("Adding %0.3e %s particles", count, ptype)
-                pos[:,0] = pp['Coordinates']['x']
-                pos[:,1] = pp['Coordinates']['y']
-                pos[:,2] = pp['Coordinates']['z']
-                mylog.debug("Spanning: %0.3e .. %0.3e in x",
-                            pos[:,0].min(), pos[:,0].max())
-                mylog.debug("Spanning: %0.3e .. %0.3e in y",
-                            pos[:,1].min(), pos[:,1].max())
-                mylog.debug("Spanning: %0.3e .. %0.3e in z",
-                            pos[:,2].min(), pos[:,2].max())
-                if np.any(pos.min(axis=0) < pf.domain_left_edge) or \
-                   np.any(pos.max(axis=0) > pf.domain_right_edge):
-                    raise YTDomainOverflow(pos.min(axis=0), pos.max(axis=0),
+                mis = np.empty(3, dtype="float64")
+                mas = np.empty(3, dtype="float64")
+                for axi, ax in enumerate('xyz'):
+                    mi = pp["Coordinates"][ax].min()
+                    ma = pp["Coordinates"][ax].max()
+                    mylog.debug("Spanning: %0.3e .. %0.3e in %s", mi, ma, ax)
+                    mis[axi] = mi
+                    mas[axi] = ma
+                if np.any(mis < pf.domain_left_edge) or \
+                   np.any(mas > pf.domain_right_edge):
+                    raise YTDomainOverflow(mis, mas,
                                            pf.domain_left_edge,
                                            pf.domain_right_edge)
-                del pp
-                octree.add(pos, domain.domain_id)
+                fpos = np.empty((count, 3), dtype="float64")
+                fpos[:,0] = pp["Coordinates"]["x"]
+                fpos[:,1] = pp["Coordinates"]["y"]
+                fpos[:,2] = pp["Coordinates"]["z"]
+                regions.add_data_file(fpos, data_file.file_id)
+                del fpos
+                pos = np.empty((count, 3), dtype="uint64")
+                for axi, ax in enumerate("xyz"):
+                    coords = pp['Coordinates'][ax].astype("float64")
+                    coords = np.floor((coords - DLE[axi])/dx[axi])
+                    pos[:,axi] = coords
+                morton[ind:ind+count] = get_morton_indices(pos)
+                del pp, pos
+        mylog.info("Adding %0.3e particles", morton.size)
+        return morton
 
-    def _count_particles(self, domain):
+    def _count_particles(self, data_file):
         npart = {
-            "Gas": domain.pf.parameters['nsph'],
-            "Stars": domain.pf.parameters['nstar'],
-            "DarkMatter": domain.pf.parameters['ndark']
+            "Gas": data_file.pf.parameters['nsph'],
+            "Stars": data_file.pf.parameters['nstar'],
+            "DarkMatter": data_file.pf.parameters['ndark']
         }
         return npart
 
-    def _create_dtypes(self, domain):
+    def _create_dtypes(self, data_file):
         # We can just look at the particle counts.
-        self._header_offset = domain.pf._header_offset
+        self._header_offset = data_file.pf._header_offset
         self._pdtypes = {}
         pds = {}
         field_list = []
-        tp = domain.total_particles
+        tp = data_file.total_particles
         for ptype, field in self._fields:
             pfields = []
             if tp[ptype] == 0: continue
-            dtbase = domain.pf._field_dtypes.get(field, 'f')
-            ff = "%s%s" % (domain.pf.endian, dtbase)
+            dtbase = data_file.pf._field_dtypes.get(field, 'f')
+            ff = "%s%s" % (data_file.pf.endian, dtbase)
             if field in _vector_fields:
                 dt = (field, [('x', ff), ('y', ff), ('z', ff)])
             else:
@@ -433,15 +480,15 @@ class IOHandlerTipsyBinary(BaseIOHandler):
         self._field_list = field_list
         return self._field_list
 
-    def _identify_fields(self, domain):
+    def _identify_fields(self, data_file):
         return self._field_list
 
-    def _calculate_particle_offsets(self, domain):
+    def _calculate_particle_offsets(self, data_file):
         field_offsets = {}
-        pos = domain.pf._header_offset
+        pos = data_file.pf._header_offset
         for ptype in self._ptypes:
             field_offsets[ptype] = pos
-            if domain.total_particles[ptype] == 0: continue
+            if data_file.total_particles[ptype] == 0: continue
             size = self._pdtypes[ptype].itemsize
-            pos += domain.total_particles[ptype] * size
+            pos += data_file.total_particles[ptype] * size
         return field_offsets
