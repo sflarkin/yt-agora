@@ -69,6 +69,7 @@ class RAMSESDomainFile(object):
             setattr(self, "%s_fn" % t, basename % t)
         self._read_amr_header()
         self._read_particle_header()
+        self._read_amr()
 
     _hydro_offset = None
     _level_count = None
@@ -91,6 +92,7 @@ class RAMSESDomainFile(object):
         hydro_offset = np.zeros(n_levels, dtype='int64')
         hydro_offset -= 1
         level_count = np.zeros(n_levels, dtype='int64')
+        skipped = []
         for level in range(self.amr_header['nlevelmax']):
             for cpu in range(self.amr_header['nboundary'] +
                              self.amr_header['ncpu']):
@@ -101,13 +103,15 @@ class RAMSESDomainFile(object):
                 except AssertionError:
                     print "You are running with the wrong number of fields."
                     print "Please specify these in the load command."
+                    print "We are looking for %s fields." % self.nvar
+                    print "The last set of field sizes was: %s" % skipped
                     raise
                 if hvals['file_ncache'] == 0: continue
                 assert(hvals['file_ilevel'] == level+1)
                 if cpu + 1 == self.domain_id and level >= min_level:
                     hydro_offset[level - min_level] = f.tell()
                     level_count[level - min_level] = hvals['file_ncache']
-                fpu.skip(f, 8 * self.nvar)
+                skipped = fpu.skip(f, 8 * self.nvar)
         self._hydro_offset = hydro_offset
         self._level_count = level_count
         return self._hydro_offset
@@ -180,21 +184,26 @@ class RAMSESDomainFile(object):
         self.amr_header = hvals
         self.amr_offset = f.tell()
         self.local_oct_count = hvals['numbl'][self.pf.min_level:, self.domain_id - 1].sum()
+        self.total_oct_count = hvals['numbl'][self.pf.min_level:,:].sum(axis=0)
 
-    def _read_amr(self, oct_handler):
+    def _read_amr(self):
         """Open the oct file, read in octs level-by-level.
            For each oct, only the position, index, level and domain 
            are needed - its position in the octree is found automatically.
            The most important is finding all the information to feed
            oct_handler.add
         """
+        self.oct_handler = RAMSESOctreeContainer(self.pf.domain_dimensions/2,
+                self.pf.domain_left_edge, self.pf.domain_right_edge)
+        root_nodes = self.amr_header['numbl'][self.pf.min_level,:].sum()
+        self.oct_handler.allocate_domains(self.total_oct_count, root_nodes)
         fb = open(self.amr_fn, "rb")
         fb.seek(self.amr_offset)
         f = cStringIO.StringIO()
         f.write(fb.read())
         f.seek(0)
         mylog.debug("Reading domain AMR % 4i (%0.3e, %0.3e)",
-            self.domain_id, self.local_oct_count, self.ngridbound.sum())
+            self.domain_id, self.total_oct_count.sum(), self.ngridbound.sum())
         def _ng(c, l):
             if c < self.amr_header['ncpu']:
                 ng = self.amr_header['numbl'][l, c]
@@ -203,7 +212,6 @@ class RAMSESDomainFile(object):
                                 self.amr_header['nboundary']*l]
             return ng
         min_level = self.pf.min_level
-        total = 0
         nx, ny, nz = (((i-1.0)/2.0) for i in self.amr_header['nx'])
         for level in range(self.amr_header['nlevelmax']):
             # Easier if do this 1-indexed
@@ -233,40 +241,34 @@ class RAMSESDomainFile(object):
                 #    rmap[:,i] = fpu.read_vector(f, "I")
                 # We don't want duplicate grids.
                 # Note that we're adding *grids*, not individual cells.
-                if level >= min_level and cpu + 1 >= self.domain_id: 
+                if level >= min_level:
                     assert(pos.shape[0] == ng)
-                    if cpu + 1 == self.domain_id:
-                        total += ng
-                    oct_handler.add(cpu + 1, level - min_level, ng, pos, 
-                                    self.domain_id)
+                    n = self.oct_handler.add(cpu + 1, level - min_level, pos)
+                    assert(n == ng)
+        self.oct_handler.finalize()
 
-    def select(self, selector):
-        if id(selector) == self._last_selector_id:
-            return self._last_mask
-        self._last_mask = selector.fill_mask(self)
-        self._last_selector_id = id(selector)
-        return self._last_mask
-
-    def count(self, selector):
-        if id(selector) == self._last_selector_id:
-            if self._last_mask is None: return 0
-            return self._last_mask.sum()
-        self.select(selector)
-        return self.count(selector)
+    def included(self, selector):
+        if getattr(selector, "domain_id", None) is not None:
+            return selector.domain_id == self.domain_id
+        domain_ids = self.oct_handler.domain_identify(selector)
+        return self.domain_id in domain_ids
 
 class RAMSESDomainSubset(OctreeSubset):
 
-    def fill(self, content, fields):
+    _domain_offset = 1
+
+    def fill(self, content, fields, selector):
         # Here we get a copy of the file, which we skip through and read the
         # bits we want.
         oct_handler = self.oct_handler
         all_fields = self.domain.pf.h.fluid_field_list
         fields = [f for ft, f in fields]
         tr = {}
-        filled = pos = level_offset = 0
-        min_level = self.domain.pf.min_level
+        cell_count = selector.count_oct_cells(self.oct_handler, self.domain_id)
+        levels, cell_inds, file_inds = self.oct_handler.file_index_octs(
+            selector, self.domain_id, cell_count)
         for field in fields:
-            tr[field] = np.zeros(self.cell_count, 'float64')
+            tr[field] = np.zeros(cell_count, 'float64')
         for level, offset in enumerate(self.domain.hydro_offset):
             if offset == -1: continue
             content.seek(offset)
@@ -277,17 +279,10 @@ class RAMSESDomainSubset(OctreeSubset):
             for i in range(8):
                 for field in all_fields:
                     if field not in fields:
-                        #print "Skipping %s in %s : %s" % (field, level,
-                        #        self.domain.domain_id)
                         fpu.skip(content)
                     else:
-                        #print "Reading %s in %s : %s" % (field, level,
-                        #        self.domain.domain_id)
                         temp[field][:,i] = fpu.read_vector(content, 'd') # cell 1
-            level_offset += oct_handler.fill_level(self.domain.domain_id, level,
-                                   tr, temp, self.mask, level_offset)
-            #print "FILL (%s : %s) %s" % (self.domain.domain_id, level, level_offset)
-        #print "DONE (%s) %s of %s" % (self.domain.domain_id, level_offset, self.cell_count)
+            oct_handler.fill_level(level, levels, cell_inds, file_inds, tr, temp)
         return tr
 
 class RAMSESGeometryHandler(OctreeGeometryHandler):
@@ -311,21 +306,6 @@ class RAMSESGeometryHandler(OctreeGeometryHandler):
         total_octs = sum(dom.local_oct_count #+ dom.ngridbound.sum()
                          for dom in self.domains)
         self.num_grids = total_octs
-        #this merely allocates space for the oct tree
-        #and nothing else
-        self.oct_handler = RAMSESOctreeContainer(
-            self.parameter_file.domain_dimensions/2,
-            self.parameter_file.domain_left_edge,
-            self.parameter_file.domain_right_edge)
-        mylog.debug("Allocating %s octs", total_octs)
-        self.oct_handler.allocate_domains(
-            [dom.local_oct_count #+ dom.ngridbound.sum()
-             for dom in self.domains])
-        #this actually reads every oct and loads it into the octree
-        for dom in self.domains:
-            dom._read_amr(self.oct_handler)
-        #for dom in self.domains:
-        #    self.oct_handler.check(dom.domain_id)
 
     def _detect_fields(self):
         # TODO: Add additional fields
@@ -342,18 +322,19 @@ class RAMSESGeometryHandler(OctreeGeometryHandler):
 
     def _identify_base_chunk(self, dobj):
         if getattr(dobj, "_chunk_info", None) is None:
-            mask = dobj.selector.select_octs(self.oct_handler)
-            counts = self.oct_handler.count_cells(dobj.selector, mask)
-            subsets = [RAMSESDomainSubset(d, mask, c)
-                       for d, c in zip(self.domains, counts) if c > 0]
+            domains = [dom for dom in self.domains if
+                       dom.included(dobj.selector)]
+            base_region = getattr(dobj, "base_region", dobj)
+            if len(domains) > 1:
+                mylog.debug("Identified %s intersecting domains", len(domains))
+            subsets = [RAMSESDomainSubset(base_region, domain, self.parameter_file)
+                       for domain in domains]
             dobj._chunk_info = subsets
-            dobj.size = sum(counts)
-            dobj.shape = (dobj.size,)
         dobj._current_chunk = list(self._chunk_all(dobj))[0]
 
     def _chunk_all(self, dobj):
         oobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
-        yield YTDataChunk(dobj, "all", oobjs, dobj.size)
+        yield YTDataChunk(dobj, "all", oobjs, None)
 
     def _chunk_spatial(self, dobj, ngz, sort = None):
         sobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
@@ -362,14 +343,12 @@ class RAMSESGeometryHandler(OctreeGeometryHandler):
                 g = og.retrieve_ghost_zones(ngz, [], smoothed=True)
             else:
                 g = og
-            size = og.cell_count
-            if size == 0: continue
-            yield YTDataChunk(dobj, "spatial", [g], size)
+            yield YTDataChunk(dobj, "spatial", [g], None)
 
     def _chunk_io(self, dobj):
         oobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
         for subset in oobjs:
-            yield YTDataChunk(dobj, "io", [subset], subset.cell_count)
+            yield YTDataChunk(dobj, "io", [subset], None)
 
 class RAMSESStaticOutput(StaticOutput):
     _hierarchy_class = RAMSESGeometryHandler
@@ -476,7 +455,7 @@ class RAMSESStaticOutput(StaticOutput):
         self.omega_lambda = rheader["omega_l"]
         self.omega_matter = rheader["omega_m"]
         self.hubble_constant = rheader["H0"] / 100.0 # This is H100
-        self.max_level = rheader['levelmax'] - rheader['levelmin']
+        self.max_level = rheader['levelmax'] - self.min_level
 
     @classmethod
     def _is_valid(self, *args, **kwargs):

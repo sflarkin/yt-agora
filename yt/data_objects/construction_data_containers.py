@@ -281,12 +281,12 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
             chunk_fields.append(self.weight_field)
         tree = self._get_tree(len(fields))
         # We do this once
-        for chunk in self.data_source.chunks(None, "io"):
+        for chunk in self.data_source.chunks([], "io"):
             self._initialize_chunk(chunk, tree)
         # This needs to be parallel_objects-ified
         for chunk in parallel_objects(self.data_source.chunks(
                 chunk_fields, "io")): 
-            mylog.debug("Adding chunk (%s) to tree", chunk.size)
+            mylog.debug("Adding chunk (%s) to tree", chunk.ires.size)
             self._handle_chunk(chunk, fields, tree)
         # Note that this will briefly double RAM usage
         if self.proj_style == "mip":
@@ -310,7 +310,6 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         np.multiply(py, self.pf.domain_width[y_dict[self.axis]], py)
         np.add(py, oy, py)
         np.multiply(pdy, self.pf.domain_width[y_dict[self.axis]], pdy)
-
         if self.weight_field is not None:
             np.divide(nvals, nwvals[:,None], nvals)
         if self.weight_field is None:
@@ -335,8 +334,8 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
 
     def _initialize_chunk(self, chunk, tree):
         icoords = chunk.icoords
-        i1 = icoords[:,0]
-        i2 = icoords[:,1]
+        i1 = icoords[:,x_dict[self.axis]]
+        i2 = icoords[:,y_dict[self.axis]]
         ilevel = chunk.ires
         tree.initialize_chunk(i1, i2, ilevel)
 
@@ -345,7 +344,7 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
             dl = 1.0
         else:
             dl = chunk.fwidth[:, self.axis]
-        v = np.empty((chunk.size, len(fields)), dtype="float64")
+        v = np.empty((chunk.ires.size, len(fields)), dtype="float64")
         for i in range(len(fields)):
             v[:,i] = chunk[fields[i]] * dl
         if self.weight_field is not None:
@@ -353,7 +352,7 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
             np.multiply(v, w[:,None], v)
             np.multiply(w, dl, w)
         else:
-            w = np.ones(chunk.size, dtype="float64")
+            w = np.ones(chunk.ires.size, dtype="float64")
         icoords = chunk.icoords
         i1 = icoords[:,x_dict[self.axis]]
         i2 = icoords[:,y_dict[self.axis]]
@@ -430,6 +429,7 @@ class YTCoveringGridBase(YTSelectionContainer3D):
         self._data_source.max_level = self.level
 
     def get_data(self, fields = None):
+        if fields is None: return
         fields = self._determine_fields(ensure_list(fields))
         fields_to_get = [f for f in fields if f not in self.field_data]
         fields_to_get = self._identify_dependencies(fields_to_get)
