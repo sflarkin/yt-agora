@@ -1,0 +1,81 @@
+"""
+Oct definitions file
+
+Author: Matthew Turk <matthewturk@gmail.com>
+Affiliation: Columbia University
+Homepage: http://yt.enzotools.org/
+License:
+  Copyright (C) 2012 Matthew Turk.  All Rights Reserved.
+
+  This file is part of yt.
+
+  yt is free software; you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation; either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+"""
+
+cimport numpy as np
+from fp_utils cimport *
+
+cdef struct ParticleArrays
+
+cdef struct Oct
+cdef struct Oct:
+    np.int64_t file_ind     # index with respect to the order in which it was
+                            # added
+    np.int64_t domain_ind   # index within the global set of domains
+                            # note that moving to a local index will require
+                            # moving to split-up masks, which is part of a
+                            # bigger refactor
+    np.int64_t domain       # (opt) addl int index
+    np.int64_t pos[3]       # position in ints
+    np.int8_t level
+    ParticleArrays *sd
+    Oct *children[2][2][2]
+    Oct *parent
+
+cdef struct OctInfo:
+    np.float64_t left_edge[3]
+    np.float64_t dds[3]
+
+cdef struct OctAllocationContainer
+cdef struct OctAllocationContainer:
+    np.int64_t n
+    np.int64_t n_assigned
+    np.int64_t offset
+    OctAllocationContainer *next
+    Oct *my_octs
+
+cdef class OctreeContainer:
+    cdef OctAllocationContainer *cont
+    cdef Oct ****root_mesh
+    cdef int nn[3]
+    cdef np.float64_t DLE[3], DRE[3]
+    cdef public int nocts
+    cdef public int max_domain
+    cdef Oct* get(self, np.float64_t ppos[3], OctInfo *oinfo = ?)
+    cdef void neighbors(self, Oct *, Oct **)
+    cdef void oct_bounds(self, Oct *, np.float64_t *, np.float64_t *)
+    # This function must return the offset from global-to-local domains; i.e.,
+    # OctAllocationContainer.offset if such a thing exists.
+    cdef np.int64_t get_domain_offset(self, int domain_id)
+
+cdef class RAMSESOctreeContainer(OctreeContainer):
+    cdef OctAllocationContainer **domains
+    cdef Oct *next_root(self, int domain_id, int ind[3])
+    cdef Oct *next_child(self, int domain_id, int ind[3], Oct *parent)
+
+cdef struct ParticleArrays:
+    Oct *oct
+    ParticleArrays *next
+    np.float64_t **pos
+    np.int64_t np
