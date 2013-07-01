@@ -50,7 +50,6 @@ class IOHandlerPackedHDF5(BaseIOHandler):
         return (exceptions.KeyError, hdf5_light_reader.ReadingError)
 
     def _read_particle_selection_by_type(self, chunks, selector, fields):
-        # Active particles don't have the particle_ prefix.
         rv = {}
         ptypes = list(set([ftype for ftype, fname in fields]))
         fields = list(set(fields))
@@ -94,7 +93,7 @@ class IOHandlerPackedHDF5(BaseIOHandler):
         # Now we have to do something unpleasant
         if any((ftype != "all" for ftype, fname in fields)):
             type_fields = [(ftype, fname) for ftype, fname in fields
-                           if ftype != all]
+                           if ftype != "all"]
             rv.update(self._read_particle_selection_by_type(
                       chunks, selector, type_fields))
             if len(rv) == len(fields): return rv
@@ -154,13 +153,10 @@ class IOHandlerPackedHDF5(BaseIOHandler):
         for chunk in chunks:
             data = self._read_chunk_data(chunk, fields)
             for g in chunk.objs:
-                mask = g.select(selector)
-                if mask is None: continue
-                nd = mask.sum()
                 for field in fields:
                     ftype, fname = field
-                    gdata = data[g.id].pop(fname).swapaxes(0,2)
-                    nd = mask_fill(rv[field], ind, mask, gdata)
+                    ds = data[g.id].pop(fname).swapaxes(0,2)
+                    nd = g.select(selector, ds, rv[field], ind) # caches
                 ind += nd
                 data.pop(g.id)
         return rv
@@ -168,6 +164,8 @@ class IOHandlerPackedHDF5(BaseIOHandler):
     def _read_grid_chunk(self, chunks, fields):
         sets = [fname for ftype, fname in fields]
         g = chunks[0].objs[0]
+        if g.filename is None:
+            return {}
         rv = hdf5_light_reader.ReadMultipleGrids(
             g.filename, [g.id], sets, "")[g.id]
         for ftype, fname in fields:
@@ -183,6 +181,8 @@ class IOHandlerPackedHDF5(BaseIOHandler):
                 continue
             elif filter_particles == 'active' and \
                  g.NumberOfActiveParticles[fields[0][0]] == 0:
+                continue
+            elif g.filename is None:
                 continue
             grids_by_file[g.filename].append(g.id)
         sets = [fname for ftype, fname in fields]

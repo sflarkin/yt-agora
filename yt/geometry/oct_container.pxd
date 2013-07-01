@@ -25,19 +25,21 @@ License:
 
 cimport numpy as np
 from fp_utils cimport *
+from selection_routines cimport SelectorObject
+from oct_visitors cimport \
+    OctVisitorData, oct_visitor_function, Oct
+from libc.stdlib cimport bsearch, qsort
 
-cdef struct ParticleArrays
+cdef int ORDER_MAX
 
-cdef struct Oct
-cdef struct Oct:
-    np.int64_t ind          # index
-    np.int64_t local_ind
-    np.int64_t domain       # (opt) addl int index
-    np.int64_t pos[3]       # position in ints
-    np.int8_t level
-    ParticleArrays *sd
-    Oct *children[2][2][2]
-    Oct *parent
+
+cdef struct OctKey:
+    np.int64_t key
+    Oct *node
+
+cdef struct OctInfo:
+    np.float64_t left_edge[3]
+    np.float64_t dds[3]
 
 cdef struct OctAllocationContainer
 cdef struct OctAllocationContainer:
@@ -49,29 +51,36 @@ cdef struct OctAllocationContainer:
 
 cdef class OctreeContainer:
     cdef OctAllocationContainer *cont
+    cdef OctAllocationContainer **domains
     cdef Oct ****root_mesh
+    cdef int partial_coverage
     cdef int nn[3]
     cdef np.float64_t DLE[3], DRE[3]
     cdef public int nocts
     cdef public int max_domain
-    cdef Oct* get(self, ppos)
+    cdef Oct *get(self, np.float64_t ppos[3], OctInfo *oinfo = ?)
+    cdef int get_root(self, int ind[3], Oct **o)
     cdef void neighbors(self, Oct *, Oct **)
     cdef void oct_bounds(self, Oct *, np.float64_t *, np.float64_t *)
-
-cdef class ARTIOOctreeContainer(OctreeContainer):
-    cdef OctAllocationContainer **domains
-    cdef Oct *get_root_oct(self, np.float64_t ppos[3])
-    cdef Oct *next_free_oct( self, int curdom )
-    cdef int valid_domain_oct(self, int curdom, Oct *parent)
-    cdef Oct *add_oct(self, int curdom, Oct *parent, int curlevel, double pp[3])
-
-cdef class RAMSESOctreeContainer(OctreeContainer):
-    cdef OctAllocationContainer **domains
+    # This function must return the offset from global-to-local domains; i.e.,
+    # OctAllocationContainer.offset if such a thing exists.
+    cdef np.int64_t get_domain_offset(self, int domain_id)
+    cdef void visit_all_octs(self, SelectorObject selector,
+                        oct_visitor_function *func,
+                        OctVisitorData *data)
     cdef Oct *next_root(self, int domain_id, int ind[3])
     cdef Oct *next_child(self, int domain_id, int ind[3], Oct *parent)
 
-cdef struct ParticleArrays:
-    Oct *oct
-    ParticleArrays *next
-    np.float64_t **pos
-    np.int64_t np
+cdef class RAMSESOctreeContainer(OctreeContainer):
+    cdef OctKey *root_nodes
+    cdef void *tree_root
+    cdef int num_root
+    cdef int max_root
+
+cdef extern from "search.h" nogil:
+    void *tsearch(const void *key, void **rootp,
+                    int (*compar)(const void *, const void *))
+    void *tfind(const void *key, const void **rootp,
+                    int (*compar)(const void *, const void *))
+    void *tdelete(const void *key, void **rootp,
+                    int (*compar)(const void *, const void *))

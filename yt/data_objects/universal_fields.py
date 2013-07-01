@@ -1,11 +1,12 @@
 """
-
 The basic field info container resides here.  These classes, code specific and
 universal, are the means by which we access fields across YT, both derived and
 native.
 
 Author: Matthew Turk <matthewturk@gmail.com>
 Affiliation: KIPAC/SLAC/Stanford
+Author: Chris Moody <chrisemoody@gmail.com>
+Affiliation: UCSC
 Homepage: http://yt-project.org/
 License:
   Copyright (C) 2008-2011 Matthew Turk.  All Rights Reserved.
@@ -33,7 +34,7 @@ import copy
 
 from yt.funcs import *
 
-from yt.utilities.lib import CICDeposit_3, obtain_rvec, obtain_rv_vec
+from yt.utilities.lib import obtain_rvec, obtain_rv_vec
 from yt.utilities.cosmology import Cosmology
 from field_info_container import \
     add_field, \
@@ -45,9 +46,11 @@ from field_info_container import \
     NeedsOriginalGrid, \
     NeedsDataField, \
     NeedsProperty, \
-    NeedsParameter
+    NeedsParameter, \
+    NullFunc
 
 from yt.utilities.physical_constants import \
+     mass_sun_cgs, \
      mh, \
      me, \
      sigma_thompson, \
@@ -89,18 +92,21 @@ add_field("OnesOverDx", function=_OnesOverDx,
           display_field=False)
 
 def _Zeros(field, data):
-    return np.zeros(data.ActiveDimensions, dtype='float64')
+    return np.zeros(data["Ones"].shape, dtype='float64')
 add_field("Zeros", function=_Zeros,
-          validators=[ValidateSpatial(0)],
           projection_conversion="unitary",
           display_field = False)
 
 def _Ones(field, data):
-    return np.ones(data.ActiveDimensions, dtype='float64')
+    tr = np.ones(data.ires.shape, dtype="float64")
+    if data._spatial:
+        return data._reshape_vals(tr)
+    return tr
 add_field("Ones", function=_Ones,
           projection_conversion="unitary",
           display_field = False)
-add_field("CellsPerBin", function=_Ones, display_field = False)
+add_field("CellsPerBin", function=_Ones,
+          display_field = False)
 
 def _SoundSpeed(field, data):
     if data.pf["EOSType"] == 1:
@@ -379,7 +385,7 @@ add_field("JeansMassMsun",function=JeansMassMsun,units=r"\rm{Msun}")
 def _CellMass(field, data):
     return data["Density"] * data["CellVolume"]
 def _convertCellMassMsun(data):
-    return 5.027854e-34 # g^-1
+    return 1.0 / mass_sun_cgs # g^-1
 add_field("CellMass", function=_CellMass, units=r"\rm{g}")
 add_field("CellMassMsun", units=r"M_{\odot}",
           function=_CellMass,
@@ -394,7 +400,7 @@ add_field("CellMassCode",
           convert_function=_convertCellMassCode)
 
 def _TotalMass(field,data):
-    return (data["Density"]+data["Dark_Matter_Density"]) * data["CellVolume"]
+    return (data["Density"]+data[("deposit", "particle_density")]) * data["CellVolume"]
 add_field("TotalMass", function=_TotalMass, units=r"\rm{g}")
 add_field("TotalMassMsun", units=r"M_{\odot}",
           function=_TotalMass,
@@ -407,7 +413,7 @@ add_field("StarMassMsun", units=r"M_{\odot}",
           convert_function=_convertCellMassMsun)
 
 def _Matter_Density(field,data):
-    return (data['Density'] + data['Dark_Matter_Density'])
+    return (data['Density'] + data['particle_density'])
 add_field("Matter_Density",function=_Matter_Density,units=r"\rm{g}/\rm{cm^3}")
 
 def _ComovingDensity(field, data):
@@ -458,6 +464,7 @@ def _convertConvergence(data):
     # lens to source
     DLS = data.pf.parameters['cosmology_calculator'].AngularDiameterDistance(
         data.pf.current_redshift, data.pf.parameters['lensing_source_redshift'])
+    # TODO: convert 1.5e14 to constants
     return (((DL * DLS) / DS) * (1.5e14 * data.pf.omega_matter * 
                                 (data.pf.hubble_constant / speed_of_light_cgs)**2 *
                                 (1 + data.pf.current_redshift)))
@@ -520,7 +527,7 @@ def _XRayEmissivity(field, data):
     return ((data["Density"].astype('float64')**2.0) \
             *data["Temperature"]**0.5)
 def _convertXRayEmissivity(data):
-    return 2.168e60
+    return 2.168e60 #TODO: convert me to constants
 add_field("XRayEmissivity", function=_XRayEmissivity,
           convert_function=_convertXRayEmissivity,
           projection_conversion="1")
@@ -869,6 +876,66 @@ add_field("RadialVelocityKMS", function=_RadialVelocity,
 add_field("RadialVelocityKMSABS", function=_RadialVelocityABS,
           convert_function=_ConvertRadialVelocityKMS, units=r"\rm{km}/\rm{s}")
 
+def _ParticleRadialVelocity(field, data):
+    normal = data.get_field_parameter('normal')
+    center = data.get_field_parameter('center')
+    bv = data.get_field_parameter("bulk_velocity")
+    pos = "particle_position_%s"
+    pos = np.array([data[pos % ax] for ax in "xyz"])
+    vel = "particle_velocity_%s"
+    vel = np.array([data[vel % ax] for ax in "xyz"])
+    theta = get_sph_theta(pos.copy(), center)
+    phi = get_sph_phi(pos.copy(), center)
+    pos = pos - np.reshape(center, (3, 1))
+    vel = vel - np.reshape(bv, (3, 1))
+    sphr = get_sph_r_component(vel, theta, phi, normal)
+    return sphr
+
+add_field("ParticleRadialVelocity", function=_ParticleRadialVelocity,
+          particle_type=True, units=r"\rm{cm}/\rm{s}",
+          validators=[ValidateParameter("normal"), 
+                      ValidateParameter("center")])
+
+def _ParticleThetaVelocity(field, data):
+    normal = data.get_field_parameter('normal')
+    center = data.get_field_parameter('center')
+    bv = data.get_field_parameter("bulk_velocity")
+    pos = "particle_position_%s"
+    pos = np.array([data[pos % ax] for ax in "xyz"])
+    vel = "particle_velocity_%s"
+    vel = np.array([data[vel % ax] for ax in "xyz"])
+    theta = get_sph_theta(pos.copy(), center)
+    phi = get_sph_phi(pos.copy(), center)
+    pos = pos - np.reshape(center, (3, 1))
+    vel = vel - np.reshape(bv, (3, 1))
+    spht = get_sph_theta_component(vel, theta, phi, normal)
+    return sphrt
+
+add_field("ParticleThetaVelocity", function=_ParticleThetaVelocity,
+          particle_type=True, units=r"\rm{cm}/\rm{s}",
+          validators=[ValidateParameter("normal"), 
+                      ValidateParameter("center")])
+
+def _ParticlePhiVelocity(field, data):
+    normal = data.get_field_parameter('normal')
+    center = data.get_field_parameter('center')
+    bv = data.get_field_parameter("bulk_velocity")
+    pos = "particle_position_%s"
+    pos = np.array([data[pos % ax] for ax in "xyz"])
+    vel = "particle_velocity_%s"
+    vel = np.array([data[vel % ax] for ax in "xyz"])
+    theta = get_sph_theta(pos.copy(), center)
+    phi = get_sph_phi(pos.copy(), center)
+    pos = pos - np.reshape(center, (3, 1))
+    vel = vel - np.reshape(bv, (3, 1))
+    sphp = get_sph_phi_component(vel, theta, phi, normal)
+    return sphrp
+
+add_field("ParticlePhiVelocity", function=_ParticleThetaVelocity,
+          particle_type=True, units=r"\rm{cm}/\rm{s}",
+          validators=[ValidateParameter("normal"), 
+                      ValidateParameter("center")])
+
 def _TangentialVelocity(field, data):
     return np.sqrt(data["VelocityMagnitude"]**2.0
                  - data["RadialVelocity"]**2.0)
@@ -882,9 +949,10 @@ def _CuttingPlaneVelocityX(field, data):
     bulk_velocity = data.get_field_parameter("bulk_velocity")
     if bulk_velocity == None:
         bulk_velocity = np.zeros(3)
-    v_vec = np.array([data["%s-velocity" % ax] for ax in 'xyz']) \
-                - bulk_velocity[...,np.newaxis]
-    return np.dot(x_vec, v_vec)
+    v_vec = np.array([data["%s-velocity" % ax] - bv \
+                for ax, bv in zip('xyz', bulk_velocity)])
+    v_vec = np.rollaxis(v_vec, 0, len(v_vec.shape))
+    return np.sum(x_vec * v_vec, axis=-1)
 add_field("CuttingPlaneVelocityX", 
           function=_CuttingPlaneVelocityX,
           validators=[ValidateParameter("cp_%s_vec" % ax)
@@ -895,9 +963,10 @@ def _CuttingPlaneVelocityY(field, data):
     bulk_velocity = data.get_field_parameter("bulk_velocity")
     if bulk_velocity == None:
         bulk_velocity = np.zeros(3)
-    v_vec = np.array([data["%s-velocity" % ax] for ax in 'xyz']) \
-                - bulk_velocity[...,np.newaxis]
-    return np.dot(y_vec, v_vec)
+    v_vec = np.array([data["%s-velocity" % ax] - bv \
+                for ax, bv in zip('xyz', bulk_velocity)])
+    v_vec = np.rollaxis(v_vec, 0, len(v_vec.shape))
+    return np.sum(y_vec * v_vec, axis=-1)
 add_field("CuttingPlaneVelocityY", 
           function=_CuttingPlaneVelocityY,
           validators=[ValidateParameter("cp_%s_vec" % ax)
@@ -927,8 +996,8 @@ def _MeanMolecularWeight(field,data):
 add_field("MeanMolecularWeight",function=_MeanMolecularWeight,units=r"")
 
 def _JeansMassMsun(field,data):
-    MJ_constant = (((5*kboltz)/(G*mh))**(1.5)) * \
-    (3/(4*3.1415926535897931))**(0.5) / 1.989e33
+    MJ_constant = (((5.0 * kboltz) / (G * mh)) ** (1.5)) * \
+    (3.0 / (4.0 * np.pi)) ** (0.5) / mass_sun_cgs
 
     return (MJ_constant *
             ((data["Temperature"]/data["MeanMolecularWeight"])**(1.5)) *
@@ -936,23 +1005,13 @@ def _JeansMassMsun(field,data):
 add_field("JeansMassMsun",function=_JeansMassMsun,
           units=r"\rm{M_{\odot}}")
 
-def _convertDensity(data):
-    return data.convert("Density")
 def _pdensity(field, data):
-    blank = np.zeros(data.ActiveDimensions, dtype='float32')
-    if data["particle_position_x"].size == 0: return blank
-    CICDeposit_3(data["particle_position_x"].astype(np.float64),
-                 data["particle_position_y"].astype(np.float64),
-                 data["particle_position_z"].astype(np.float64),
-                 data["particle_mass"].astype(np.float32),
-                 data["particle_position_x"].size,
-                 blank, np.array(data.LeftEdge).astype(np.float64),
-                 np.array(data.ActiveDimensions).astype(np.int32),
-                 just_one(data['dx']))
-    return blank
+    pmass = data[('deposit','all_mass')]
+    np.divide(pmass, data["CellVolume"], pmass)
+    return pmass
 add_field("particle_density", function=_pdensity,
-          validators=[ValidateGridType()], convert_function=_convertDensity,
-          display_name=r"\mathrm{Particle}\/\mathrm{Density})")
+          validators=[ValidateGridType()],
+          display_name=r"\mathrm{Particle}\/\mathrm{Density}")
 
 def _MagneticEnergy(field,data):
     """This assumes that your front end has provided Bx, By, Bz in
@@ -988,8 +1047,8 @@ def _MagneticPressure(field,data):
     return data['MagneticEnergy']
 add_field("MagneticPressure",
           function=_MagneticPressure,
-          display_name=r"\rm{Magnetic}\/\rm{Energy}",
-          units="\rm{ergs}\/\rm{cm}^{-3}")
+          display_name=r"\rm{Magnetic}\/\rm{Pressure}",
+          units=r"\rm{ergs}\/\rm{cm}^{-3}")
 
 def _BPoloidal(field,data):
     normal = data.get_field_parameter("normal")

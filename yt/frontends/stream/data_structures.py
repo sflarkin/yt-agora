@@ -25,6 +25,7 @@ License:
 
 import weakref
 import numpy as np
+import uuid
 
 from yt.utilities.io_handler import io_registry
 from yt.funcs import *
@@ -265,8 +266,10 @@ class StreamStaticOutput(StaticOutput):
         #self._conversion_override = conversion_override
 
         self.stream_handler = stream_handler
-        StaticOutput.__init__(self, "InMemoryParameterFile", self._data_style)
-        self.storage_filename = storage_filename
+        name = "InMemoryParameterFile_%s" % (uuid.uuid4().hex)
+        from yt.data_objects.static_output import _cached_pfs
+        _cached_pfs[name] = self
+        StaticOutput.__init__(self, name, self._data_style)
 
         self.units = {}
         self.time_units = {}
@@ -282,6 +285,8 @@ class StreamStaticOutput(StaticOutput):
         self.periodicity = self.stream_handler.periodicity
         self.domain_dimensions = self.stream_handler.domain_dimensions
         self.current_time = self.stream_handler.simulation_time
+        self.parameters['Gamma'] = 5/3
+        self.parameters['EOSType'] = -1
         if self.stream_handler.cosmology_simulation:
             self.cosmological_simulation = 1
             self.current_redshift = self.stream_handler.current_redshift
