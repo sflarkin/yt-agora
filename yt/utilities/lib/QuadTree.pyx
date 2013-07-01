@@ -342,10 +342,12 @@ cdef class QuadTree:
 
     @cython.boundscheck(False)
     @cython.wraparound(False)
-    def get_all(self, int count_only = 0):
+    @cython.cdivision(True)
+    def get_all(self, int count_only = 0, int style = 1):
         cdef int i, j, vi
         cdef int total = 0
         vals = []
+        self.merged = style
         for i in range(self.top_grid_dims[0]):
             for j in range(self.top_grid_dims[1]):
                 total += self.count(self.root_nodes[i][j])
@@ -390,6 +392,7 @@ cdef class QuadTree:
                 count += self.count(node.children[i][j])
         return count
 
+    @cython.cdivision(True)
     cdef int fill(self, QuadTreeNode *node, 
                         np.int64_t curpos,
                         np.float64_t *px,
@@ -402,6 +405,8 @@ cdef class QuadTree:
                         np.float64_t wtoadd,
                         np.int64_t level):
         cdef int i, j, n
+        cdef np.float64_t *vorig
+        vorig = <np.float64_t *> alloca(sizeof(np.float64_t) * self.nvals)
         if node.children[0][0] == NULL:
             if self.merged == -1:
                 for i in range(self.nvals):
@@ -421,6 +426,7 @@ cdef class QuadTree:
         cdef np.int64_t added = 0
         if self.merged == 1:
             for i in range(self.nvals):
+                vorig[i] = vtoadd[i]
                 vtoadd[i] += node.val[i]
             wtoadd += node.weight_val
         elif self.merged == -1:
@@ -436,7 +442,7 @@ cdef class QuadTree:
                         vtoadd, wtoadd, level + 1)
         if self.merged == 1:
             for i in range(self.nvals):
-                vtoadd[i] -= node.val[i]
+                vtoadd[i] = vorig[i]
             wtoadd -= node.weight_val
         return added
 

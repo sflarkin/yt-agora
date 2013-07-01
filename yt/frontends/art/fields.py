@@ -25,6 +25,8 @@ License:
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 import numpy as np
+
+from yt.funcs import *
 from yt.data_objects.field_info_container import \
     FieldInfoContainer, \
     FieldInfo, \
@@ -40,6 +42,10 @@ import yt.utilities.lib as amr_utils
 from yt.utilities.physical_constants import mass_sun_cgs
 from yt.frontends.art.definitions import *
 
+from yt.data_objects.particle_fields import \
+    particle_deposition_functions, \
+    particle_vector_functions
+
 KnownARTFields = FieldInfoContainer()
 add_art_field = KnownARTFields.add_field
 ARTFieldInfo = FieldInfoContainer.create_with_fallback(FieldInfo)
@@ -48,19 +54,6 @@ add_field = ARTFieldInfo.add_field
 for f in fluid_fields:
     add_art_field(f, function=NullFunc, take_log=True,
                   validators=[ValidateDataField(f)])
-
-for f in particle_fields:
-    add_art_field(f, function=NullFunc, take_log=True,
-                  validators=[ValidateDataField(f)],
-                  particle_type=True)
-add_art_field("particle_mass", function=NullFunc, take_log=True,
-              validators=[ValidateDataField(f)],
-              particle_type=True,
-              convert_function=lambda x: x.convert("particle_mass"))
-add_art_field("particle_mass_initial", function=NullFunc, take_log=True,
-              validators=[ValidateDataField(f)],
-              particle_type=True,
-              convert_function=lambda x: x.convert("particle_mass"))
 
 def _convertDensity(data):
     return data.convert("Density")
@@ -213,6 +206,25 @@ ARTFieldInfo["Metal_Density"]._units = r"\rm{g}/\rm{cm}^3"
 ARTFieldInfo["Metal_Density"]._projected_units = r"\rm{g}/\rm{cm}^2"
 
 # Particle fields
+for f in particle_fields:
+    add_art_field(f, function=NullFunc, take_log=True,
+                  validators=[ValidateDataField(f)],
+                  particle_type=True)
+for ax in "xyz":
+    add_art_field("particle_velocity_%s" % ax, function=NullFunc, take_log=True,
+                  validators=[ValidateDataField(f)],
+                  particle_type=True,
+                  convert_function=lambda x: x.convert("particle_velocity_%s" % ax))
+add_art_field("particle_mass", function=NullFunc, take_log=True,
+              validators=[ValidateDataField(f)],
+              particle_type=True,
+              convert_function=lambda x: x.convert("particle_mass"))
+add_art_field("particle_mass_initial", function=NullFunc, take_log=True,
+              validators=[ValidateDataField(f)],
+              particle_type=True,
+              convert_function=lambda x: x.convert("particle_mass"))
+
+
 def _particle_age(field, data):
     tr = data["particle_creation_time"]
     return data.pf.current_time - tr
@@ -255,3 +267,55 @@ def _ParticleMassMsun(field, data):
     return data["particle_mass"]/mass_sun_cgs
 add_field("ParticleMassMsun", function=_ParticleMassMsun, particle_type=True,
           take_log=True, units=r"\rm{Msun}")
+
+# Particle Deposition Fields
+_ptypes = ["all", "darkmatter", "stars", "specie0"]
+
+for _ptype in _ptypes:
+    particle_vector_functions(_ptype, ["particle_position_%s" % ax for ax in 'xyz'],
+                                     ["particle_velocity_%s" % ax for ax in 'xyz'],
+                              ARTFieldInfo)
+    particle_deposition_functions(_ptype, "Coordinates", "particle_mass",
+                                   ARTFieldInfo)
+
+# Mixed Fluid-Particle Fields
+
+def baryon_density(field, data):
+    rho = data["deposit", "stars_density"]
+    rho += data["gas", "Density"]
+    return rho
+
+ARTFieldInfo.add_field(("deposit", "baryon_density"),
+         function = baryon_density,
+         validators = [ValidateSpatial()],
+         display_name = "\\mathrm{Baryon Density}",
+         units = r"\mathrm{g}/\mathrm{cm}^{3}",
+         projected_units = r"\mathrm{g}/\mathrm{cm}^{2}",
+         projection_conversion = 'cm')
+
+def total_density(field, data):
+    rho = data["deposit", "baryon_density"]
+    rho += data["deposit", "specie0_density"]
+    return rho
+
+ARTFieldInfo.add_field(("deposit", "total_density"),
+         function = total_density,
+         validators = [ValidateSpatial()],
+         display_name = "\\mathrm{Total Density}",
+         units = r"\mathrm{g}/\mathrm{cm}^{3}",
+         projected_units = r"\mathrm{g}/\mathrm{cm}^{2}",
+         projection_conversion = 'cm')
+
+def multimass_density(field, data):
+    rho = data["deposit", "baryon_density"]
+    rho += data["deposit", "darkmatter_density"]
+    return rho
+
+ARTFieldInfo.add_field(("deposit", "multimass_density"),
+         function = multimass_density,
+         validators = [ValidateSpatial()],
+         display_name = "\\mathrm{Multimass Density}",
+         units = r"\mathrm{g}/\mathrm{cm}^{3}",
+         projected_units = r"\mathrm{g}/\mathrm{cm}^{2}",
+         projection_conversion = 'cm')
+
