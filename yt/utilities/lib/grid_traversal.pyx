@@ -58,24 +58,6 @@ cdef extern from "math.h":
     double sin(double x) nogil
     double sqrt(double x) nogil
 
-cdef struct VolumeContainer:
-    int n_fields
-    np.float64_t **data
-    np.float64_t left_edge[3]
-    np.float64_t right_edge[3]
-    np.float64_t dds[3]
-    np.float64_t idds[3]
-    int dims[3]
-
-ctypedef void sample_function(
-                VolumeContainer *vc,
-                np.float64_t v_pos[3],
-                np.float64_t v_dir[3],
-                np.float64_t enter_t,
-                np.float64_t exit_t,
-                int index[3],
-                void *data) nogil
-
 cdef class PartitionedGrid:
     cdef public object my_data
     cdef public object LeftEdge
@@ -904,7 +886,7 @@ cdef class ProtoPrism:
     @cython.wraparound(False)
     def get_brick(self, np.ndarray[np.float64_t, ndim=1] grid_left_edge,
                         np.ndarray[np.float64_t, ndim=1] grid_dds,
-                        child_mask):
+                        np.ndarray[np.uint8_t, ndim=3, cast=True] child_mask):
         # We get passed in the left edge, the dds (which gives dimensions) and
         # the data, which is already vertex-centered.
         cdef PartitionedGrid PG
