@@ -1160,12 +1160,11 @@ class SlicePlot(PWViewerMPL):
          or the axis name itself
     fields : string
          The name of the field(s) to be plotted.
-    center : two or three-element vector of sequence floats, 'c', or 'center', or 'max'
-         The coordinate of the center of the image.  If left blank,
-         the image centers on the location of the maximum density
-         cell.  If set to 'c' or 'center', the plot is centered on
-         the middle of the domain.  If set to 'max', will be at the point
-         of highest density.
+    center : two or three-element vector of sequence floats, or one of 'c', 
+         'center', 'max' or 'm'. The coordinate of the center of the image. 
+         If set to 'c', 'center' or left blank, the plot is centered on the
+         middle of the domain. If set to 'max' or 'm', the center will be at 
+         the point of highest density.
     width : tuple or a float.
          Width can have four different formats to support windows with variable
          x and y widths.  They are:
@@ -1270,13 +1269,11 @@ class ProjectionPlot(PWViewerMPL):
          or the axis name itself
     fields : string
         The name of the field(s) to be plotted.
-    center : two or three-element vector of sequence floats, 'c', or 'center', or 'max'
-         The coordinate of the center of the image.  If left blank,
-         the image centers on the location of the maximum density
-         cell.  If set to 'c' or 'center', the plot is centered on
-         the middle of the domain.  If set to 'max', will be at the point
-         of highest density.
-    width : tuple or a float.
+    center : two or three-element vector of sequence floats, or one of 'c', 
+         'center', 'max' or 'm'. The coordinate of the center of the image. 
+         If set to 'c', 'center' or left blank, the plot is centered on the
+         middle of the domain. If set to 'max' or 'm', the center will be at 
+         the point of highest density.
          Width can have four different formats to support windows with variable
          x and y widths.  They are:
 
@@ -1388,11 +1385,11 @@ class OffAxisSlicePlot(PWViewerMPL):
         The vector normal to the slicing plane.
     fields : string
         The name of the field(s) to be plotted.
-    center : A two or three-element vector of sequence floats, 'c', or 'center'
-        The coordinate of the center of the image.  If left blank,
-        the image centers on the location of the maximum density
-        cell.  If set to 'c' or 'center', the plot is centered on
-        the middle of the domain.
+    center : two or three-element vector of sequence floats, or one of 'c', 
+         'center', 'max' or 'm'. The coordinate of the center of the image. 
+         If set to 'c', 'center' or left blank, the plot is centered on the
+         middle of the domain. If set to 'max' or 'm', the center will be at 
+         the point of highest density.
     width : A tuple or a float
         A tuple containing the width of image and the string key of
         the unit: (width, 'unit').  If set to a float, code units
@@ -1471,11 +1468,11 @@ class OffAxisProjectionPlot(PWViewerMPL):
         The vector normal to the slicing plane.
     fields : string
         The name of the field(s) to be plotted.
-    center : A two or three-element vector of sequence floats, 'c', or 'center'
-        The coordinate of the center of the image.  If left blank,
-        the image centers on the location of the maximum density
-        cell.  If set to 'c' or 'center', the plot is centered on
-        the middle of the domain.
+    center : two or three-element vector of sequence floats, or one of 'c', 
+         'center', 'max' or 'm'. The coordinate of the center of the image. 
+         If set to 'c', 'center' or left blank, the plot is centered on the
+         middle of the domain. If set to 'max' or 'm', the center will be at 
+         the point of highest density.
     width : tuple or a float.
          Width can have four different formats to support windows with variable
          x and y widths.  They are:
