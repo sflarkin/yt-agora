@@ -254,11 +254,15 @@ cdef class SelectorObject:
             this_level = 0 # We turn this off for the second pass.
             iter += 1
 
+    @cython.boundscheck(False)
+    @cython.wraparound(False)
+    @cython.cdivision(True)
     cdef int select_grid(self, np.float64_t left_edge[3],
                                np.float64_t right_edge[3],
                                np.int32_t level, Oct *o = NULL) nogil:
-        return 0
-    
+        if level < self.min_level or level > self.max_level: return 0
+        return self.select_bbox(left_edge,right_edge)
+ 
     cdef int select_cell(self, np.float64_t pos[3], np.float64_t dds[3]) nogil:
         return 0
 
@@ -327,7 +331,7 @@ cdef class SelectorObject:
     def fill_mask(self, gobj):
         cdef np.ndarray[np.uint8_t, ndim=3, cast=True] child_mask
         child_mask = gobj.child_mask
-        cdef np.ndarray[np.uint8_t, ndim=3] mask 
+        cdef np.ndarray[np.uint8_t, ndim=3] mask
         cdef int ind[3][2]
         cdef int dim[3]
         cdef np.ndarray[np.float64_t, ndim=1] odds = gobj.dds
@@ -455,14 +459,6 @@ cdef class SphereSelector(SelectorObject):
     @cython.boundscheck(False)
     @cython.wraparound(False)
     @cython.cdivision(True)
-    cdef int select_grid(self, np.float64_t left_edge[3],
-                               np.float64_t right_edge[3],
-                               np.int32_t level, Oct *o = NULL) nogil:
-        return self.select_bbox(left_edge,right_edge)
-
-    @cython.boundscheck(False)
-    @cython.wraparound(False)
-    @cython.cdivision(True)
     cdef int select_cell(self, np.float64_t pos[3], np.float64_t dds[3]) nogil:
         # sphere center either inside cell or center of cell lies inside sphere
         if (pos[0] - 0.5*dds[0] <= self.center[0] <= pos[0]+0.5*dds[0] and
@@ -535,15 +531,6 @@ cdef class RegionSelector(SelectorObject):
         for i in range(3):
             self.left_edge[i] = dobj.left_edge[i]
             self.right_edge[i] = dobj.right_edge[i]
-
-    @cython.boundscheck(False)
-    @cython.wraparound(False)
-    @cython.cdivision(True)
-    cdef int select_grid(self, np.float64_t left_edge[3],
-                               np.float64_t right_edge[3],
-                               np.int32_t level, Oct *o = NULL) nogil:
-        if level < self.min_level or level > self.max_level: return 0
-        return self.select_bbox( left_edge, right_edge )
 
     @cython.boundscheck(False)
     @cython.wraparound(False)
@@ -622,14 +609,6 @@ cdef class DiskSelector(SelectorObject):
         self.radius = dobj._radius
         self.radius2 = dobj._radius * dobj._radius
         self.height = dobj._height
-
-    @cython.boundscheck(False)
-    @cython.wraparound(False)
-    @cython.cdivision(True)
-    cdef int select_grid(self, np.float64_t left_edge[3],
-                               np.float64_t right_edge[3],
-                               np.int32_t level, Oct *o = NULL) nogil:
-        return self.select_bbox( left_edge, right_edge )
 
     @cython.boundscheck(False)
     @cython.wraparound(False)
@@ -735,14 +714,6 @@ cdef class CuttingPlaneSelector(SelectorObject):
     @cython.boundscheck(False)
     @cython.wraparound(False)
     @cython.cdivision(True)
-    cdef int select_grid(self, np.float64_t left_edge[3],
-                               np.float64_t right_edge[3],
-                               np.int32_t level, Oct *o = NULL) nogil:
-        return self.select_bbox(left_edge,right_edge)
-
-    @cython.boundscheck(False)
-    @cython.wraparound(False)
-    @cython.cdivision(True)
     cdef int select_cell(self, np.float64_t pos[3], np.float64_t dds[3]) nogil:
         cdef np.float64_t left_edge[3]
         cdef np.float64_t right_edge[3]
@@ -819,14 +790,6 @@ cdef class SliceSelector(SelectorObject):
     @cython.boundscheck(False)
     @cython.wraparound(False)
     @cython.cdivision(True)
-    cdef int select_grid(self, np.float64_t left_edge[3],
-                               np.float64_t right_edge[3],
-                               np.int32_t level, Oct *o = NULL) nogil:
-        return self.select_bbox( left_edge, right_edge )
-
-    @cython.boundscheck(False)
-    @cython.wraparound(False)
-    @cython.cdivision(True)
     cdef int select_cell(self, np.float64_t pos[3], np.float64_t dds[3]) nogil:
         if pos[self.axis] + 0.5*dds[self.axis] > self.coord \
            and pos[self.axis] - 0.5*dds[self.axis] <= self.coord:
@@ -874,14 +837,6 @@ cdef class OrthoRaySelector(SelectorObject):
         self.py_ax = dobj.py_ax
         self.px = dobj.px
         self.py = dobj.py
-
-    @cython.boundscheck(False)
-    @cython.wraparound(False)
-    @cython.cdivision(True)
-    cdef int select_grid(self, np.float64_t left_edge[3],
-                               np.float64_t right_edge[3],
-                               np.int32_t level, Oct *o = NULL) nogil:
-        return self.select_bbox(left_edge,right_edge)
 
     @cython.boundscheck(False)
     @cython.wraparound(False)
@@ -957,14 +912,6 @@ cdef class RaySelector(SelectorObject):
             self.vec[i] = dobj.vec[i]
             self.p1[i] = dobj.start_point[i]
             self.p2[i] = dobj.end_point[i]
-
-    @cython.boundscheck(False)
-    @cython.wraparound(False)
-    @cython.cdivision(True)
-    cdef int select_grid(self, np.float64_t left_edge[3],
-                               np.float64_t right_edge[3],
-                               np.int32_t level, Oct *o = NULL) nogil:
-        return self.select_bbox(left_edge,right_edge)
 
     @cython.boundscheck(False)
     @cython.wraparound(False)
@@ -1152,14 +1099,6 @@ cdef class EllipsoidSelector(SelectorObject):
         self.mag[0] = dobj._A
         self.mag[1] = dobj._B
         self.mag[2] = dobj._C
-
-    @cython.boundscheck(False)
-    @cython.wraparound(False)
-    @cython.cdivision(True)
-    cdef int select_grid(self, np.float64_t left_edge[3],
-                               np.float64_t right_edge[3],
-                               np.int32_t level, Oct *o = NULL) nogil:
-        return self.select_bbox(left_edge, right_edge)
 
     @cython.boundscheck(False)
     @cython.wraparound(False)
