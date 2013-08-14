@@ -7,6 +7,11 @@ cimport numpy as np
 import sys 
 
 from yt.geometry.selection_routines cimport SelectorObject
+from yt.geometry.oct_container cimport \
+    OctreeContainer, OctAllocationContainer, \
+    SparseOctreeContainer
+from yt.geometry.oct_visitors cimport \
+    OctVisitorData, oct_visitor_function, Oct
 from libc.stdint cimport int32_t, int64_t
 from libc.stdlib cimport malloc, free
 import  data_structures  
@@ -103,8 +108,12 @@ cdef extern from "artio.h":
     int artio_particle_read_species_begin(artio_fileset_handle *handle, int species)
     int artio_particle_read_species_end(artio_fileset_handle *handle) 
    
+    
+cdef extern from "artio_internal.h":
+    np.int64_t artio_sfc_index( artio_fileset_handle *handle, int coords[3] )
+    void artio_sfc_coords( artio_fileset_handle *handle, int64_t index, int coords[3] )
 
-cdef check_artio_status(int status, char *fname="[unknown]"):
+cdef void check_artio_status(int status, char *fname="[unknown]"):
     if status!=ARTIO_SUCCESS :
         callername = sys._getframe().f_code.co_name
         nline = sys._getframe().f_lineno
@@ -282,10 +291,10 @@ cdef class artio_fileset :
             elif self.parameters["num_secondary_variables"][species] > 0 and \
                     field in self.parameters["species_%02u_secondary_variable_labels"%(species,)] :
                 selected_secondary[species].append((self.parameters["species_%02u_secondary_variable_labels"%(species,)].index(field),(species,field)))
-                data[(species,field)] = np.empty(0,dtype="float32")
+                data[(species,field)] = np.empty(0,dtype="float64")
             elif field == "MASS" :
                 selected_mass[species] = (species,field)
-                data[(species,field)] = np.empty(0,dtype="float32")
+                data[(species,field)] = np.empty(0,dtype="float64")
             elif field == "PID" :
                 selected_pid[species] = (species,field)
                 data[(species,field)] = np.empty(0,dtype="int64")
@@ -394,7 +403,7 @@ cdef class artio_fileset :
         ires = np.empty(0, dtype="int64")
 
         #data = [ np.empty(max_cells, dtype="float32") for i in range(num_fields) ]
-        data = [ np.empty(0,dtype="float32") for i in range(num_fields)]
+        data = [ np.empty(0,dtype="float64") for i in range(num_fields)]
 
         count = 0
         for sfc in range( sfc_start, sfc_end+1 ) :
@@ -513,3 +522,393 @@ def artio_is_valid( char *file_prefix ) :
     else :
         artio_fileset_close(handle) 
     return True
+
+def get_coords(artio_fileset handle, np.int64_t s):
+    cdef int coords[3]
+    artio_sfc_coords(handle.handle, s, coords)
+    return (coords[0], coords[1], coords[2])
+
+cdef struct particle_var_pointers:
+    # The number of particles we have filled
+    np.int64_t count
+    # Number of primary variables and pointers to their indices
+    int n_p
+    int p_ind[16] # Max of 16 vars
+    # Number of secondary variables and pointers to their indices
+    int n_s
+    int s_ind[16] # Max of 16 vars
+    # Pointers to the bools and data arrays for mass, pid and species
+    int n_mass
+    np.float64_t *mass
+    int n_pid
+    np.int64_t *pid
+    int n_species
+    np.int8_t *species
+    # Pointers to the pointers to primary and secondary vars
+    np.float64_t *pvars[16]
+    np.float64_t *svars[16]
+
+cdef class ARTIOOctreeContainer(SparseOctreeContainer):
+    # This is a transitory, created-on-demand OctreeContainer.  It should not
+    # be considered to be long-lasting, and during its creation it will read
+    # the index file.  This means that when created it will then be able to
+    # provide coordinates, but then on subsequent IO accesses it will pass over
+    # the file again, despite knowing the indexing system already.  Because of
+    # this, we will avoid creating it as long as possible.
+
+    cdef public np.int64_t sfc_start
+    cdef public np.int64_t sfc_end
+    cdef public artio_fileset artio_handle
+    cdef Oct **root_octs
+    cdef np.int64_t *level_indices
+
+    def __init__(self, oct_dimensions, domain_left_edge, domain_right_edge,
+                 int64_t sfc_start, int64_t sfc_end, artio_fileset artio_handle):
+        self.artio_handle = artio_handle
+        self.sfc_start = sfc_start
+        self.sfc_end = sfc_end
+        # Note the final argument is partial_coverage, which indicates whether
+        # or not an Oct can be partially refined.
+        super(ARTIOOctreeContainer, self).__init__(oct_dimensions,
+            domain_left_edge, domain_right_edge)
+        self.level_indices = NULL
+        self._initialize_root_mesh()
+
+    @cython.boundscheck(False)
+    @cython.wraparound(False)
+    @cython.cdivision(True)
+    def _initialize_root_mesh(self):
+        # We actually will not be initializing the root mesh here, we will be
+        # initializing the entire mesh between sfc_start and sfc_end.
+        cdef np.int64_t oct_ind, sfc, nadded, tot_octs, ipos
+        cdef np.uint8_t bits
+        cdef int status
+        cdef artio_fileset_handle *handle = self.artio_handle.handle
+        cdef double dpos[3]
+        cdef int coords[3]
+        cdef int num_oct_levels, level, i, j
+        cdef int max_level = self.artio_handle.max_level
+        cdef int *num_octs_per_level = <int *>malloc(
+            (max_level + 1)*sizeof(int))
+        cdef np.int64_t *tot_octs_per_level = <np.int64_t *>malloc(
+            (max_level + 1)*sizeof(np.int64_t))
+        self.level_indices = <np.int64_t *>malloc(
+            (max_level + 1)*sizeof(np.int64_t))
+        for level in range(max_level + 1):
+            tot_octs_per_level[level] = 0
+        status = artio_grid_cache_sfc_range(handle,
+            self.sfc_start, self.sfc_end )
+        check_artio_status(status) 
+        # Now we iterate and create them, level by level.
+        # Note that we are doing a bit of magic to figure out how many root
+        # nodes we will need at most
+        cdef int nmask = self.nn[0] * self.nn[1] * self.nn[2] / 8
+        cdef np.uint8_t *mask = <np.uint8_t *> malloc(
+            self.nn[0] * self.nn[1] * self.nn[2]) # one bit for each one
+        for i in range(nmask): mask[i] = 0
+        for sfc in range(self.sfc_start, self.sfc_end + 1):
+            status = artio_grid_read_root_cell_begin( handle, sfc, 
+                    dpos, NULL, &num_oct_levels, num_octs_per_level )
+            check_artio_status(status) 
+            artio_sfc_coords(handle, sfc, coords)
+            # Now we mask that bit
+            for i in range(3):
+                coords[i] = <int> (coords[i]/2)
+            ipos = ((coords[0]*self.nn[1])+coords[1])*self.nn[2]+coords[2]
+            bits = ipos % 8
+            mask[ <int> (ipos/8) ] |= (1 << bits)
+            for level in range(1, num_oct_levels+1):
+                # Now we are simply counting so we can pre-allocate arrays.
+                # Because the grids have all been cached this should be fine.
+                tot_octs_per_level[level] += num_octs_per_level[level-1]
+            status = artio_grid_read_root_cell_end( handle )
+            check_artio_status(status)
+        cdef np.int64_t num_root = 0
+        for i in range(nmask):
+            for j in range(8):
+                num_root += ((mask[i] >> j) & 1)
+        tot_octs_per_level[0] = num_root
+        cdef np.int64_t tot = 0
+        for i in range(max_level + 1):
+            self.level_indices[i] = tot
+            tot += tot_octs_per_level[i]
+        self.allocate_domains([tot], num_root)
+        # Now we have everything counted, and we need to create the appropriate
+        # number of arrays.
+        cdef np.ndarray[np.float64_t, ndim=2] pos
+        pos = np.empty((tot, 3), dtype="float64")
+        # We do a special case for level 0
+        cdef np.float64_t dds[3]
+        for i in range(3):
+            dds[i] = (self.DRE[i] - self.DLE[i])/self.nn[i]
+        for sfc in range(self.sfc_start, self.sfc_end + 1):
+            status = artio_grid_read_root_cell_begin( handle, sfc, 
+                    dpos, NULL, &num_oct_levels, num_octs_per_level)
+            check_artio_status(status) 
+            artio_sfc_coords(handle, sfc, coords)
+            # Now we check if we have added yet or not
+            for i in range(3):
+                coords[i] = <int> (coords[i]/2)
+            ipos = ((coords[0]*self.nn[1])+coords[1])*self.nn[2]+coords[2]
+            bits = ipos % 8
+            if ((mask[<int>(ipos/8)] >> bits) & 1) == 1:
+                # We add it here
+                for i in range(3):
+                    dpos[i] = self.DLE[i] + (coords[i]+0.5)*dds[i]
+                    pos[self.level_indices[0], i] = dpos[i]
+                mask[<int>(ipos/8)] -= (1 << bits)
+                self.level_indices[0] += 1
+            # Now we iterate over all the children
+            for level in range(1, num_oct_levels+1):
+                status = artio_grid_read_level_begin(handle, level)
+                check_artio_status(status) 
+                for oct_ind in range(num_octs_per_level[level - 1]):
+                    status = artio_grid_read_oct(handle, dpos, NULL, NULL)
+                    check_artio_status(status)
+                    for i in range(3):
+                        pos[self.level_indices[level], i] = dpos[i]
+                    self.level_indices[level] += 1
+                status = artio_grid_read_level_end(handle)
+                check_artio_status(status)
+            status = artio_grid_read_root_cell_end( handle )
+            check_artio_status(status)
+        nadded = 0
+        cdef np.int64_t si, ei
+        si = 0
+        for level in range(max_level + 1):
+            self.level_indices[level] = si
+            ei = si + tot_octs_per_level[level]
+            if tot_octs_per_level[level] == 0: break
+            nadded = self.add(1, level, pos[si:ei, :])
+            if nadded != (ei - si):
+                print level, nadded, ei, si, self.max_root,
+                print self.level_indices[level]
+                print pos[si:ei,:]
+                raise RuntimeError
+            si = ei
+        artio_grid_clear_sfc_cache(handle)
+        free(mask)
+        free(num_octs_per_level)
+        free(tot_octs_per_level)
+
+    @cython.boundscheck(False)
+    @cython.wraparound(False)
+    @cython.cdivision(True)
+    def fill_sfc(self, 
+                 np.ndarray[np.uint8_t, ndim=1] levels,
+                 np.ndarray[np.uint8_t, ndim=1] cell_inds,
+                 np.ndarray[np.int64_t, ndim=1] file_inds,
+                 field_indices, dest_fields):
+        cdef np.ndarray[np.float32_t, ndim=2] source
+        cdef np.ndarray[np.float64_t, ndim=1] dest
+        cdef int n, status, i, di, num_oct_levels, nf, ngv, max_level
+        cdef np.int64_t sfc
+        cdef np.float64_t val
+        cdef artio_fileset_handle *handle = self.artio_handle.handle
+        cdef double dpos[3]
+        # We duplicate some of the grid_variables stuff here so that we can
+        # potentially release the GIL
+        nf = len(field_indices)
+        ngv = self.artio_handle.num_grid_variables
+        max_level = self.artio_handle.max_level
+        cdef int *num_octs_per_level = <int *>malloc(
+            (max_level + 1)*sizeof(int))
+        cdef float *grid_variables = <float *>malloc(
+            8 * ngv * sizeof(float))
+        cdef int* field_ind = <int*> malloc(
+            nf * sizeof(int))
+        cdef np.float32_t **field_vals = <np.float32_t**> malloc(
+            nf * sizeof(np.float32_t*))
+        cdef np.int64_t *local_ind = <np.int64_t *> malloc(
+            (max_level + 1) * sizeof(np.int64_t))
+        for i in range(max_level + 1):
+            # This will help us keep track of where we are in the flattened
+            # array, which will be indexed by file_ind.
+            local_ind[i] = self.level_indices[i]
+        source_arrays = []
+        for i in range(nf):
+            field_ind[i] = field_indices[i]
+            # This zeros should be an empty once we handle the root grid
+            source = np.zeros((self.nocts, 8), dtype="float32")
+            source_arrays.append(source)
+            field_vals[i] = <np.float32_t*> source.data
+        # First we need to walk the mesh in the file.  Then we fill in the dest
+        # location based on the file index.
+        status = artio_grid_cache_sfc_range(handle,
+            self.sfc_start, self.sfc_end )
+        check_artio_status(status) 
+        for sfc in range(self.sfc_start, self.sfc_end + 1):
+            status = artio_grid_read_root_cell_begin( handle, sfc, 
+                    dpos, NULL, &num_oct_levels, num_octs_per_level)
+            check_artio_status(status) 
+            for level in range(1, num_oct_levels+1):
+                status = artio_grid_read_level_begin(handle, level)
+                check_artio_status(status) 
+                for oct_ind in range(num_octs_per_level[level - 1]):
+                    status = artio_grid_read_oct(handle, dpos, grid_variables, NULL)
+                    check_artio_status(status)
+                    for j in range(8):
+                        for i in range(nf):
+                            field_vals[i][local_ind[level] * 8 + j] = \
+                                grid_variables[ngv * j + i]
+                    local_ind[level] += 1
+                status = artio_grid_read_level_end(handle)
+                check_artio_status(status)
+            status = artio_grid_read_root_cell_end( handle )
+            check_artio_status(status)
+        # Now we have all our sources.
+        artio_grid_clear_sfc_cache(handle)
+        for j in range(nf):
+            dest = dest_fields[j]
+            source = source_arrays[j]
+            for i in range(levels.shape[0]):
+                if levels[i] == 0: continue
+                oct_ind = self.level_indices[levels[i]]
+                dest[i] = source[file_inds[i] + oct_ind, cell_inds[i]]
+        free(field_ind)
+        free(field_vals)
+        free(local_ind)
+        free(grid_variables)
+        free(num_octs_per_level)
+
+    def fill_sfc_particles(self, fields):
+        cdef int status, ispec, subspecies
+        cdef np.int64_t sfc, particle, pid, ind, vind
+        cdef int num_species = self.artio_handle.num_species
+        cdef artio_fileset_handle *handle = self.artio_handle.handle
+        cdef int *num_particles_per_species =  <int *>malloc(
+            sizeof(int)*num_species) 
+        cdef int *accessed_species =  <int *>malloc(
+            sizeof(int)*num_species) 
+        cdef int *total_particles = <int *>malloc(
+            sizeof(int)*num_species) 
+        cdef particle_var_pointers *vpoints = <particle_var_pointers *> malloc(
+            sizeof(particle_var_pointers)*num_species)
+        cdef double *primary_variables
+        cdef float *secondary_variables
+        cdef np.int64_t tp
+
+        cdef np.ndarray[np.int8_t, ndim=1] npi8arr
+        cdef np.ndarray[np.int64_t, ndim=1] npi64arr
+        cdef np.ndarray[np.float64_t, ndim=1] npf64arr
+
+        # Now we set up our field pointers
+        params = self.artio_handle.parameters
+
+        npri_vars = params["num_primary_variables"]
+        nsec_vars = params["num_secondary_variables"]
+        primary_variables = <double *>malloc(sizeof(double) * max(npri_vars))
+        secondary_variables = <float *>malloc(sizeof(float) * max(nsec_vars))
+
+        cdef particle_var_pointers *vp
+
+        for ispec in range(num_species):
+            total_particles[ispec] = 0
+            accessed_species[ispec] = 0
+            # Initialize our vpoints array
+            vpoints[ispec].count = 0
+            vpoints[ispec].n_mass = 0
+            vpoints[ispec].n_pid = 0
+            vpoints[ispec].n_species = 0
+            vpoints[ispec].n_p = 0
+            vpoints[ispec].n_s = 0
+
+        status = artio_particle_cache_sfc_range( handle,
+                self.sfc_start, self.sfc_end ) 
+        check_artio_status(status)
+
+        # Pass through once.  We want every single particle.
+        for sfc in range(self.sfc_start, self.sfc_end + 1):
+            status = artio_particle_read_root_cell_begin( handle, sfc,
+                    num_particles_per_species )
+            check_artio_status(status)
+
+            for ispec in range(num_species):
+                total_particles[ispec] += num_particles_per_species[ispec]
+
+            status = artio_particle_read_root_cell_end( handle )
+            check_artio_status(status)
+
+        # Now we allocate our final fields, which will be filled
+        #for ispec in range(num_species):
+        #    print "In SFC %s to %s reading %s of species %s" % (
+        #        self.sfc_start, self.sfc_end + 1, total_particles[ispec], ispec)
+        data = {}
+        for species, field in sorted(fields):
+            accessed_species[species] = 1
+            pri_vars = params.get(
+                "species_%02u_primary_variable_labels" % (species,), [])
+            sec_vars = params.get(
+                "species_%02u_secondary_variable_labels" % (species,), [])
+            tp = total_particles[species]
+            vp = &vpoints[species]
+            if field == "MASS":
+                vp.n_mass = 1
+                npf64arr = data[(species, field)] = np.zeros(tp, dtype="float64")
+                # We fill this *now*
+                npf64arr += params["particle_species_mass"][species]
+                vp.mass = <np.float64_t*> npf64arr.data
+            elif field == "PID":
+                vp.n_pid = 1
+                npi64arr = data[(species, field)] = np.zeros(tp, dtype="int64")
+                vp.pid = <np.int64_t*> npi64arr.data
+            elif field == "SPECIES":
+                vp.n_species = 1
+                npi8arr = data[(species, field)] = np.zeros(tp, dtype="int8")
+                # We fill this *now*
+                npi8arr += species
+                vp.species = <np.int8_t*> npi8arr.data
+            elif npri_vars[species] > 0 and field in pri_vars :
+                npf64arr = data[(species, field)] = np.zeros(tp, dtype="float64")
+                vp.p_ind[vp.n_p] = pri_vars.index(field)
+                vp.pvars[vp.n_p] = <np.float64_t *> npf64arr.data
+                vp.n_p += 1
+            elif nsec_vars[species] > 0 and field in sec_vars :
+                npf64arr = data[(species, field)] = np.zeros(tp, dtype="float64")
+                vp.s_ind[vp.n_s] = sec_vars.index(field)
+                vp.svars[vp.n_s] = <np.float64_t *> npf64arr.data
+                vp.n_s += 1
+
+        for sfc in range(self.sfc_start, self.sfc_end + 1):
+            status = artio_particle_read_root_cell_begin( handle, sfc,
+                    num_particles_per_species )
+            check_artio_status(status)
+            for ispec in range(num_species) : 
+                if accessed_species[ispec] == 0: continue
+                status = artio_particle_read_species_begin(handle, ispec);
+                check_artio_status(status)
+                vp = &vpoints[ispec]
+ 
+                for particle in range(num_particles_per_species[ispec]) :
+                    status = artio_particle_read_particle(handle,
+                            &pid, &subspecies, primary_variables,
+                            secondary_variables)
+                    check_artio_status(status)
+                    ind = vp.count
+
+                    for i in range(vp.n_p):
+                        vind = vp.p_ind[i]
+                        vp.pvars[i][ind] = primary_variables[vind]
+                        
+                    for i in range(vp.n_s):
+                        vind = vp.s_ind[i]
+                        vp.svars[i][ind] = secondary_variables[vind]
+                        
+                    if vp.n_pid:
+                        vp.pid[ind] = pid
+
+                    vp.count += 1
+
+                status = artio_particle_read_species_end( handle )
+                check_artio_status(status)
+                    
+            status = artio_particle_read_root_cell_end( handle )
+            check_artio_status(status)
+        free(num_particles_per_species)
+        free(total_particles)
+        free(accessed_species)
+        free(vpoints)
+        free(primary_variables)
+        free(secondary_variables)
+        return data
+ 
