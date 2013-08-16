@@ -69,6 +69,25 @@ class YTNoDataInObjectError(YTException):
             s += "  It may lie on a grid face.  Try offsetting slightly."
         return s
 
+class YTFieldNotFound(YTException):
+    def __init__(self, fname, pf):
+        self.fname = fname
+        self.pf = pf
+
+    def __str__(self):
+        return "Could not find field '%s' in %s." % (self.fname, self.pf)
+
+class YTCouldNotGenerateField(YTFieldNotFound):
+    def __str__(self):
+        return "Could field '%s' in %s could not be generated." % (self.fname, self.pf)
+
+class YTFieldTypeNotFound(YTException):
+    def __init__(self, fname):
+        self.fname = fname
+
+    def __str__(self):
+        return "Could not find field '%s'." % (self.fname)
+
 class YTSimulationNotIdentified(YTException):
     def __init__(self, sim_type):
         YTException.__init__(self)
@@ -90,7 +109,7 @@ class YTCannotParseFieldDisplayName(YTException):
                 % (self.display_name, self.field_name) + self.mathtext_error
 
 class YTCannotParseUnitDisplayName(YTException):
-    def __init__(self, field_name, display_unit, mathtext_error):
+    def __init__(self, field_name, unit_name, mathtext_error):
         self.field_name = field_name
         self.unit_name = unit_name
         self.mathtext_error = mathtext_error
@@ -134,6 +153,17 @@ class YTNotDeclaredInsideNotebook(YTException):
         return "You have not declared yourself to be inside the IPython" + \
                "Notebook.  Do so with this command:\n\n" + \
                "ytcfg['yt','ipython_notebook'] = 'True'"
+
+class YTGeometryNotSupported(YTException):
+    def __init__(self, geom):
+        self.geom = geom
+
+    def __str__(self):
+        return "We don't currently support %s geometry" % self.geom
+
+class YTCoordinateNotImplemented(YTException):
+    def __str__(self):
+        return "This coordinate is not implemented for this geometry type."
 
 class YTUnitNotRecognized(YTException):
     def __init__(self, unit):
@@ -215,3 +245,45 @@ class YTInvalidWidthError(YTException):
 
     def __str__(self):
         return str(self.error)
+
+class YTFieldNotParseable(YTException):
+    def __init__(self, field):
+        self.field = field
+
+    def __str__(self):
+        return "Cannot identify field %s" % self.field
+
+class YTDataSelectorNotImplemented(YTException):
+    def __init__(self, class_name):
+        self.class_name = class_name
+
+    def __str__(self):
+        return "Data selector '%s' not implemented." % (self.class_name)
+
+class YTParticleDepositionNotImplemented(YTException):
+    def __init__(self, class_name):
+        self.class_name = class_name
+
+    def __str__(self):
+        return "Particle deposition method '%s' not implemented." % (self.class_name)
+
+class YTDomainOverflow(YTException):
+    def __init__(self, mi, ma, dle, dre):
+        self.mi = mi
+        self.ma = ma
+        self.dle = dle
+        self.dre = dre
+
+    def __str__(self):
+        return "Particle bounds %s and %s exceed domain bounds %s and %s" % (
+            self.mi, self.ma, self.dle, self.dre)
+
+class YTIllDefinedFilter(YTException):
+    def __init__(self, filter, s1, s2):
+        self.filter = filter
+        self.s1 = s1
+        self.s2 = s2
+
+    def __str__(self):
+        return "Filter '%s' ill-defined.  Applied to shape %s but is shape %s." % (
+            self.filter, self.s1, self.s2)

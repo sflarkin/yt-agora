@@ -46,7 +46,7 @@ class AnalysisTask(object):
         self.__dict__.update(kwargs)
 
     def __repr__(self):
-        # Stolen from AMRData.__repr__
+        # Stolen from YTDataContainer.__repr__
         s = "%s: " % (self.__class__.__name__)
         s += ", ".join(["%s=%s" % (i, getattr(self,i))
                        for i in self._params])
@@ -63,7 +63,7 @@ def analysis_task(params = None):
 @analysis_task(('field',))
 def MaximumValue(params, data_object):
     v = data_object.quantities["MaxLocation"](
-            params.field, lazy_reader=True)[0]
+            params.field)[0]
     return v
 
 @analysis_task()
@@ -80,14 +80,14 @@ class SlicePlotDataset(AnalysisTask):
 
     def eval(self, pf):
         slc = self.SlicePlot(pf, self.axis, self.field, center = self.center)
-        return pc.save()
+        return slc.save()
 
 class QuantityProxy(AnalysisTask):
     _params = None
     quantity_name = None
 
     def __repr__(self):
-        # Stolen from AMRData.__repr__
+        # Stolen from YTDataContainer.__repr__
         s = "%s: " % (self.__class__.__name__)
         s += ", ".join(["%s" % [arg for arg in self.args]])
         s += ", ".join(["%s=%s" % (k,v) for k, v in self.kwargs.items()])

@@ -127,24 +127,34 @@ class FieldInfoContainer(dict): # Resistance has utility
 
     def __missing__(self, key):
         if self.fallback is None:
-            raise KeyError("No field named %s" % key)
+            raise KeyError("No field named %s" % (key,))
         return self.fallback[key]
 
+    name = ""
+
     @classmethod
-    def create_with_fallback(cls, fallback):
+    def create_with_fallback(cls, fallback, name = ""):
         obj = cls()
         obj.fallback = fallback
+        obj.name = name
         return obj
 
     def __contains__(self, key):
         if dict.__contains__(self, key): return True
         if self.fallback is None: return False
-        return self.fallback.has_key(key)
+        return key in self.fallback
 
     def __iter__(self):
-        for f in dict.__iter__(self): yield f
-        if self.fallback:
+        for f in dict.__iter__(self):
+            yield f
+        if self.fallback is not None:
             for f in self.fallback: yield f
+
+    def keys(self):
+        keys = dict.keys(self)
+        if self.fallback:
+            keys += self.fallback.keys()
+        return keys
 
 def TranslationFunc(field_name):
     def _TranslationFunc(field, data):
@@ -155,6 +165,7 @@ def NullFunc(field, data):
     return
 
 FieldInfo = FieldInfoContainer()
+FieldInfo.name = id(FieldInfo)
 add_field = FieldInfo.add_field
 add_grad = FieldInfo.add_grad
 
@@ -210,6 +221,8 @@ class FieldDetector(defaultdict):
         self.flat = flat
         self._spatial = not flat
         self.ActiveDimensions = [nd,nd,nd]
+        self.shape = tuple(self.ActiveDimensions)
+        self.size = np.prod(self.ActiveDimensions)
         self.LeftEdge = [0.0, 0.0, 0.0]
         self.RightEdge = [1.0, 1.0, 1.0]
         self.dds = np.ones(3, "float64")
@@ -220,6 +233,7 @@ class FieldDetector(defaultdict):
         if pf is None:
             # required attrs
             pf = fake_parameter_file(lambda: 1)
+            pf["Massarr"] = np.ones(6)
             pf.current_redshift = pf.omega_lambda = pf.omega_matter = \
                 pf.cosmological_simulation = 0.0
             pf.hubble_constant = 0.7
@@ -250,16 +264,32 @@ class FieldDetector(defaultdict):
                 lambda: np.ones((nd * nd * nd), dtype='float64')
                 + 1e-4*np.random.random((nd * nd * nd)))
 
+    def _reshape_vals(self, arr):
+        if not self._spatial: return arr
+        if len(arr.shape) == 3: return arr
+        return arr.reshape(self.ActiveDimensions, order="C")
+
     def __missing__(self, item):
-        FI = getattr(self.pf, "field_info", FieldInfo)
-        if FI.has_key(item) and FI[item]._function.func_name != 'NullFunc':
+        if hasattr(self.pf, "field_info"):
+            if not isinstance(item, tuple):
+                field = ("unknown", item)
+            else:
+                field = item
+            finfo = self.pf._get_field_info(*field)
+        else:
+            FI = getattr(self.pf, "field_info", FieldInfo)
+            if item in FI:
+                finfo = FI[item]
+            else:
+                finfo = None
+        if finfo is not None and finfo._function.func_name != 'NullFunc':
             try:
-                vv = FI[item](self)
+                vv = finfo(self)
             except NeedsGridType as exc:
                 ngz = exc.ghost_zones
-                nfd = FieldDetector(self.nd + ngz * 2)
+                nfd = FieldDetector(self.nd + ngz * 2, pf = self.pf)
                 nfd._num_ghost_zones = ngz
-                vv = FI[item](nfd)
+                vv = finfo(nfd)
                 if ngz > 0: vv = vv[ngz:-ngz, ngz:-ngz, ngz:-ngz]
                 for i in nfd.requested:
                     if i not in self.requested: self.requested.append(i)
@@ -270,10 +300,23 @@ class FieldDetector(defaultdict):
                 if not self.flat: self[item] = vv
                 else: self[item] = vv.ravel()
                 return self[item]
+        elif finfo is not None and finfo.particle_type:
+            if item == "Coordinates" or item[1] == "Coordinates" or \
+               item == "Velocities" or item[1] == "Velocities":
+                # A vector
+                self[item] = np.ones((self.NumberOfParticles, 3))
+            else:
+                # Not a vector
+                self[item] = np.ones(self.NumberOfParticles)
+            self.requested.append(item)
+            return self[item]
         self.requested.append(item)
         if item not in self:
             self[item] = self._read_data(item)
         return self[item]
+
+    def deposit(self, *args, **kwargs):
+        return np.random.random((self.nd, self.nd, self.nd))
 
     def _read_data(self, field_name):
         self.requested.append(field_name)
@@ -293,6 +336,42 @@ class FieldDetector(defaultdict):
     id = 1
     def has_field_parameter(self, param): return True
     def convert(self, item): return 1
+
+    @property
+    def fcoords(self):
+        fc = np.array(np.mgrid[0:1:self.nd*1j,
+                               0:1:self.nd*1j,
+                               0:1:self.nd*1j])
+        if self.flat:
+            fc.shape = (self.nd*self.nd*self.nd, 3)
+        else:
+            fc = fc.transpose()
+        return fc
+
+    @property
+    def icoords(self):
+        ic = np.mgrid[0:self.nd-1:self.nd*1j,
+                      0:self.nd-1:self.nd*1j,
+                      0:self.nd-1:self.nd*1j]
+        if self.flat:
+            ic.shape = (self.nd*self.nd*self.nd, 3)
+        else:
+            ic = ic.transpose()
+        return ic
+
+    @property
+    def ires(self):
+        ir = np.ones(self.nd**3, dtype="int64")
+        if not self.flat:
+            ir.shape = (self.nd, self.nd, self.nd)
+        return ir
+
+    @property
+    def fwidth(self):
+        fw = np.ones(self.nd**3, dtype="float64") / self.nd
+        if not self.flat:
+            fw.shape = (self.nd, self.nd, self.nd)
+        return fw
 
 class DerivedField(object):
     """
@@ -357,6 +436,23 @@ class DerivedField(object):
         self.display_name = display_name
         self.not_in_all = not_in_all
 
+    def _copy_def(self):
+        dd = {}
+        dd['name'] = self.name
+        dd['convert_function'] = self._convert_function
+        dd['particle_convert_function'] = self._particle_convert_function
+        dd['units'] = self._units
+        dd['projected_units'] = self._projected_units,
+        dd['take_log'] = self.take_log
+        dd['validators'] = list(self.validators)
+        dd['particle_type'] = self.particle_type
+        dd['vector_field'] = self.vector_field
+        dd['display_field'] = True
+        dd['not_in_all'] = self.not_in_all
+        dd['display_name'] = self.display_name
+        dd['projection_conversion'] = self.projection_conversion
+        return dd
+
     def check_available(self, data):
         """
         This raises an exception of the appropriate type if the set of
@@ -393,7 +489,8 @@ class DerivedField(object):
         ii = self.check_available(data)
         original_fields = data.keys() # Copy
         dd = self._function(self, data)
-        dd *= self._convert_function(data)
+        if dd is not None:
+            dd *= self._convert_function(data)
         for field_name in data.keys():
             if field_name not in original_fields:
                 del data[field_name]
@@ -489,7 +586,7 @@ class ValidateSpatial(FieldValidator):
         # When we say spatial information, we really mean
         # that it has a three-dimensional data structure
         #if isinstance(data, FieldDetector): return True
-        if not data._spatial:
+        if not getattr(data, '_spatial', False):
             raise NeedsGridType(self.ghost_zones,self.fields)
         if self.ghost_zones <= data._num_ghost_zones:
             return True
