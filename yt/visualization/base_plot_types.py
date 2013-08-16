@@ -104,3 +104,4 @@ class ImagePlotMPL(PlotMPL):
         canvas.print_figure(f)
         f.seek(0)
         return f.read()
+

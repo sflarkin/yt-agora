@@ -38,8 +38,8 @@ import glob #ST 9/12
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
            AMRGridPatch
-from yt.data_objects.hierarchy import \
-           AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+    GridGeometryHandler
 from yt.data_objects.static_output import \
            StaticOutput
 from yt.utilities.definitions import \
@@ -113,7 +113,7 @@ def parse_line(line, grid):
         grid['read_field'] = field
         grid['read_type'] = 'vector'
 
-class AthenaHierarchy(AMRHierarchy):
+class AthenaHierarchy(GridGeometryHandler):
 
     grid = AthenaGrid
     _data_style='athena'

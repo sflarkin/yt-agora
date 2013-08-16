@@ -34,32 +34,17 @@ from yt.data_objects.field_info_container import \
     FieldDetector
 from yt.utilities.data_point_utilities import FindBindingEnergy
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
-    ParallelAnalysisInterface
+    ParallelAnalysisInterface, parallel_objects
 from yt.utilities.lib import Octree
+from yt.utilities.physical_constants import \
+    gravitational_constant_cgs, \
+    mass_sun_cgs, \
+    HUGE
+from yt.utilities.math_utils import prec_accum
 
 __CUDA_BLOCK_SIZE = 256
 
 quantity_info = {}
-
-class GridChildMaskWrapper:
-    def __init__(self, grid, data_source):
-        self.grid = grid
-        self.data_source = data_source
-        # We have a local cache so that *within* a call to the DerivedQuantity
-        # function, we only read each field once.  Otherwise, when preloading
-        # the field will be popped and removed and lost if the underlying data
-        # source's _get_data_from_grid method is wrapped by restore_state.
-        # This is common.  So, if data[something] is accessed multiple times by
-        # a single quantity, the second time will re-read the data the slow
-        # way.
-        self.local_cache = {}
-    def __getattr__(self, attr):
-        return getattr(self.grid, attr)
-    def __getitem__(self, item):
-        if item not in self.local_cache:
-            data = self.data_source._get_data_from_grid(self.grid, item)
-            self.local_cache[item] = data
-        return self.local_cache[item]
 
 class DerivedQuantity(ParallelAnalysisInterface):
     def __init__(self, collection, name, function,
@@ -77,48 +62,32 @@ class DerivedQuantity(ParallelAnalysisInterface):
         self.force_unlazy = force_unlazy
 
     def __call__(self, *args, **kwargs):
-        lazy_reader = kwargs.pop('lazy_reader', True)
-        preload = kwargs.pop('preload', ytcfg.getboolean("yt","__parallel"))
-        if preload:
-            if not lazy_reader: mylog.debug("Turning on lazy_reader because of preload")
-            lazy_reader = True
-            e = FieldDetector(flat = True)
-            e.NumberOfParticles = 1
+        e = FieldDetector(flat = True)
+        e.NumberOfParticles = 1
+        fields = e.requested
+        try:
             self.func(e, *args, **kwargs)
-            mylog.debug("Preloading %s", e.requested)
-            self.comm.preload([g for g in self._get_grid_objs()], e.requested,
-                          self._data_source.pf.h.io)
-        if lazy_reader and not self.force_unlazy:
-            return self._call_func_lazy(args, kwargs)
-        else:
-            return self._call_func_unlazy(args, kwargs)
-
-    def _call_func_lazy(self, args, kwargs):
-        self.retvals = [ [] for i in range(self.n_ret)]
-        for gi,g in enumerate(self._get_grids()):
-            rv = self.func(GridChildMaskWrapper(g, self._data_source), *args, **kwargs)
+        except:
+            mylog.error("Could not preload for quantity %s, IO speed may suffer", self.__name__)
+        retvals = [ [] for i in range(self.n_ret)]
+        chunks = self._data_source.chunks([], chunking_style="io")
+        for ds in parallel_objects(chunks, -1):
+            rv = self.func(ds, *args, **kwargs)
             if not iterable(rv): rv = (rv,)
-            for i in range(self.n_ret): self.retvals[i].append(rv[i])
-            g.clear_data()
-        self.retvals = [np.array(self.retvals[i]) for i in range(self.n_ret)]
-        return self.c_func(self._data_source, *self.retvals)
-
-    def _finalize_parallel(self):
+            for i in range(self.n_ret): retvals[i].append(rv[i])
+        retvals = [np.array(retvals[i]) for i in range(self.n_ret)]
         # Note that we do some fancy footwork here.
         # _par_combine_object and its affiliated alltoall function
         # assume that the *long* axis is the last one.  However,
         # our long axis is the first one!
         rv = []
-        for my_list in self.retvals:
+        for my_list in retvals:
             data = np.array(my_list).transpose()
             rv.append(self.comm.par_combine_object(data,
                         datatype="array", op="cat").transpose())
-        self.retvals = rv
+        retvals = rv
+        return self.c_func(self._data_source, *retvals)
         
-    def _call_func_unlazy(self, args, kwargs):
-        retval = self.func(self._data_source, *args, **kwargs)
-        return self.c_func(self._data_source, *retval)
-
 def add_quantity(name, **kwargs):
     if 'function' not in kwargs or 'combine_function' not in kwargs:
         mylog.error("Not adding field %s because both function and combine_function must be provided" % name)
@@ -150,12 +119,15 @@ def _TotalMass(data):
     This function takes no arguments and returns the sum of cell masses and
     particle masses in the object.
     """
-    baryon_mass = data["CellMassMsun"].sum()
     try:
-        particle_mass = data["ParticleMassMsun"].sum()
-        total_mass = baryon_mass + particle_mass
+        cell_mass = _TotalQuantity(data,["CellMassMsun"])
     except KeyError:
-        total_mass = baryon_mass
+        cell_mass = 0.0
+    try:
+        particle_mass = _TotalQuantity(data,["ParticleMassMsun"])
+    except KeyError:
+        particle_mass = 0.0
+    total_mass = cell_mass + particle_mass
     return [total_mass]
 def _combTotalMass(data, total_mass):
     return total_mass.sum()
@@ -177,15 +149,15 @@ def _CenterOfMass(data, use_cells=True, use_particles=False):
     """
     x = y = z = den = 0
     if use_cells: 
-        x += (data["x"] * data["CellMassMsun"]).sum()
-        y += (data["y"] * data["CellMassMsun"]).sum()
-        z += (data["z"] * data["CellMassMsun"]).sum()
-        den += data["CellMassMsun"].sum()
+        x += (data["x"] * data["CellMassMsun"]).sum(dtype=np.float64)
+        y += (data["y"] * data["CellMassMsun"]).sum(dtype=np.float64)
+        z += (data["z"] * data["CellMassMsun"]).sum(dtype=np.float64)
+        den += data["CellMassMsun"].sum(dtype=np.float64)
     if use_particles:
-        x += (data["particle_position_x"] * data["ParticleMassMsun"]).sum()
-        y += (data["particle_position_y"] * data["ParticleMassMsun"]).sum()
-        z += (data["particle_position_z"] * data["ParticleMassMsun"]).sum()
-        den += data["ParticleMassMsun"].sum()
+        x += (data["particle_position_x"] * data["ParticleMassMsun"]).sum(dtype=np.float64)
+        y += (data["particle_position_y"] * data["ParticleMassMsun"]).sum(dtype=np.float64)
+        z += (data["particle_position_z"] * data["ParticleMassMsun"]).sum(dtype=np.float64)
+        den += data["ParticleMassMsun"].sum(dtype=np.float64)
 
     return x,y,z, den
 def _combCenterOfMass(data, x,y,z, den):
@@ -200,8 +172,8 @@ def _WeightedAverageQuantity(data, field, weight):
     :param field: The field to average
     :param weight: The field to weight by
     """
-    num = (data[field] * data[weight]).sum()
-    den = data[weight].sum()
+    num = (data[field] * data[weight]).sum(dtype=np.float64)
+    den = data[weight].sum(dtype=np.float64)
     return num, den
 def _combWeightedAverageQuantity(data, field, weight):
     return field.sum()/weight.sum()
@@ -217,11 +189,11 @@ def _WeightedVariance(data, field, weight):
 
     Returns the weighted variance and the weighted mean.
     """
-    my_weight = data[weight].sum()
+    my_weight = data[weight].sum(dtype=np.float64)
     if my_weight == 0:
         return 0.0, 0.0, 0.0
-    my_mean = (data[field] * data[weight]).sum() / my_weight
-    my_var2 = (data[weight] * (data[field] - my_mean)**2).sum() / my_weight
+    my_mean = (data[field] * data[weight]).sum(dtype=np.float64) / my_weight
+    my_var2 = (data[weight] * (data[field] - my_mean)**2).sum(dtype=np.float64) / my_weight
     return my_weight, my_mean, my_var2
 def _combWeightedVariance(data, my_weight, my_mean, my_var2):
     all_weight = my_weight.sum()
@@ -235,10 +207,10 @@ def _BulkVelocity(data):
     """
     This function returns the mass-weighted average velocity in the object.
     """
-    xv = (data["x-velocity"] * data["CellMassMsun"]).sum()
-    yv = (data["y-velocity"] * data["CellMassMsun"]).sum()
-    zv = (data["z-velocity"] * data["CellMassMsun"]).sum()
-    w = data["CellMassMsun"].sum()
+    xv = (data["x-velocity"] * data["CellMassMsun"]).sum(dtype=np.float64)
+    yv = (data["y-velocity"] * data["CellMassMsun"]).sum(dtype=np.float64)
+    zv = (data["z-velocity"] * data["CellMassMsun"]).sum(dtype=np.float64)
+    w = data["CellMassMsun"].sum(dtype=np.float64)
     return xv, yv, zv, w
 def _combBulkVelocity(data, xv, yv, zv, w):
     w = w.sum()
@@ -256,7 +228,7 @@ def _AngularMomentumVector(data):
     amx = data["SpecificAngularMomentumX"]*data["CellMassMsun"]
     amy = data["SpecificAngularMomentumY"]*data["CellMassMsun"]
     amz = data["SpecificAngularMomentumZ"]*data["CellMassMsun"]
-    j_mag = [amx.sum(), amy.sum(), amz.sum()]
+    j_mag = [amx.sum(dtype=np.float64), amy.sum(dtype=np.float64), amz.sum(dtype=np.float64)]
     return [j_mag]
 
 def _StarAngularMomentumVector(data):
@@ -272,13 +244,13 @@ def _StarAngularMomentumVector(data):
     amx = sLx * star_mass
     amy = sLy * star_mass
     amz = sLz * star_mass
-    j_mag = [amx.sum(), amy.sum(), amz.sum()]
+    j_mag = [amx.sum(dtype=np.float64), amy.sum(dtype=np.float64), amz.sum(dtype=np.float64)]
     return [j_mag]
 
 def _combAngularMomentumVector(data, j_mag):
     if len(j_mag.shape) < 2: j_mag = np.expand_dims(j_mag, 0)
-    L_vec = j_mag.sum(axis=0)
-    L_vec_norm = L_vec / np.sqrt((L_vec**2.0).sum())
+    L_vec = j_mag.sum(axis=0,dtype=np.float64)
+    L_vec_norm = L_vec / np.sqrt((L_vec**2.0).sum(dtype=np.float64))
     return L_vec_norm
 add_quantity("AngularMomentumVector", function=_AngularMomentumVector,
              combine_function=_combAngularMomentumVector, n_ret=1)
@@ -291,13 +263,13 @@ def _BaryonSpinParameter(data):
     This function returns the spin parameter for the baryons, but it uses
     the particles in calculating enclosed mass.
     """
-    m_enc = data["CellMassMsun"].sum() + data["ParticleMassMsun"].sum()
+    m_enc = _TotalMass(data)
     amx = data["SpecificAngularMomentumX"]*data["CellMassMsun"]
     amy = data["SpecificAngularMomentumY"]*data["CellMassMsun"]
     amz = data["SpecificAngularMomentumZ"]*data["CellMassMsun"]
-    j_mag = np.array([amx.sum(), amy.sum(), amz.sum()])
-    e_term_pre = np.sum(data["CellMassMsun"]*data["VelocityMagnitude"]**2.0)
-    weight=data["CellMassMsun"].sum()
+    j_mag = np.array([amx.sum(dtype=np.float64), amy.sum(dtype=np.float64), amz.sum(dtype=np.float64)])
+    e_term_pre = np.sum(data["CellMassMsun"]*data["VelocityMagnitude"]**2.0,dtype=np.float64)
+    weight=data["CellMassMsun"].sum(dtype=np.float64)
     return j_mag, m_enc, e_term_pre, weight
 def _combBaryonSpinParameter(data, j_mag, m_enc, e_term_pre, weight):
     # Because it's a vector field, we have to ensure we have enough dimensions
@@ -306,8 +278,7 @@ def _combBaryonSpinParameter(data, j_mag, m_enc, e_term_pre, weight):
     M = m_enc.sum()
     J = np.sqrt(((j_mag.sum(axis=0))**2.0).sum())/W
     E = np.sqrt(e_term_pre.sum()/W)
-    G = 6.67e-8 # cm^3 g^-1 s^-2
-    spin = J * E / (M*1.989e33*G)
+    spin = J * E / (M * mass_sun_cgs * gravitational_constant_cgs)
     return spin
 add_quantity("BaryonSpinParameter", function=_BaryonSpinParameter,
              combine_function=_combBaryonSpinParameter, n_ret=4)
@@ -317,15 +288,15 @@ def _ParticleSpinParameter(data):
     This function returns the spin parameter for the baryons, but it uses
     the particles in calculating enclosed mass.
     """
-    m_enc = data["CellMassMsun"].sum() + data["ParticleMassMsun"].sum()
+    m_enc = _TotalMass(data)
     amx = data["ParticleSpecificAngularMomentumX"]*data["ParticleMassMsun"]
-    if amx.size == 0: return (np.zeros((3,), dtype='float64'), m_enc, 0, 0)
+    if amx.size == 0: return (np.zeros((3,), dtype=np.float64), m_enc, 0, 0)
     amy = data["ParticleSpecificAngularMomentumY"]*data["ParticleMassMsun"]
     amz = data["ParticleSpecificAngularMomentumZ"]*data["ParticleMassMsun"]
-    j_mag = np.array([amx.sum(), amy.sum(), amz.sum()])
+    j_mag = np.array([amx.sum(dtype=np.float64), amy.sum(dtype=np.float64), amz.sum(dtype=np.float64)])
     e_term_pre = np.sum(data["ParticleMassMsun"]
-                       *data["ParticleVelocityMagnitude"]**2.0)
-    weight=data["ParticleMassMsun"].sum()
+                       *data["ParticleVelocityMagnitude"]**2.0,dtype=np.float64)
+    weight=data["ParticleMassMsun"].sum(dtype=np.float64)
     return j_mag, m_enc, e_term_pre, weight
 add_quantity("ParticleSpinParameter", function=_ParticleSpinParameter,
              combine_function=_combBaryonSpinParameter, n_ret=4)
@@ -372,26 +343,26 @@ def _IsBound(data, truncate = True, include_thermal_energy = False,
     kinetic = 0.5 * (data["CellMass"] * 
                      ((data["x-velocity"] - bv_x)**2 + 
                       (data["y-velocity"] - bv_y)**2 +
-                      (data["z-velocity"] - bv_z)**2)).sum()
+                      (data["z-velocity"] - bv_z)**2)).sum(dtype=np.float64)
 
     if (include_particles):
-	mass_to_use = data["TotalMass"]
+        mass_to_use = data["TotalMass"]
         kinetic += 0.5 * (data["Dark_Matter_Mass"] *
                           ((data["cic_particle_velocity_x"] - bv_x)**2 +
                            (data["cic_particle_velocity_y"] - bv_y)**2 +
-                           (data["cic_particle_velocity_z"] - bv_z)**2)).sum()
+                           (data["cic_particle_velocity_z"] - bv_z)**2)).sum(dtype=np.float64)
     else:
-	mass_to_use = data["CellMass"]
+        mass_to_use = data["CellMass"]
     # Add thermal energy to kinetic energy
     if (include_thermal_energy):
-        thermal = (data["ThermalEnergy"] * mass_to_use).sum()
+        thermal = (data["ThermalEnergy"] * mass_to_use).sum(dtype=np.float64)
         kinetic += thermal
     if periodic_test:
         kinetic = np.ones_like(kinetic)
     # Gravitational potential energy
     # We only divide once here because we have velocity in cgs, but radius is
     # in code.
-    G = 6.67e-8 / data.convert("cm") # cm^3 g^-1 s^-2
+    G = gravitational_constant_cgs / data.convert("cm") # cm^3 g^-1 s^-2
     # Check for periodicity of the clump.
     two_root = 2. * np.array(data.pf.domain_width) / np.array(data.pf.domain_dimensions)
     domain_period = data.pf.domain_right_edge - data.pf.domain_left_edge
@@ -613,15 +584,15 @@ def _Extrema(data, fields, non_zero = False, filter=None):
     mins, maxs = [], []
     for field in fields:
         if data[field].size < 1:
-            mins.append(1e90)
-            maxs.append(-1e90)
+            mins.append(HUGE)
+            maxs.append(-HUGE)
             continue
         if filter is None:
             if non_zero:
                 nz_filter = data[field]>0.0
                 if not nz_filter.any():
-                    mins.append(1e90)
-                    maxs.append(-1e90)
+                    mins.append(HUGE)
+                    maxs.append(-HUGE)
                     continue
             else:
                 nz_filter = None
@@ -636,8 +607,8 @@ def _Extrema(data, fields, non_zero = False, filter=None):
                 mins.append(np.nanmin(data[field][nz_filter]))
                 maxs.append(np.nanmax(data[field][nz_filter]))
             else:
-                mins.append(1e90)
-                maxs.append(-1e90)
+                mins.append(HUGE)
+                maxs.append(-HUGE)
     return len(fields), mins, maxs
 def _combExtrema(data, n_fields, mins, maxs):
     mins, maxs = np.atleast_2d(mins, maxs)
@@ -669,38 +640,36 @@ def _MaxLocation(data, field):
     This function returns the location of the maximum of a set
     of fields.
     """
-    ma, maxi, mx, my, mz, mg = -1e90, -1, -1, -1, -1, -1
+    ma, maxi, mx, my, mz = -HUGE, -1, -1, -1, -1
     if data[field].size > 0:
         maxi = np.argmax(data[field])
         ma = data[field][maxi]
         mx, my, mz = [data[ax][maxi] for ax in 'xyz']
-        mg = data["GridIndices"][maxi]
-    return (ma, maxi, mx, my, mz, mg)
+    return (ma, maxi, mx, my, mz)
 def _combMaxLocation(data, *args):
     args = [np.atleast_1d(arg) for arg in args]
     i = np.argmax(args[0]) # ma is arg[0]
     return [arg[i] for arg in args]
 add_quantity("MaxLocation", function=_MaxLocation,
-             combine_function=_combMaxLocation, n_ret = 6)
+             combine_function=_combMaxLocation, n_ret = 5)
 
 def _MinLocation(data, field):
     """
     This function returns the location of the minimum of a set
     of fields.
     """
-    ma, mini, mx, my, mz, mg = 1e90, -1, -1, -1, -1, -1
+    ma, mini, mx, my, mz = HUGE, -1, -1, -1, -1
     if data[field].size > 0:
         mini = np.argmin(data[field])
         ma = data[field][mini]
         mx, my, mz = [data[ax][mini] for ax in 'xyz']
-        mg = data["GridIndices"][mini]
-    return (ma, mini, mx, my, mz, mg)
+    return (ma, mini, mx, my, mz)
 def _combMinLocation(data, *args):
     args = [np.atleast_1d(arg) for arg in args]
     i = np.argmin(args[0]) # ma is arg[0]
     return [arg[i] for arg in args]
 add_quantity("MinLocation", function=_MinLocation,
-             combine_function=_combMinLocation, n_ret = 6)
+             combine_function=_combMinLocation, n_ret = 5)
 
 
 def _TotalQuantity(data, fields):
@@ -713,9 +682,9 @@ def _TotalQuantity(data, fields):
     totals = []
     for field in fields:
         if data[field].size < 1:
-            totals.append(0.0)
+            totals.append(np.zeros(1,dtype=prec_accum[data[field].dtype])[0])
             continue
-        totals.append(data[field].sum())
+        totals.append(data[field].sum(dtype=prec_accum[data[field].dtype]))
     return len(fields), totals
 def _combTotalQuantity(data, n_fields, totals):
     totals = np.atleast_2d(totals)
@@ -723,3 +692,37 @@ def _combTotalQuantity(data, n_fields, totals):
     return [np.sum(totals[:,i]) for i in range(n_fields)]
 add_quantity("TotalQuantity", function=_TotalQuantity,
                 combine_function=_combTotalQuantity, n_ret=2)
+
+def _ParticleDensityCenter(data,nbins=3,particle_type="all"):
+    """
+    Find the center of the particle density
+    by histogramming the particles iteratively.
+    """
+    pos = [data[(particle_type,"particle_position_%s"%ax)] for ax in "xyz"]
+    pos = np.array(pos).T
+    mas = data[(particle_type,"particle_mass")]
+    calc_radius= lambda x,y:np.sqrt(np.sum((x-y)**2.0,axis=1,dtype=np.float64))
+    density = 0
+    if pos.shape[0]==0:
+        return -1.0,[-1.,-1.,-1.]
+    while pos.shape[0] > 1:
+        table,bins=np.histogramdd(pos,bins=nbins, weights=mas)
+        bin_size = min((np.max(bins,axis=1)-np.min(bins,axis=1))/nbins)
+        centeridx = np.where(table==table.max())
+        le = np.array([bins[0][centeridx[0][0]],
+                       bins[1][centeridx[1][0]],
+                       bins[2][centeridx[2][0]]])
+        re = np.array([bins[0][centeridx[0][0]+1],
+                       bins[1][centeridx[1][0]+1],
+                       bins[2][centeridx[2][0]+1]])
+        center = 0.5*(le+re)
+        idx = calc_radius(pos,center)<bin_size
+        pos, mas = pos[idx],mas[idx]
+        density = max(density,mas.sum(dtype=np.float64)/bin_size**3.0)
+    return density, center
+def _combParticleDensityCenter(data,densities,centers):
+    i = np.argmax(densities)
+    return densities[i],centers[i]
+
+add_quantity("ParticleDensityCenter",function=_ParticleDensityCenter,
+             combine_function=_combParticleDensityCenter,n_ret=2)

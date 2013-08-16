@@ -45,7 +45,10 @@ from yt.config import ytcfg
 from yt.utilities.performance_counters import \
     yt_counters, time_function
 from yt.utilities.math_utils import periodic_dist, get_rotation_matrix
-from yt.utilities.physical_constants import rho_crit_now, mass_sun_cgs
+from yt.utilities.physical_constants import \
+    rho_crit_now, \
+    mass_sun_cgs, \
+    TINY
 
 from .hop.EnzoHop import RunHOP
 from .fof.EnzoFOF import RunFOF
@@ -59,8 +62,6 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelDummy, \
     ParallelAnalysisInterface, \
     parallel_blocking_call
-
-TINY = 1.e-40
 
 class Halo(object):
     """
@@ -313,7 +314,7 @@ class Halo(object):
 
         Returns
         -------
-        sphere : `yt.data_objects.api.AMRSphereBase`
+        sphere : `yt.data_objects.api.YTSphereBase`
             The empty data source.
 
         Examples
@@ -994,7 +995,7 @@ class LoadedHalo(Halo):
 
         Returns
         -------
-        sphere : `yt.data_objects.api.AMRSphereBase`
+        sphere : `yt.data_objects.api.YTSphereBase`
             The empty data source.
 
         Examples
@@ -1428,7 +1429,7 @@ class RockstarHaloList(HaloList):
         fglob = path.join(basedir, 'halos_%d.*.bin' % n)
         files = glob.glob(fglob)
         halos = self._get_halos_binary(files)
-        #Jc = 1.98892e33/pf['mpchcm']*1e5
+        #Jc = mass_sun_cgs/ pf['mpchcm'] * 1e5
         Jc = 1.0
         length = 1.0 / pf['mpchcm']
         conv = dict(pos = np.array([length, length, length,
@@ -2494,7 +2495,7 @@ class HOPHaloFinder(GenericHaloFinder, HOPHaloList):
             if dm_only:
                 select = self._get_dm_indices()
                 total_mass = \
-                    self.comm.mpi_allreduce((self._data_source["ParticleMassMsun"][select]).sum(dtype='float64'), op='sum')
+                    self.comm.mpi_allreduce((self._data_source['all', "ParticleMassMsun"][select]).sum(dtype='float64'), op='sum')
             else:
                 total_mass = self.comm.mpi_allreduce(self._data_source.quantities["TotalQuantity"]("ParticleMassMsun")[0], op='sum')
         # MJT: Note that instead of this, if we are assuming that the particles
