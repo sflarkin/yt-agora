@@ -52,3 +52,10 @@ cdef class SelectorObject:
 
     # compute periodic distance (if periodicity set) assuming 0->domain_width[i] coordinates
     cdef np.float64_t difference(self, np.float64_t x1, np.float64_t x2, int d) nogil
+
+cdef class AlwaysSelector(SelectorObject):
+    pass
+
+cdef class OctreeSubsetSelector(SelectorObject):
+    cdef SelectorObject base_selector
+    cdef public np.int64_t domain_id

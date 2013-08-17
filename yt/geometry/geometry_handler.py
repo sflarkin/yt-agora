@@ -220,6 +220,7 @@ class GeometryHandler(ParallelAnalysisInterface):
             for pt in self.parameter_file.particle_types:
                 new_fi = copy.copy(finfo)
                 new_fi.name = (pt, new_fi.name)
+                if new_fi.name in fi: continue
                 fi[new_fi.name] = new_fi
                 new_fields.append(new_fi.name)
             fields_to_check += new_fields
@@ -249,6 +250,8 @@ class GeometryHandler(ParallelAnalysisInterface):
                 if (field[0], f) in self.field_list:
                     requested.append( (field[0], f) )
                 elif f in self.field_list:
+                    requested.append( f )
+                elif isinstance(f, tuple) and f[1] in self.field_list:
                     requested.append( f )
                 else:
                     missing = True
