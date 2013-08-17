@@ -1234,8 +1234,6 @@ cdef class GridSelector(SelectorObject):
 grid_selector = GridSelector
 
 cdef class OctreeSubsetSelector(SelectorObject):
-    cdef SelectorObject base_selector
-    cdef public np.int64_t domain_id
 
     def __init__(self, dobj):
         self.base_selector = dobj.base_selector
@@ -1297,7 +1295,7 @@ cdef class OctreeSubsetSelector(SelectorObject):
 
 octree_subset_selector = OctreeSubsetSelector
 
-cdef class ParticleOctreeSubsetSelector(SelectorObject):
+cdef class IndexedOctreeSubsetSelector(SelectorObject):
     # This is a numpy array, which will be a bool of ndim 1
     cdef np.uint64_t min_ind
     cdef np.uint64_t max_ind
@@ -1354,7 +1352,7 @@ cdef class ParticleOctreeSubsetSelector(SelectorObject):
     def _hash_vals(self):
         return (hash(self.base_selector), self.min_ind, self.max_ind)
 
-particle_octree_subset_selector = ParticleOctreeSubsetSelector
+indexed_octree_subset_selector = IndexedOctreeSubsetSelector
 
 cdef class AlwaysSelector(SelectorObject):
 
