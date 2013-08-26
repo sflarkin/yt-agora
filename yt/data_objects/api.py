@@ -1,4 +1,4 @@
-"""
+""" 
 API for yt.data_objects
 
 Author: Matthew Turk <matthewturk@gmail.com>
@@ -31,14 +31,11 @@ License:
 from grid_patch import \
     AMRGridPatch
 
-from hierarchy import \
-    AMRHierarchy
+from octree_subset import \
+    OctreeSubset
 
 from static_output import \
     StaticOutput
-
-from object_finding_mixin import \
-    ObjectFindingMixin
 
 from particle_io import \
     ParticleIOHandler, \
@@ -60,6 +57,9 @@ from analyzer_objects import \
 
 from data_containers import \
     data_object_registry
+
+import construction_data_containers as __cdc
+import selection_data_containers as __sdc
 
 from derived_quantities import \
     quantity_info, \
@@ -89,3 +89,6 @@ from field_info_container import \
 
 from particle_trajectories import \
     ParticleTrajectoryCollection
+
+from particle_filters import \
+    particle_filter

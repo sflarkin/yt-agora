@@ -1,4 +1,4 @@
-"""
+""" 
 All of the base-level stuff for plotting.
 
 Author: Matthew Turk <matthewturk@gmail.com>
@@ -354,7 +354,7 @@ class PlotCollection(object):
         r"""Create a slice, from that a slice plot, and add it to the current
         collection.
 
-        This function will generate a `yt.data_objects.api.AMRSliceBase` from the given
+        This function will generate a `yt.data_objects.api.YTSliceBase` from the given
         parameters.  This slice then gets passed to a `yt.visualization.plot_types.PCSlicePlot`, and
         the resultant plot is added to the current collection.  Various
         parameters allow control of the way the slice is displayed, as well as
@@ -386,7 +386,7 @@ class PlotCollection(object):
         periodic : boolean, optional
             By default, the slices are assumed to be periodic, and they will
             wrap around the edges.
-        obj : `yt.data_objects.api.AMRSliceBase`, optional
+        obj : `yt.data_objects.api.YTSliceBase`, optional
             If you would like to use an existing slice, you may specify it
             here, in which case a new slice will not be created.
         field_parameters : dict, optional
@@ -400,7 +400,7 @@ class PlotCollection(object):
 
         See Also
         --------
-        yt.data_objects.api.AMRSliceBase : This is the type created by this function and 
+        yt.data_objects.api.YTSliceBase : This is the type created by this function and
                                 passed to the plot created here.
 
         Notes
@@ -441,7 +441,7 @@ class PlotCollection(object):
                       data_source=None, figure=None, axes=None):
         r"""Create a plot of a thick slab of particles.
 
-        This function will generate a `yt.data_objects.api.AMRRegionBase` from the given
+        This function will generate a `yt.data_objects.api.YTRegionBase` from the given
         parameters, and all particles which are within that region will be
         plotted.
 
@@ -463,7 +463,7 @@ class PlotCollection(object):
             The stride through the particles to plot.  Used to plot every
             fifth, every tenth, etc.  Note that the sorted order of particles
             may result in a biased selection of particles.
-        data_source : `yt.data_objects.api.AMRData`, optional
+        data_source : `yt.data_objects.api.YTDataContainer`, optional
             If specified, this will be the data source used for obtaining
             particles.
         figure : `matplotlib.figure.Figure`, optional
@@ -515,7 +515,7 @@ class PlotCollection(object):
         A cutting plane is an oblique slice through the simulation volume,
         oriented by a specified normal vector that is perpendicular to the
         image plane.  This function will generate a
-        `yt.data_objects.api.AMRCuttingPlaneBase` from the given parameters.  This cutting
+        `yt.data_objects.api.YTCuttingPlaneBase` from the given parameters.  This cutting
         plane then gets passed to a `yt.visualization.plot_types.CuttingPlanePlot`, and the
         resultant plot is added to the current collection.  Various parameters
         allow control of the way the slice is displayed, as well as how the
@@ -543,7 +543,7 @@ class PlotCollection(object):
             This parameter can act as a proxy for the manual creation of a
             figure.  By specifying it, you can create plots with an arbitrarily
             large or small size.  It is in inches, defaulting to 100 dpi.
-        obj : `AMRCuttingPlaneBase`, optional
+        obj : `YTCuttingPlaneBase`, optional
             If you would like to use an existing cutting plane, you may specify
             it here, in which case a new cutting plane will not be created.
         field_parameters : dict, optional
@@ -558,7 +558,7 @@ class PlotCollection(object):
 
         See Also
         --------
-        yt.data_objects.api.AMRCuttingPlaneBase : This is the type created by this function.
+        yt.data_objects.api.YTCuttingPlaneBase : This is the type created by this function.
 
         Notes
         -----
@@ -610,7 +610,7 @@ class PlotCollection(object):
         image plane.  This function will slice through, but instead of
         retaining all the data necessary to rescale the cutting plane at any
         width, it only retains the pixels for a single width.  This function
-        will generate a `yt.data_objects.api.AMRFixedResCuttingPlaneBase` from the given
+        will generate a `yt.data_objects.api.YTFixedResCuttingPlaneBase` from the given
         parameters.  This image buffer then gets passed to a
         `yt.visualization.plot_types.FixedResolutionPlot`, and the resultant plot is added to the
         current collection.  Various parameters allow control of the way the
@@ -643,7 +643,7 @@ class PlotCollection(object):
             This parameter can act as a proxy for the manual creation of a
             figure.  By specifying it, you can create plots with an arbitrarily
             large or small size.  It is in inches, defaulting to 100 dpi.
-        obj : `AMRCuttingPlaneBase`, optional
+        obj : `YTCuttingPlaneBase`, optional
             If you would like to use an existing cutting plane, you may specify
             it here, in which case a new cutting plane will not be created.
         field_parameters : dict, optional
@@ -658,7 +658,7 @@ class PlotCollection(object):
 
         See Also
         --------
-        yt.data_objects.api.AMRFixedResCuttingPlaneBase : This is the type created by this
+        yt.data_objects.api.YTFixedResCuttingPlaneBase : This is the type created by this
                                                function.
 
         Examples
@@ -700,7 +700,7 @@ class PlotCollection(object):
         r"""Create a projection, from that a projection plot, and add it to the
         current collection.
 
-        This function will generate a `yt.data_objects.api.AMRProjBase` from the given
+        This function will generate a `yt.data_objects.api.YTOverlapProjBase` from the given
         parameters.  This projection then gets passed to a
         `yt.visualization.plot_types.PCProjectionPlot`, and the resultant plot is added to the
         current collection.  Various parameters allow control of the way the
@@ -712,8 +712,8 @@ class PlotCollection(object):
             The initial field to slice and display.
         axis : int
             The axis along which to slice.  Can be 0, 1, or 2 or x, y, z.
-        data_source : `yt.data_objects.api.AMRData`
-            This is a data source respecting the `AMRData` protocol (i.e., it
+        data_source : `yt.data_objects.api.YTDataContainer`
+            This is a data source respecting the `YTDataContainer` protocol (i.e., it
             has grids and so forth) that will be used as input to the
             projection.
         weight_field : string
@@ -738,7 +738,7 @@ class PlotCollection(object):
         periodic : boolean, optional
             By default, the slices are assumed to be periodic, and they will
             wrap around the edges.
-        obj : `yt.data_objects.api.AMRProjBase`, optional
+        obj : `yt.data_objects.api.YTOverlapProjBase`, optional
             If you would like to use an existing projection, you may specify it
             here, in which case a new projection will not be created.  If this
             option is specified the options data_source, weight_field and
@@ -754,7 +754,7 @@ class PlotCollection(object):
 
         See Also
         --------
-        yt.data_objects.api.AMRProjBase : This is the type created by this function and 
+        yt.data_objects.api.YTOverlapProjBase : This is the type created by this function and
                                passed to the plot created here.
 
         Notes
@@ -778,7 +778,7 @@ class PlotCollection(object):
         if center == None:
             center = self.c
         if obj is None:
-            obj = self.pf.hierarchy.proj(axis, field, weight_field,
+            obj = self.pf.hierarchy.proj(field, axis, weight_field,
                                          source = data_source, center=center,
                                          **field_parameters)
         p = self._add_plot(PCProjectionPlot(obj, field,
@@ -795,7 +795,7 @@ class PlotCollection(object):
         projection plot, and add it to the current collection.
 
         This function will generate a rectangular prism region and supply it to
-        a`yt.data_objects.api.AMRProjBase` from the given parameters.  This projection
+        a`yt.data_objects.api.YTOverlapProjBase` from the given parameters.  This projection
         then gets passed to a `yt.visualization.plot_types.PCProjectionPlot`, and the resultant plot
         is added to the current collection.  Various parameters allow control
         of the way the slice is displayed, as well as how the slice is
@@ -843,7 +843,7 @@ class PlotCollection(object):
 
         See Also
         --------
-        yt.data_objects.api.AMRProjBase : This is the type created by this function and 
+        yt.data_objects.api.YTOverlapProjBase : This is the type created by this function and
                                passed to the plot created here.
 
         Notes
@@ -872,7 +872,7 @@ class PlotCollection(object):
         LE[axis] -= thickness/2.0
         RE[axis] += thickness/2.0
         region = self.pf.h.region(center, LE, RE)
-        obj = self.pf.hierarchy.proj(axis, field, weight_field,
+        obj = self.pf.hierarchy.proj(field, axis, weight_field,
                                      source = region, center=center,
                                      **field_parameters)
         p = self._add_plot(PCProjectionPlot(obj, field,
@@ -884,11 +884,10 @@ class PlotCollection(object):
     def add_profile_object(self, data_source, fields,
                            weight="CellMassMsun", accumulation=False,
                            x_bins=128, x_log=True, x_bounds=None,
-                           lazy_reader=True, id=None,
-                           figure=None, axes=None):
+                           id=None, figure=None, axes=None):
         r"""From an existing object, create a 1D, binned profile.
 
-        This function will accept an existing `AMRData` source and from that,
+        This function will accept an existing `YTDataContainer` source and from that,
         it will generate a `Binned1DProfile`, based on the specified options.
         This is useful if you have extracted a region, or if you wish to bin
         some set of massages data -- or even if you wish to bin anything other
@@ -898,8 +897,8 @@ class PlotCollection(object):
 
         Parameters
         ----------
-        data_source : `yt.data_objects.api.AMRData`
-            This is a data source respecting the `AMRData` protocol (i.e., it
+        data_source : `yt.data_objects.api.YTDataContainer`
+            This is a data source respecting the `YTDataContainer` protocol (i.e., it
             has grids and so forth) that will be used as input to the profile
             generation.
         fields : list of strings
@@ -922,11 +921,6 @@ class PlotCollection(object):
             If specified, the boundary values for the binning.  If unspecified,
             the min/max from the data_source will be used.  (Non-zero min/max
             in case of log-spacing.)
-        lazy_reader : boolean, optional
-            If this is false, all of the data will be read into memory before
-            any processing occurs.  It defaults to true, and grids are binned
-            on a one-by-one basis.  Note that parallel computation requires
-            this to be true.
         id : int, optional
             If specified, this will be the "semi-unique id" of the resultant
             plot.  This should not be set.
@@ -957,13 +951,11 @@ class PlotCollection(object):
         """
         if x_bounds is None:
             x_min, x_max = data_source.quantities["Extrema"](
-                            fields[0], non_zero = x_log,
-                            lazy_reader=lazy_reader)[0]
+                            fields[0], non_zero = x_log)[0]
         else:
             x_min, x_max = x_bounds
         profile = BinnedProfile1D(data_source,
-                                  x_bins, fields[0], x_min, x_max, x_log,
-                                  lazy_reader)
+                                  x_bins, fields[0], x_min, x_max, x_log)
         if len(fields) > 1:
             profile.add_fields(fields[1:], weight=weight, accumulation=accumulation)
         if id is None: id = self._get_new_id()
@@ -974,8 +966,7 @@ class PlotCollection(object):
     def add_profile_sphere(self, radius, unit, fields, center = None,
                            weight="CellMassMsun", accumulation=False,
                            x_bins=128, x_log=True, x_bounds=None,
-                           lazy_reader=True, id=None,
-                           figure=None, axes=None):
+                           id=None, figure=None, axes=None):
         r"""From a description of a sphere, create a 1D, binned profile.
 
         This function will accept the radius of a sphere, and from that it will
@@ -1015,11 +1006,6 @@ class PlotCollection(object):
             If specified, the boundary values for the binning.  If unspecified,
             the min/max from the data_source will be used.  (Non-zero min/max
             in case of log-spacing.)
-        lazy_reader : boolean, optional
-            If this is false, all of the data will be read into memory before
-            any processing occurs.  It defaults to true, and grids are binned
-            on a one-by-one basis.  Note that parallel computation requires
-            this to be true.
         id : int, optional
             If specified, this will be the "semi-unique id" of the resultant
             plot.  This should not be set.
@@ -1041,7 +1027,7 @@ class PlotCollection(object):
         yt.data_objects.profiles.BinnedProfile1D : This is the object that does the
                                    transformation of raw data into a 1D
                                    profile.
-        yt.data_objects.api.AMRSphereBase : This is the object auto-generated by this
+        yt.data_objects.api.YTSphereBase : This is the object auto-generated by this
                                  function.
 
         Examples
@@ -1054,7 +1040,7 @@ class PlotCollection(object):
         r = radius/self.pf[unit]
         sphere = self.pf.hierarchy.sphere(center, r)
         p = self.add_profile_object(sphere, fields, weight, accumulation,
-                           x_bins, x_log, x_bounds, lazy_reader, id,
+                           x_bins, x_log, x_bounds, id,
                            figure=figure, axes=axes)
         p["Width"] = radius
         p["Unit"] = unit
@@ -1065,12 +1051,11 @@ class PlotCollection(object):
                                weight="CellMassMsun", accumulation=False,
                                x_bins=128, x_log=True, x_bounds=None,
                                y_bins=128, y_log=True, y_bounds=None,
-                               lazy_reader=True, id=None,
-                               axes = None, figure = None,
+                               id=None, axes = None, figure = None,
                                fractional=False):
         r"""From an existing object, create a 2D, binned profile.
 
-        This function will accept an existing `AMRData` source and from that,
+        This function will accept an existing `YTDataContainer` source and from that,
         it will generate a `Binned2DProfile`, based on the specified options.
         This is useful if you have extracted a region, or if you wish to bin
         some set of massages data -- or even if you wish to bin anything other
@@ -1080,8 +1065,8 @@ class PlotCollection(object):
 
         Parameters
         ----------
-        data_source : `yt.data_objects.api.AMRData`
-            This is a data source respecting the `AMRData` protocol (i.e., it
+        data_source : `yt.data_objects.api.YTDataContainer`
+            This is a data source respecting the `YTDataContainer` protocol (i.e., it
             has grids and so forth) that will be used as input to the profile
             generation.
         fields : list of strings
@@ -1118,11 +1103,6 @@ class PlotCollection(object):
             If specified, the boundary values for the binning.  If unspecified,
             the min/max from the data_source will be used.  (Non-zero min/max
             in case of log-spacing.)
-        lazy_reader : boolean, optional
-            If this is false, all of the data will be read into memory before
-            any processing occurs.  It defaults to true, and grids are binned
-            on a one-by-one basis.  Note that parallel computation requires
-            this to be true.
         id : int, optional
             If specified, this will be the "semi-unique id" of the resultant
             plot.  This should not be set.
@@ -1159,20 +1139,17 @@ class PlotCollection(object):
         """
         if x_bounds is None:
             x_min, x_max = data_source.quantities["Extrema"](
-                                    fields[0], non_zero = x_log,
-                                    lazy_reader=lazy_reader)[0]
+                                    fields[0], non_zero = x_log)[0]
         else:
             x_min, x_max = x_bounds
         if y_bounds is None:
             y_min, y_max = data_source.quantities["Extrema"](
-                                    fields[1], non_zero = y_log,
-                                    lazy_reader=lazy_reader)[0]
+                                    fields[1], non_zero = y_log)[0]
         else:
             y_min, y_max = y_bounds
         profile = BinnedProfile2D(data_source,
                                   x_bins, fields[0], x_min, x_max, x_log,
-                                  y_bins, fields[1], y_min, y_max, y_log,
-                                  lazy_reader)
+                                  y_bins, fields[1], y_min, y_max, y_log)
         # This will add all the fields to the profile object
         if len(fields)>2:
             profile.add_fields(fields[2:], weight=weight,
@@ -1188,8 +1165,7 @@ class PlotCollection(object):
                          weight="CellMassMsun", accumulation=False,
                          x_bins=128, x_log=True, x_bounds=None,
                          y_bins=128, y_log=True, y_bounds=None,
-                         lazy_reader=True, id=None,
-                         axes = None, figure = None,
+                         id=None, axes = None, figure = None,
                          fractional=False):
         r"""From a description of a sphere, create a 2D, binned profile.
 
@@ -1244,11 +1220,6 @@ class PlotCollection(object):
             If specified, the boundary values for the binning.  If unspecified,
             the min/max from the data_source will be used.  (Non-zero min/max
             in case of log-spacing.)
-        lazy_reader : boolean, optional
-            If this is false, all of the data will be read into memory before
-            any processing occurs.  It defaults to true, and grids are binned
-            on a one-by-one basis.  Note that parallel computation requires
-            this to be true.
         id : int, optional
             If specified, this will be the "semi-unique id" of the resultant
             plot.  This should not be set.
@@ -1289,7 +1260,7 @@ class PlotCollection(object):
                              weight, accumulation,
                              x_bins, x_log, x_bounds,
                              y_bins, y_log, y_bounds,
-                             lazy_reader, id, axes=axes, figure=figure, fractional=fractional)
+                             id, axes=axes, figure=figure, fractional=fractional)
         p["Width"] = radius
         p["Unit"] = unit
         p["Axis"] = None
@@ -1299,12 +1270,12 @@ class PlotCollection(object):
                      figure = None, axes = None, plot_options = None):
         r"""Given a data source, make a scatter plot from that data source.
 
-        This is a very simple plot: you give it an instance of `AMRData`, two
+        This is a very simple plot: you give it an instance of `YTDataContainer`, two
         field names, and it will plot them on an axis
 
         Parameters
         ----------
-        data_source : `yt.data_objects.api.AMRData`
+        data_source : `yt.data_objects.api.YTDataContainer`
             This will be the data source from which field values will be
             obtained.
         fields : tuple of strings
@@ -1391,7 +1362,7 @@ class PlotCollection(object):
         angular momentum vector.
 
         >>> pf = load("RD0005-mine/RedshiftOutput0005")
-        >>> proj = pf.h.proj(0, "Density")
+        >>> proj = pf.h.proj("Density", 0)
         >>> frb = FixedResolutionBuffer(proj, (0.2, 0.3, 0.4, 0.5), (512, 512))
         >>> p = pc.add_fixed_resolution_plot(frb, "Density")
         """
@@ -1407,7 +1378,7 @@ class PlotCollection(object):
         r"""Create a ray parallel to some axis, from that a line plot, and add
         it to the current collection.
 
-        This function will generate a `yt.data_objects.api.AMROrthoRayBase` from the given
+        This function will generate a `yt.data_objects.api.YTOrthoRayBase` from the given
         parameters.  This ray then gets passed to a `yt.visualization.plot_types.LineQueryPLot`, and
         the resultant plot is added to the current collection.  Various
         parameters allow control of the way the line plot is displayed, as well as
@@ -1442,7 +1413,7 @@ class PlotCollection(object):
 
         See Also
         --------
-        yt.data_objects.api.AMROrthoRayBase : This is the type created by this function and 
+        yt.data_objects.api.YTOrthoRayBase : This is the type created by this function and
                                    passed to the plot created here.
 
         Examples
@@ -1470,7 +1441,7 @@ class PlotCollection(object):
         r"""Create a ray between two points, from that a line plot, and add
         it to the current collection.
 
-        This function will generate a `yt.data_objects.api.AMRRayBase` from the given
+        This function will generate a `yt.data_objects.api.YTRayBase` from the given
         parameters.  This ray then gets passed to a `yt.visualization.plot_types.LineQueryPLot`, and
         the resultant plot is added to the current collection.  Various
         parameters allow control of the way the line plot is displayed, as well as
@@ -1503,7 +1474,7 @@ class PlotCollection(object):
 
         See Also
         --------
-        yt.data_objects.api.AMRRayBase : This is the type created by this function and 
+        yt.data_objects.api.YTRayBase : This is the type created by this function and
                               passed to the plot created here.
 
         Examples
@@ -1845,7 +1816,7 @@ def matplotlib_widget(data_source, field, npix):
 
     Parameters
     ----------
-    data_source : :class:`yt.data_objects.data_containers.AMRProjBase` or :class:`yt.data_objects.data_containers.AMRSliceBase`
+    data_source : :class:`yt.data_objects.data_containers.YTOverlapProjBase` or :class:`yt.data_objects.data_containers.YTSliceBase`
         This is the source to be pixelized, which can be a projection or a
         slice.  
     field : string
@@ -1857,7 +1828,7 @@ def matplotlib_widget(data_source, field, npix):
     --------
 
     >>> pf = load("DD0030/DD0030")
-    >>> p = pf.h.proj(0, "Density")
+    >>> p = pf.h.proj("Density", "z")
     >>> matplotlib_widget(p, "Density", 1024)
 
     """

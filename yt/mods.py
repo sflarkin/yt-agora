@@ -64,7 +64,8 @@ from yt.data_objects.api import \
     ValidateParameter, ValidateDataField, ValidateProperty, \
     ValidateSpatial, ValidateGridType, \
     TimeSeriesData, AnalysisTask, analysis_task, \
-    ParticleTrajectoryCollection, ImageArray
+    ParticleTrajectoryCollection, ImageArray, \
+    particle_filter
 
 from yt.data_objects.derived_quantities import \
     add_quantity, quantity_info
@@ -89,6 +90,12 @@ from yt.frontends.flash.api import \
 from yt.frontends.tiger.api import \
     TigerStaticOutput, TigerFieldInfo, add_tiger_field
 
+from yt.frontends.artio.api import \
+    ARTIOStaticOutput, ARTIOFieldInfo, add_artio_field
+
+#from yt.frontends.artio2.api import \
+#    Artio2StaticOutput
+
 from yt.frontends.ramses.api import \
     RAMSESStaticOutput, RAMSESFieldInfo, add_ramses_field
 
@@ -112,7 +119,13 @@ from yt.frontends.pluto.api import \
 
 from yt.frontends.stream.api import \
     StreamStaticOutput, StreamFieldInfo, add_stream_field, \
-    StreamHandler, load_uniform_grid, load_amr_grids
+    StreamHandler, load_uniform_grid, load_amr_grids, \
+    load_particles
+
+from yt.frontends.sph.api import \
+    OWLSStaticOutput, OWLSFieldInfo, add_owls_field, \
+    GadgetStaticOutput, GadgetFieldInfo, add_gadget_field, \
+    TipsyStaticOutput, TipsyFieldInfo, add_tipsy_field
 
 from yt.analysis_modules.list_modules import \
     get_available_modules, amods
