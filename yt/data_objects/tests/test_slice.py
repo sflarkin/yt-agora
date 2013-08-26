@@ -67,7 +67,7 @@ def test_slice():
             yax = y_dict[ax]
             for wf in ["Density", None]:
                 fns = []
-                slc = pf.h.slice(ax, slc_pos, ["Ones", "Density"])
+                slc = pf.h.slice(ax, slc_pos)
                 yield assert_equal, slc["Ones"].sum(), slc["Ones"].size
                 yield assert_equal, slc["Ones"].min(), 1.0
                 yield assert_equal, slc["Ones"].max(), 1.0
@@ -106,14 +106,14 @@ def test_slice():
 
 def test_slice_over_edges():
     pf = fake_random_pf(64, nprocs=8, fields=["Density"], negative=[False])
+    slc = pf.h.slice(0, 0.0)
+    slc["Density"]
+    slc = pf.h.slice(1, 0.5)
+    slc["Density"]
 
-    slc = pf.h.slice(0, 0.0, "Density")
-    yield assert_array_equal, slc.grid_left_edge[:, 0], np.zeros((4))
-    slc = pf.h.slice(1, 0.5, "Density")
-    yield assert_array_equal, slc.grid_left_edge[:, 1], np.ones((4)) * 0.5
 
-
-@raises(YTNoDataInObjectError)
 def test_slice_over_outer_boundary():
     pf = fake_random_pf(64, nprocs=8, fields=["Density"], negative=[False])
-    slc = pf.h.slice(2, 1.0, "Density")
+    slc = pf.h.slice(2, 1.0)
+    slc["Density"]
+    yield assert_equal, slc["Density"].size, 0

@@ -13,7 +13,8 @@ Homepage: http://yt-project.org/
 Author: Nathan Goldbaum <goldbaum@ucolick.org>
 Affiliation: UC Santa Cruz
 License:
-  Copyright (C) 2008-2011 Matthew Turk, JS Oishi, Stephen Skory.  All Rights Reserved.
+  Copyright (C) 2008-2012 Matthew Turk, JS Oishi, Stephen Skory, Anthony Scopatz.  
+  All Rights Reserved.
 
   This file is part of yt.
 
