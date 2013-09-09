@@ -46,8 +46,8 @@ from .definitions import \
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
      AMRGridPatch
-from yt.data_objects.hierarchy import \
-     AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+     GridGeometryHandler
 from yt.data_objects.static_output import \
      StaticOutput
 from yt.utilities.definitions import \
@@ -95,7 +95,7 @@ class PlutoGrid(AMRGridPatch):
         self.dds = self.hierarchy.dds_list[self.Level]
         self.field_data['dx'], self.field_data['dy'], self.field_data['dz'] = self.dds
 
-class PlutoHierarchy(AMRHierarchy):
+class PlutoHierarchy(GridGeometryHandler):
 
     grid = PlutoGrid
 
@@ -113,7 +113,7 @@ class PlutoHierarchy(AMRHierarchy):
 
         self.float_type = self._handle['/level_0']['data:datatype=0'].dtype.name
         self._levels = self._handle.keys()[2:]
-        AMRHierarchy.__init__(self,pf,data_style)
+        GridGeometryHandler.__init__(self,pf,data_style)
 
     def _detect_fields(self):
         ncomp = int(self._handle['/'].attrs['num_components'])
@@ -121,7 +121,7 @@ class PlutoHierarchy(AMRHierarchy):
           
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
     def _count_grids(self):
