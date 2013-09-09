@@ -121,7 +121,8 @@ def read_vector(f, d, endian='='):
     vec_fmt = "%s%s" % (endian, d)
     vec_size = struct.calcsize(vec_fmt)
     if vec_len % vec_size != 0:
-        print "fmt = '%s' ; length = %s ; size= %s" % (fmt, length, size)
+        print("fmt = '%s' ; length = %s ; size= %s"
+              % (vec_fmt, vec_len, vec_size))
         raise RuntimeError
     vec_num = vec_len / vec_size
     if isinstance(f, file): # Needs to be explicitly a file
@@ -158,7 +159,7 @@ def skip(f, n=1, endian='='):
     >>> f = open("fort.3", "rb")
     >>> skip(f, 3)
     """
-    skipped = 0
+    skipped = []
     pos = f.tell()
     for i in range(n):
         fmt = endian+"I"
@@ -167,7 +168,7 @@ def skip(f, n=1, endian='='):
         f.seek(s1+ struct.calcsize(fmt), os.SEEK_CUR)
         s2= struct.unpack(fmt, size)[0]
         assert s1==s2 
-        skipped += s1/struct.calcsize(fmt)
+        skipped.append(s1/struct.calcsize(fmt))
     return skipped
 
 def peek_record_size(f,endian='='):

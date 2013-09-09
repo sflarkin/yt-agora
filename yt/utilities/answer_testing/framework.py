@@ -445,7 +445,7 @@ class ProjectionValuesTest(AnswerTestingTest):
         else:
             obj = None
         if self.pf.domain_dimensions[self.axis] == 1: return None
-        proj = self.pf.h.proj(self.axis, self.field,
+        proj = self.pf.h.proj(self.field, self.axis,
                               weight_field=self.weight_field,
                               data_source = obj)
         return proj.field_data
@@ -485,7 +485,7 @@ class PixelizedProjectionValuesTest(AnswerTestingTest):
             obj = self.create_obj(self.pf, self.obj_type)
         else:
             obj = None
-        proj = self.pf.h.proj(self.axis, self.field,
+        proj = self.pf.h.proj(self.field, self.axis, 
                               weight_field=self.weight_field,
                               data_source = obj)
         frb = proj.to_frb((1.0, 'unitary'), 256)

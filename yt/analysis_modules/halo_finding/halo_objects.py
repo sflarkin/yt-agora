@@ -45,7 +45,10 @@ from yt.config import ytcfg
 from yt.utilities.performance_counters import \
     yt_counters, time_function
 from yt.utilities.math_utils import periodic_dist, get_rotation_matrix
-from yt.utilities.physical_constants import rho_crit_now, mass_sun_cgs
+from yt.utilities.physical_constants import \
+    rho_crit_now, \
+    mass_sun_cgs, \
+    TINY
 
 from .hop.EnzoHop import RunHOP
 from .fof.EnzoFOF import RunFOF
@@ -59,8 +62,6 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelDummy, \
     ParallelAnalysisInterface, \
     parallel_blocking_call
-
-TINY = 1.e-40
 
 class Halo(object):
     """
@@ -313,7 +314,7 @@ class Halo(object):
 
         Returns
         -------
-        sphere : `yt.data_objects.api.AMRSphereBase`
+        sphere : `yt.data_objects.api.YTSphereBase`
             The empty data source.
 
         Examples
@@ -994,7 +995,7 @@ class LoadedHalo(Halo):
 
         Returns
         -------
-        sphere : `yt.data_objects.api.AMRSphereBase`
+        sphere : `yt.data_objects.api.YTSphereBase`
             The empty data source.
 
         Examples
@@ -1429,7 +1430,7 @@ class RockstarHaloList(HaloList):
         fglob = path.join(basedir, 'halos_%d.*.bin' % n)
         files = glob.glob(fglob)
         halos = self._get_halos_binary(files)
-        #Jc = 1.98892e33/pf['mpchcm']*1e5
+        #Jc = mass_sun_cgs/ pf['mpchcm'] * 1e5
         Jc = 1.0
         length = 1.0 / pf['mpchcm']
         conv = dict(pos = np.array([length, length, length,
@@ -2215,11 +2216,11 @@ class parallelHF(GenericHaloFinder, parallelHOPHaloList):
                 self.comm.mpi_bcast(self.bucket_bounds)
             my_bounds = self.bucket_bounds[self.comm.rank]
             LE, RE = my_bounds[0], my_bounds[1]
-            self._data_source = self.hierarchy.region_strict([0.] * 3, LE, RE)
+            self._data_source = self.hierarchy.region([0.] * 3, LE, RE)
         # If this isn't parallel, define the region as an AMRRegionStrict so
         # particle IO works.
         if self.comm.size == 1:
-            self._data_source = self.hierarchy.periodic_region_strict([0.5] * 3,
+            self._data_source = self.hierarchy.region([0.5] * 3,
                 LE, RE)
         # get the average spacing between particles for this region
         # The except is for the serial case where the full box is what we want.
@@ -2305,8 +2306,7 @@ class parallelHF(GenericHaloFinder, parallelHOPHaloList):
                 np.zeros(3, dtype='float64'))
         # If we're using a subvolume, we now re-divide.
         if subvolume is not None:
-            self._data_source = pf.h.periodic_region_strict([0.] * 3, ds_LE,
-                ds_RE)
+            self._data_source = pf.h.region([0.] * 3, ds_LE, ds_RE)
             # Cut up the volume.
             padded, LE, RE, self._data_source = \
                 self.partition_hierarchy_3d(ds=self._data_source,
@@ -2495,7 +2495,7 @@ class HOPHaloFinder(GenericHaloFinder, HOPHaloList):
             if dm_only:
                 select = self._get_dm_indices()
                 total_mass = \
-                    self.comm.mpi_allreduce((self._data_source["ParticleMassMsun"][select]).sum(dtype='float64'), op='sum')
+                    self.comm.mpi_allreduce((self._data_source['all', "ParticleMassMsun"][select]).sum(dtype='float64'), op='sum')
             else:
                 total_mass = self.comm.mpi_allreduce(self._data_source.quantities["TotalQuantity"]("ParticleMassMsun")[0], op='sum')
         # MJT: Note that instead of this, if we are assuming that the particles
@@ -2503,7 +2503,7 @@ class HOPHaloFinder(GenericHaloFinder, HOPHaloList):
         # object representing the entire domain and sum it "lazily" with
         # Derived Quantities.
         if subvolume is not None:
-            self._data_source = pf.h.periodic_region_strict([0.] * 3, ds_LE, ds_RE)
+            self._data_source = pf.h.region([0.] * 3, ds_LE, ds_RE)
         else:
             self._data_source = pf.h.all_data()
         self.padding = padding  # * pf["unitary"] # This should be clevererer
@@ -2599,7 +2599,7 @@ class FOFHaloFinder(GenericHaloFinder, FOFHaloList):
             linking_length = np.abs(link)
         self.padding = padding
         if subvolume is not None:
-            self._data_source = pf.h.periodic_region_strict([0.] * 3, ds_LE,
+            self._data_source = pf.h.region([0.] * 3, ds_LE,
                 ds_RE)
         else:
             self._data_source = pf.h.all_data()

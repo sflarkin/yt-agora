@@ -13,7 +13,8 @@ Homepage: http://yt-project.org/
 Author: Nathan Goldbaum <goldbaum@ucolick.org>
 Affiliation: UC Santa Cruz
 License:
-  Copyright (C) 2008-2011 Matthew Turk, JS Oishi, Stephen Skory.  All Rights Reserved.
+  Copyright (C) 2008-2012 Matthew Turk, JS Oishi, Stephen Skory, Anthony Scopatz.  
+  All Rights Reserved.
 
   This file is part of yt.
 
@@ -1133,8 +1134,7 @@ class ParticleCallback(PlotCallback):
             and np.all(self.region.left_edge <= LE) \
             and np.all(self.region.right_edge >= RE):
             return self.region
-        self.region = data.pf.h.periodic_region(
-            data.center, LE, RE)
+        self.region = data.pf.h.region(data.center, LE, RE)
         return self.region
 
 class TitleCallback(PlotCallback):
