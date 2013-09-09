@@ -607,3 +607,36 @@ class YTDataChunk(object):
             cdt[ind:ind+gdt.size] = gdt
             ind += gt.size
         return cdt
+
+class ChunkDataCache(object):
+    def __init__(self, base_iter, preload_fields, geometry_handler,
+                 max_length = 256):
+        # At some point, max_length should instead become a heuristic function,
+        # potentially looking at estimated memory usage.  Note that this never
+        # initializes the iterator; it assumes the iterator is already created,
+        # and it calls next() on it.
+        self.base_iter = base_iter.__iter__()
+        self.queue = []
+        self.max_length = max_length
+        self.preload_fields = preload_fields
+        self.geometry_handler = geometry_handler
+        self.cache = {}
+
+    def __iter__(self):
+        return self
+    
+    def next(self):
+        if len(self.queue) == 0:
+            for i in range(self.max_length):
+                try:
+                    self.queue.append(self.base_iter.next())
+                except StopIteration:
+                    break
+            # If it's still zero ...
+            if len(self.queue) == 0: raise StopIteration
+            chunk = YTDataChunk(None, "cache", self.queue, cache=False)
+            self.cache = self.geometry_handler.io._read_chunk_data(
+                chunk, self.preload_fields)
+        g = self.queue.pop(0)
+        g._initialize_cache(self.cache.pop(g.id, {}))
+        return g
