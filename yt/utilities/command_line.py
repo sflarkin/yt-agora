@@ -1,27 +1,17 @@
 """
 A means of running standalone commands with a shared set of options.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from yt.config import ytcfg
 ytcfg["yt","__command_line"] = "True"
@@ -1173,7 +1163,7 @@ class YTMapserverCmd(YTCommand):
             p = pc.add_slice(args.field, args.axis)
         from yt.gui.reason.pannable_map import PannableMapServer
         mapper = PannableMapServer(p.data, args.field)
-        import yt.utilities.bottle as bottle
+        import yt.extern.bottle as bottle
         bottle.debug(True)
         if args.host is not None:
             colonpl = args.host.find(":")
@@ -1555,7 +1545,7 @@ class YTGUICmd(YTCommand):
         except IOError:
             sys.exit(1)
         from yt.config import ytcfg;ytcfg["yt","__withinreason"]="True"
-        import yt.utilities.bottle as bottle
+        import yt.extern.bottle as bottle
         from yt.gui.reason.extdirect_repl import ExtDirectREPL
         from yt.gui.reason.bottle_mods import uuid_serve_functions, PayloadHandler
         hr = ExtDirectREPL(reasonjs_path, use_pyro=args.use_pyro)
