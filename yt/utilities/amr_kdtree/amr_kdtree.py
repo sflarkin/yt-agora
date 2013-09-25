@@ -42,11 +42,18 @@ steps = np.array([[-1, -1, -1], [-1, -1,  0], [-1, -1,  1],
                   [ 1,  1, -1], [ 1,  1,  0], [ 1,  1,  1] ])
 
 class Tree(object):
-    def __init__(self, pf, comm_rank=0, comm_size=1, left=None, right=None,
-            min_level=None, max_level=None, grids=None):
-        
+    def __init__(self, pf, comm_rank=0, comm_size=1, left=None, right=None, 
+        min_level=None, max_level=None, data_source=None):
+
         self.pf = pf
-        self._id_offset = self.pf.h.grids[0]._id_offset
+        try:
+            self._id_offset = pf.h.grids[0]._id_offset
+        except AttributeError:
+            self._id_offset = 0
+
+        if data_source is None:
+            data_source = pf.h.all_data()
+        self.data_source = data_source
         if left is None:
             left = np.array([-np.inf]*3)
         if right is None:
@@ -58,53 +65,25 @@ class Tree(object):
         self.max_level = max_level
         self.comm_rank = comm_rank
         self.comm_size = comm_size
-        self.trunk = Node(None, None, None,
-                left, right, -1, 1)
-        if grids is None:
-            grids = pf.h.region((left+right)/2., left, right)._grids
-        self.grids = grids
-        self.build(self.grids)
+        self.trunk = Node(None, None, None, left, right, -1, 1)
+        self.build()
 
     def add_grids(self, grids):
-        lvl_range = range(self.min_level, self.max_level+1)
-        if grids is None:
-            level_iter = self.pf.hierarchy.get_levels()
-            grids_added = 0
-            while True:
-                try:
-                    grids = level_iter.next()
-                except:
-                    break
-                if grids[0].Level not in lvl_range:
-                    continue
-                if grids_added < self.comm_size:
-                    gmask = np.array([g in self.grids for g in grids])
-                    gles = np.array([g.LeftEdge for g in grids])[gmask]
-                    gres = np.array([g.RightEdge for g in grids])[gmask]
-                    gids = np.array([g.id for g in grids])[gmask]
-                    add_pygrids(self.trunk, gids.size, gles, gres, gids, 
-                              self.comm_rank,
-                              self.comm_size)
-                    grids_added += grids.size
-                    del gles, gres, gids, grids
-                else:
-                    grids_added += grids.size
-                    [add_grid(self.trunk, g.LeftEdge, g.RightEdge, g.id,
-                              self.comm_rank, self.comm_size) for g in grids]
-            return
+        gles = np.array([g.LeftEdge for g in grids])
+        gres = np.array([g.RightEdge for g in grids])
+        gids = np.array([g.id for g in grids])
+        add_pygrids(self.trunk, gids.size, gles, gres, gids,
+                    self.comm_rank, self.comm_size)
+        del gles, gres, gids, grids
 
+    def build(self):
+        lvl_range = range(self.min_level, self.max_level+1)
         for lvl in lvl_range:
-            gles = np.array([g.LeftEdge for g in grids if g.Level == lvl])
-            gres = np.array([g.RightEdge for g in grids if g.Level == lvl])
+            #grids = self.data_source.select_grids(lvl)
+            grids = np.array([b for b, mask in self.data_source.blocks if b.Level == lvl])
             gids = np.array([g.id for g in grids if g.Level == lvl],
                             dtype="int64")
-
-            add_pygrids(self.trunk, len(gids), gles, gres, gids, self.comm_rank, self.comm_size)
-            del gles, gres, gids
-
-
-    def build(self, grids=None):
-        self.add_grids(grids)
+            self.add_grids(grids)
 
     def check_tree(self):
         for node in depth_traverse(self.trunk):
@@ -147,19 +126,19 @@ class Tree(object):
             cells += np.prod(dims)
         return cells
 
+
 class AMRKDTree(ParallelAnalysisInterface):
-    def __init__(self, pf,  l_max=None, le=None, re=None,
-                 fields=None, no_ghost=False, min_level=None, max_level=None,
-                 log_fields=None,
-                 grids=None):
+
+    fields = None
+    log_fields = None
+    no_ghost = True
+
+    def __init__(self, pf, min_level=None, max_level=None,
+                 data_source=None):
 
         ParallelAnalysisInterface.__init__(self)
 
         self.pf = pf
-        self.l_max = l_max
-        if max_level is None: max_level = l_max
-        if fields is None: fields = ["Density"]
-        self.fields = ensure_list(fields)
         self.current_vcds = []
         self.current_saved_grids = []
         self.bricks = []
@@ -167,39 +146,38 @@ class AMRKDTree(ParallelAnalysisInterface):
         self.sdx = pf.h.get_smallest_dx()
 
         self._initialized = False
-        self.no_ghost = no_ghost
-        if log_fields is not None:
-            log_fields = ensure_list(log_fields)
-        else:
-            pf.h
-            log_fields = [self.pf.field_info[field].take_log
-                         for field in self.fields]
+        try:
+            self._id_offset = pf.h.grids[0]._id_offset
+        except AttributeError:
+            self._id_offset = 0
 
-        self.log_fields = log_fields
-        self._id_offset = pf.h.grids[0]._id_offset
-
-        if le is None:
-            self.le = pf.domain_left_edge
-        else:
-            self.le = np.array(le)
-        if re is None:
-            self.re = pf.domain_right_edge
-        else:
-            self.re = np.array(re)
+        if data_source is None:
+            data_source = self.pf.h.all_data()
+        self.data_source = data_source
 
         mylog.debug('Building AMRKDTree')
         self.tree = Tree(pf, self.comm.rank, self.comm.size,
-                         self.le, self.re, min_level=min_level,
-                         max_level=max_level, grids=grids)
+                         min_level=min_level, max_level=max_level,
+                         data_source=data_source)
 
-    def initialize_source(self):
-        if self._initialized : return
+    def set_fields(self, fields, log_fields, no_ghost):
+        self.fields = fields
+        self.log_fields = log_fields
+        self.no_ghost = no_ghost
+        del self.bricks, self.brick_dimensions
+        self.brick_dimensions = []
         bricks = []
         for b in self.traverse():
             bricks.append(b)
         self.bricks = np.array(bricks)
         self.brick_dimensions = np.array(self.brick_dimensions)
         self._initialized = True
+
+    def initialize_source(self, fields, log_fields, no_ghost):
+        if fields == self.fields and log_fields == self.log_fields and \
+                no_ghost == self.no_ghost:
+            return
+        self.set_fields(fields, log_fields, no_ghost)
 
     def traverse(self, viewpoint=None):
         for node in kd_traverse(self.tree.trunk, viewpoint=viewpoint):
@@ -209,7 +187,7 @@ class AMRKDTree(ParallelAnalysisInterface):
         path = np.binary_repr(nodeid)
         depth = 1
         temp = self.tree.trunk
-        for depth in range(1,len(path)):
+        for depth in range(1, len(path)):
             if path[depth] == '0':
                 temp = temp.left
             else:
@@ -271,23 +249,30 @@ class AMRKDTree(ParallelAnalysisInterface):
             dds = self.current_vcds[self.current_saved_grids.index(grid)]
         else:
             dds = []
-            for i,field in enumerate(self.fields):
-                vcd = grid.get_vertex_centered_data(field,smoothed=True,no_ghost=self.no_ghost).astype('float64')
+            for i, field in enumerate(self.fields):
+                vcd = grid.get_vertex_centered_data(field, smoothed=True, no_ghost=self.no_ghost).astype('float64')
                 if self.log_fields[i]: vcd = np.log10(vcd)
                 dds.append(vcd)
                 self.current_saved_grids.append(grid)
                 self.current_vcds.append(dds)
+
+        if self.data_source.selector is None:
+            mask = np.ones(dims, dtype='uint8')
+        else:
+            mask = self.data_source.selector.fill_mask(grid)[li[0]:ri[0], li[1]:ri[1], li[2]:ri[2] ].astype('uint8')
 
         data = [d[li[0]:ri[0]+1,
                   li[1]:ri[1]+1,
                   li[2]:ri[2]+1].copy() for d in dds]
 
         brick = PartitionedGrid(grid.id, data,
+                                mask,
                                 nle.copy(),
                                 nre.copy(),
                                 dims.astype('int64'))
         node.data = brick
-        if not self._initialized: self.brick_dimensions.append(dims)
+        if not self._initialized:
+            self.brick_dimensions.append(dims)
         return brick
 
     def locate_brick(self, position):
@@ -295,12 +280,12 @@ class AMRKDTree(ParallelAnalysisInterface):
         Alias of AMRKDTree.locate_node, to preserve backwards
         compatibility.
         """
-        return self.locate_node(position) 
+        return self.locate_node(position)
 
     def locate_neighbors(self, grid, ci):
-        r"""Given a grid and cell index, finds the 26 neighbor grids 
+        r"""Given a grid and cell index, finds the 26 neighbor grids
         and cell indices.
-        
+
         Parameters
         ----------
         grid: Grid Object

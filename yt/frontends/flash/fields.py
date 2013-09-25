@@ -355,6 +355,7 @@ def _nion(field, data):
     return data['dens'] * data['sumy'] * Na
 add_field('nion', function=_nion, take_log=True, units=r"\rm{cm}^{-3}")
 
+
 def _abar(field, data):
     try:
         return 1.0 / data['sumy']

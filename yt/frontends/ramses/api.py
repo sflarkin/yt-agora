@@ -14,8 +14,6 @@ API for yt.frontends.ramses
 #-----------------------------------------------------------------------------
 
 from .data_structures import \
-      RAMSESGrid, \
-      RAMSESHierarchy, \
       RAMSESStaticOutput
 
 from .fields import \

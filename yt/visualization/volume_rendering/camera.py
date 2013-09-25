@@ -98,7 +98,7 @@ class Camera(ParallelAnalysisInterface):
     use_kd: bool, optional
         Specifies whether or not to use a kd-Tree framework for
         the Homogenized Volume and ray-casting.  Default to True.
-    l_max: int, optional
+    max_level: int, optional
         Specifies the maximum level to be rendered.  Also
         specifies the maximum level used in the kd-Tree
         construction.  Defaults to None (all levels), and only
@@ -111,42 +111,10 @@ class Camera(ParallelAnalysisInterface):
         accuracy/smoothness in resulting image.  The effects are
         less notable when the transfer function is smooth and
         broad. Default: True
-    tree_type: string, optional
-        Specifies the type of kd-Tree to be constructed/cast.
-        There are three options, the default being 'domain'. Only
-        affects parallel rendering.  'domain' is suggested.
-
-        'domain' - Tree construction/casting is load balanced by
-        splitting up the domain into the first N subtrees among N
-        processors (N must be a power of 2).  Casting then
-        proceeds with each processor rendering their subvolume,
-        and final image is composited on the root processor.  The
-        kd-Tree is never combined, reducing communication and
-        memory overhead. The viewpoint can be changed without
-        communication or re-partitioning of the data, making it
-        ideal for rotations/spins.
-
-        'breadth' - kd-Tree is first constructed as in 'domain',
-        but then combined among all the subtrees.  Rendering is
-        then split among N processors (again a power of 2), based
-        on the N most expensive branches of the tree.  As in
-        'domain', viewpoint can be changed without re-partitioning
-        or communication.
-
-        'depth' - kd-Tree is first constructed as in 'domain', but
-        then combined among all subtrees.  Rendering is then load
-        balanced in a back-to-front manner, splitting up the cost
-        as evenly as possible.  If the viewpoint changes,
-        additional data might have to be partitioned.  Is also
-        prone to longer data IO times.  If all the data can fit in
-        memory on each cpu, this can be the fastest option for
-        multiple ray casts on the same dataset.
-    le: array_like, optional
-        Specifies the left edge of the volume to be rendered.
-        Currently only works with use_kd=True.
-    re: array_like, optional
-        Specifies the right edge of the volume to be rendered.
-        Currently only works with use_kd=True.
+    data_source: data container, optional
+        Optionally specify an arbitrary data source to the volume rendering.
+        All cells not included in the data source will be ignored during ray
+        casting. By default this will get set to pf.h.all_data().
 
     Examples
     --------
@@ -189,9 +157,9 @@ class Camera(ParallelAnalysisInterface):
                  volume = None, fields = None,
                  log_fields = None,
                  sub_samples = 5, pf = None,
-                 use_kd=True, l_max=None, no_ghost=True,
-                 tree_type='domain',
-                 le=None, re=None, use_light=False):
+                 min_level=None, max_level=None, no_ghost=True,
+                 data_source=None,
+                 use_light=False):
         ParallelAnalysisInterface.__init__(self)
         if pf is not None: self.pf = pf
         if not iterable(resolution):
@@ -211,33 +179,25 @@ class Camera(ParallelAnalysisInterface):
             transfer_function = ProjectionTransferFunction()
         self.transfer_function = transfer_function
         self.log_fields = log_fields
+        dd = self.pf.h.all_data()
+        efields = dd._determine_fields(self.fields)
         if self.log_fields is None:
-            self.log_fields = [self.pf.field_info[f].take_log for f in self.fields]
-        self.use_kd = use_kd
-        self.l_max = l_max
+            self.log_fields = [self.pf._get_field_info(*f).take_log for f in efields]
         self.no_ghost = no_ghost
         self.use_light = use_light
         self.light_dir = None
         self.light_rgba = None
         if self.no_ghost:
             mylog.info('Warning: no_ghost is currently True (default). This may lead to artifacts at grid boundaries.')
-        self.tree_type = tree_type
-        if le is None: le = self.pf.domain_left_edge
-        self.le = np.array(le)
-        if re is None: re = self.pf.domain_right_edge
-        self.re = np.array(re)
+
+        if data_source is None:
+            data_source = self.pf.h.all_data()
+        self.data_source = data_source
+
         if volume is None:
-            if self.use_kd:
-                volume = AMRKDTree(self.pf, l_max=l_max, fields=self.fields, no_ghost=no_ghost,
-                                   log_fields = log_fields, le=self.le, re=self.re)
-            else:
-                volume = HomogenizedVolume(fields, pf = self.pf,
-                                           log_fields = log_fields)
-        else:
-            self.use_kd = isinstance(volume, AMRKDTree)
+            volume = AMRKDTree(self.pf, min_level=min_level, 
+                               max_level=max_level, data_source=self.data_source)
         self.volume = volume        
-        self.center = (self.re + self.le) / 2.0
-        self.region = self.pf.h.region(self.center, self.le, self.re)
 
     def _setup_box_properties(self, width, center, unit_vectors):
         self.width = width
@@ -296,8 +256,8 @@ class Camera(ParallelAnalysisInterface):
         >>> write_bitmap(im, 'render_with_grids.png')
 
         """
-        corners = self.region.grid_corners
-        levels = self.region.grid_levels[:,0]
+        corners = self.pf.h.grid_corners
+        levels = self.pf.h.grid_levels[:,0]
 
         if max_level is not None:
             subset = levels <= max_level
@@ -679,7 +639,8 @@ class Camera(ParallelAnalysisInterface):
                                 background='black')
 
     def initialize_source(self):
-        return self.volume.initialize_source()
+        return self.volume.initialize_source(self.fields, self.log_fields,
+                                             self.no_ghost)
 
     def get_information(self):
         info_dict = {'fields':self.fields,
@@ -1158,9 +1119,7 @@ class HEALpixCamera(Camera):
                  sub_samples = 5, log_fields = None, volume = None,
                  pf = None, use_kd=True, no_ghost=False, use_light=False,
                  inner_radius = 10):
-        print "Because of recent relicensing, we currently cannot provide"
-        print "HEALpix functionality.  Please visit yt-users for more"
-        print "information."
+        mylog.error('I am sorry, HEALpix Camera does not work yet in 3.0')
         raise NotImplementedError
         ParallelAnalysisInterface.__init__(self)
         if pf is not None: self.pf = pf
@@ -1184,14 +1143,16 @@ class HEALpixCamera(Camera):
         self.fields = fields
         self.sub_samples = sub_samples
         self.log_fields = log_fields
+        dd = pf.h.all_data()
+        efields = dd._determine_fields(self.fields)
         if self.log_fields is None:
-            self.log_fields = [self.pf.field_info[f].take_log for f in self.fields]
+            self.log_fields = [self.pf._get_field_info(*f).take_log for f in efields]
         self.use_light = use_light
         self.light_dir = None
         self.light_rgba = None
         if volume is None:
-            volume = AMRKDTree(self.pf, fields=self.fields, no_ghost=no_ghost,
-                               log_fields=log_fields)
+            volume = AMRKDTree(self.pf, min_level=min_level,
+                               max_level=max_level, data_source=self.data_source)
         self.use_kd = isinstance(volume, AMRKDTree)
         self.volume = volume
 
@@ -1305,7 +1266,6 @@ class AdaptiveHEALpixCamera(Camera):
                  sub_samples = 5, log_fields = None, volume = None,
                  pf = None, use_kd=True, no_ghost=False,
                  rays_per_cell = 0.1, max_nside = 8192):
-        raise NotImplementedError
         ParallelAnalysisInterface.__init__(self)
         if pf is not None: self.pf = pf
         self.center = np.array(center, dtype='float64')
@@ -1999,7 +1959,7 @@ class MosaicFisheyeCamera(Camera):
             yield self.snapshot()
 
 def allsky_projection(pf, center, radius, nside, field, weight = None,
-                      inner_radius = 10, rotation = None, source = None):
+                      inner_radius = 10, rotation = None, data_source = None):
     r"""Project through a parameter file, through an allsky-method
     decomposition from HEALpix, and return the image plane.
 
@@ -2034,7 +1994,7 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
         If supplied, the vectors will be rotated by this.  You can construct
         this by, for instance, calling np.array([v1,v2,v3]) where those are the
         three reference planes of an orthogonal frame (see ortho_find).
-    source : data container, default None
+    data_source : data container, default None
         If this is supplied, this gives the data source from which the all sky
         projection pulls its data from.
 
@@ -2053,10 +2013,6 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
     """
     # We manually modify the ProjectionTransferFunction to get it to work the
     # way we want, with a second field that's also passed through.
-    print "Because of recent relicensing, we currently cannot provide"
-    print "HEALpix functionality.  Please visit yt-users for more"
-    print "information."
-    raise NotImplementedError
     fields = [field]
     center = np.array(center, dtype='float64')
     if weight is not None:
@@ -2068,6 +2024,9 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
             return temp_weightfield
         pf.field_info.add_field("temp_weightfield",
             function=_make_wf(field, weight))
+        # Now we have to tell the parameter file to add it and to calculate its
+        # dependencies..
+        pf.h._derived_fields_add(["temp_weightfield"], [])
         fields = ["temp_weightfield", weight]
     nv = 12*nside**2
     image = np.zeros((nv,1,4), dtype='float64', order='C')
@@ -2084,16 +2043,16 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
     positions += inner_radius * dx * vs
     vs *= radius
     uv = np.ones(3, dtype='float64')
-    if source is not None:
-        grids = source._grids
+    if data_source is not None:
+        grids = data_source._grids
     else:
         grids = pf.h.sphere(center, radius)._grids
     sampler = ProjectionSampler(positions, vs, center, (0.0, 0.0, 0.0, 0.0),
                                 image, uv, uv, np.zeros(3, dtype='float64'))
     pb = get_pbar("Sampling ", len(grids))
     for i,grid in enumerate(grids):
-        if source is not None:
-            data = [grid[field] * source._get_cut_mask(grid) * \
+        if data_source is not None:
+            data = [grid[field] * data_source._get_cut_mask(grid) * \
                 grid.child_mask.astype('float64')
                 for field in fields]
         else:
@@ -2108,12 +2067,16 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
         pb.update(i)
     pb.finish()
     image = sampler.aimage
+    dd = self.pf.h.all_data()
+    field = dd._determine_fields([field])[0]
+    finfo = self.pf._get_field_info(*field)
     if weight is None:
-        dl = radius * pf.units[pf.field_info[field].projection_conversion]
+        dl = radius * pf.units[finfo.projection_conversion]
         image *= dl
     else:
         image[:,:,0] /= image[:,:,1]
         pf.field_info.pop("temp_weightfield")
+        pf.field_dependencies.pop("temp_weightfield")
         for g in pf.h.grids:
             if "temp_weightfield" in g.keys():
                 del g["temp_weightfield"]
@@ -2121,10 +2084,6 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
 
 def plot_allsky_healpix(image, nside, fn, label = "", rotation = None,
                         take_log = True, resolution=512, cmin=None, cmax=None):
-    print "Because of recent relicensing, we currently cannot provide"
-    print "HEALpix functionality.  Please visit yt-users for more"
-    print "information."
-    raise NotImplementedError
     import matplotlib.figure
     import matplotlib.backends.backend_agg
     if rotation is None: rotation = np.eye(3).astype("float64")
@@ -2148,7 +2107,6 @@ def plot_allsky_healpix(image, nside, fn, label = "", rotation = None,
 class ProjectionCamera(Camera):
     def __init__(self, center, normal_vector, width, resolution,
             field, weight=None, volume=None, no_ghost = False, 
-            le=None, re=None,
             north_vector=None, pf=None, interpolated=False):
 
         if not interpolated:
@@ -2169,6 +2127,9 @@ class ProjectionCamera(Camera):
                 return temp_weightfield
             pf.field_info.add_field("temp_weightfield",
                 function=_make_wf(self.field, self.weight))
+            # Now we have to tell the parameter file to add it and to calculate
+            # its dependencies..
+            pf.h._derived_fields_add(["temp_weightfield"], [])
             fields = ["temp_weightfield", self.weight]
         
         self.fields = fields
@@ -2176,7 +2137,7 @@ class ProjectionCamera(Camera):
         Camera.__init__(self, center, normal_vector, width, resolution, None,
                 fields = fields, pf=pf, volume=volume,
                 log_fields=self.log_fields, 
-                le=le, re=re, north_vector=north_vector,
+                north_vector=north_vector,
                 no_ghost=no_ghost)
 
     def get_sampler(self, args):
@@ -2203,8 +2164,11 @@ class ProjectionCamera(Camera):
 
     def finalize_image(self,image):
         pf = self.pf
+        dd = pf.h.all_data()
+        field = dd._determine_fields([self.field])[0]
+        finfo = pf._get_field_info(*field)
         if self.weight is None:
-            dl = self.width[2] * pf.units[pf.field_info[self.field].projection_conversion]
+            dl = self.width[2] * pf.units[finfo.projection_conversion]
             image *= dl
         else:
             image[:,:,0] /= image[:,:,1]
@@ -2236,25 +2200,25 @@ class ProjectionCamera(Camera):
                     np.minimum(mi, this_point, mi)
                     np.maximum(ma, this_point, ma)
         # Now we have a bounding box.
-        grids = pf.h.region(self.center, mi, ma)._grids
+        data_source = pf.h.region(self.center, mi, ma)
 
-        pb = get_pbar("Sampling ", len(grids))
-        for i,grid in enumerate(grids):
-            data = [(grid[field] * grid.child_mask).astype("float64")
-                    for field in fields]
+        for i, (grid, mask) in enumerate(data_source.blocks):
+            data = [(grid[field] * mask).astype("float64") for field in fields]
             pg = PartitionedGrid(
                 grid.id, data,
+                mask.astype('uint8'),
                 grid.LeftEdge, grid.RightEdge, grid.ActiveDimensions.astype("int64"))
             grid.clear_data()
             sampler(pg, num_threads = num_threads)
-            pb.update(i)
-        pb.finish()
 
         image = self.finalize_image(sampler.aimage)
         return image
 
     def save_image(self, image, fn=None, clip_ratio=None):
-        if self.pf.field_info[self.field].take_log:
+        dd = self.pf.h.all_data()
+        field = dd._determine_fields([self.field])[0]
+        finfo = self.pf._get_field_info(*field)
+        if finfo.take_log:
             im = np.log10(image)
         else:
             im = image
@@ -2360,6 +2324,7 @@ def off_axis_projection(pf, center, normal_vector, width, resolution,
     image = projcam.snapshot()
     if weight is not None:
         pf.field_info.pop("temp_weightfield")
+        pf.field_dependencies.pop("temp_weightfield")
     del projcam
     return image[:,:]
 

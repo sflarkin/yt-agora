@@ -15,6 +15,7 @@ Some simple localhost-only remote pdb hacks
 
 import cmd, pdb, cStringIO, xmlrpclib, socket, sys
 import traceback
+import signal
 from SimpleXMLRPCServer import SimpleXMLRPCServer
 from yt.config import ytcfg
 

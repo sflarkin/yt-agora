@@ -15,10 +15,16 @@ conversion functions between time and redshift pulled from Enzo.
 #-----------------------------------------------------------------------------
 
 import numpy as np
+from yt.utilities.physical_constants import \
+    gravitational_constant_cgs, \
+    km_per_cm, \
+    pc_per_mpc, \
+    km_per_pc, \
+    speed_of_light_cgs
 
-c_kms = 2.99792458e5 # c in km/s
-G = 6.67259e-8 # cgs
-kmPerMpc = 3.08567758e19
+c_kms = speed_of_light_cgs * km_per_cm # c in km/s
+G = gravitational_constant_cgs
+kmPerMpc = km_per_pc * pc_per_mpc
 
 class Cosmology(object):
     def __init__(self, HubbleConstantNow = 71.0,
@@ -45,7 +51,7 @@ class Cosmology(object):
                           self.HubbleDistance()))
          elif (self.OmegaCurvatureNow < 0):
              return (self.HubbleDistance() / np.sqrt(np.fabs(self.OmegaCurvatureNow)) * 
-                     sin(np.sqrt(np.fabs(self.OmegaCurvatureNow)) * 
+                     np.sin(np.sqrt(np.fabs(self.OmegaCurvatureNow)) * 
                          self.ComovingRadialDistance(z_i,z_f) / self.HubbleDistance()))
          else:
              return self.ComovingRadialDistance(z_i,z_f)
@@ -57,7 +63,7 @@ class Cosmology(object):
                       np.sqrt(1 + self.OmegaCurvatureNow * 
                            sqr(self.ComovingTransverseDistance(z_i,z_f) / 
                                self.HubbleDistance())) - 
-                      anp.sinh(np.fabs(self.OmegaCurvatureNow) * 
+                      np.sinh(np.fabs(self.OmegaCurvatureNow) * 
                             self.ComovingTransverseDistance(z_i,z_f) / 
                             self.HubbleDistance()) / np.sqrt(self.OmegaCurvatureNow)) / 1e9)
         elif (self.OmegaCurvatureNow < 0):
@@ -67,7 +73,7 @@ class Cosmology(object):
                       np.sqrt(1 + self.OmegaCurvatureNow * 
                            sqr(self.ComovingTransverseDistance(z_i,z_f) / 
                                self.HubbleDistance())) - 
-                      asin(np.fabs(self.OmegaCurvatureNow) * 
+                      np.arcsin(np.fabs(self.OmegaCurvatureNow) * 
                            self.ComovingTransverseDistance(z_i,z_f) / 
                            self.HubbleDistance()) / 
                       np.sqrt(np.fabs(self.OmegaCurvatureNow))) / 1e9)
@@ -152,6 +158,7 @@ class EnzoCosmology(object):
         """
         # Changed 2.52e17 to 2.52e19 because H_0 is in km/s/Mpc, 
         # instead of 100 km/s/Mpc.
+        # TODO: Move me to physical_units
         return 2.52e19 / np.sqrt(self.OmegaMatterNow) / \
             self.HubbleConstantNow / np.power(1 + self.InitialRedshift,1.5)
 
@@ -252,7 +259,7 @@ class EnzoCosmology(object):
         # 3) For OmegaMatterNow > 1 and OmegaLambdaNow == 0, use sin/cos.
  
         if ((self.OmegaMatterNow > 1) and (self.OmegaLambdaNow == 0)):
-            eta = np.acos(1 - 2*(1-self.OmegaMatterNow)/self.OmegaMatterNow/(1+z))
+            eta = np.arccos(1 - 2*(1-self.OmegaMatterNow)/self.OmegaMatterNow/(1+z))
             TimeHubble0 = self.OmegaMatterNow/(2*np.power(1.0-self.OmegaMatterNow, 1.5))*\
                 (eta - np.sin(eta))
  

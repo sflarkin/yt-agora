@@ -20,14 +20,13 @@ import weakref
 from collections import defaultdict
 from string import strip, rstrip
 from stat import ST_CTIME
-import glob
 
 import numpy as np
 
 from yt.funcs import *
 from yt.data_objects.field_info_container import FieldInfoContainer, NullFunc
 from yt.data_objects.grid_patch import AMRGridPatch
-from yt.data_objects.hierarchy import AMRHierarchy
+from yt.geometry.grid_geometry_handler import GridGeometryHandler
 from yt.data_objects.static_output import StaticOutput
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
@@ -35,6 +34,8 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
     parallel_root_only
 from yt.utilities.lib import \
     get_box_grids_level
+from yt.geometry.selection_routines import \
+    RegionSelector
 
 from .definitions import \
     orion2enzoDict, \
@@ -44,7 +45,6 @@ from .fields import \
     add_orion_field, \
     KnownOrionFields
 from .io import IOHandlerBoxlib
-
 # This is what we use to find scientific notation that might include d's
 # instead of e's.
 _scinot_finder = re.compile(r"[-+]?[0-9]*\.?[0-9]+([eEdD][-+]?[0-9]+)?")
@@ -96,14 +96,14 @@ class BoxlibGrid(AMRGridPatch):
         return [self.hierarchy.grids[cid - self._id_offset]
                 for cid in self._children_ids]
 
-class BoxlibHierarchy(AMRHierarchy):
+class BoxlibHierarchy(GridGeometryHandler):
     grid = BoxlibGrid
     def __init__(self, pf, data_style='boxlib_native'):
         self.data_style = data_style
         self.header_filename = os.path.join(pf.output_dir, 'Header')
         self.directory = pf.output_dir
 
-        AMRHierarchy.__init__(self, pf, data_style)
+        GridGeometryHandler.__init__(self, pf, data_style)
         self._cache_endianness(self.grids[-1])
         #self._read_particles()
 
@@ -287,7 +287,8 @@ class BoxlibHierarchy(AMRHierarchy):
 
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
+        self.object_types.sort()
 
 class BoxlibStaticOutput(StaticOutput):
     """
@@ -298,6 +299,9 @@ class BoxlibStaticOutput(StaticOutput):
     _fieldinfo_fallback = OrionFieldInfo
     _fieldinfo_known = KnownOrionFields
     _output_prefix = None
+
+    # THIS SHOULD BE FIXED:
+    periodicity = (True, True, True)
 
     def __init__(self, output_dir,
                  cparam_filename = "inputs",
@@ -665,4 +669,5 @@ class MaestroStaticOutput(BoxlibStaticOutput):
         # Maestro outputs have "Castro" in them
         if any(line.startswith("Castro   ") for line in lines): return True
         return False
+
 
