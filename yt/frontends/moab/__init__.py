@@ -1,5 +1,5 @@
 """
-API for yt.frontends.gadget
+Empty __init__.py file.
 
 
 
@@ -12,15 +12,3 @@ API for yt.frontends.gadget
 #
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
-
-from .data_structures import \
-      GadgetGrid, \
-      GadgetHierarchy, \
-      GadgetStaticOutput
-
-from .fields import \
-      GadgetFieldInfo, \
-      add_gadget_field
-
-from .io import \
-      IOHandlerGadget

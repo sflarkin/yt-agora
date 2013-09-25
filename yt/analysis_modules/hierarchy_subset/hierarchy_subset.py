@@ -22,8 +22,8 @@ from yt.data_objects.grid_patch import \
     AMRGridPatch
 from yt.data_objects.static_output import \
     StaticOutput
-from yt.data_objects.hierarchy import \
-    AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+    GridGeometryHandler
 
 class DummyHierarchy(object):
     pass
@@ -185,7 +185,7 @@ class OldExtractedHierarchy(object):
     def _convert_coords(self, val):
         return (val - self.left_edge_offset)*self.mult_factor
 
-class ExtractedHierarchy(AMRHierarchy):
+class ExtractedHierarchy(GridGeometryHandler):
 
     grid = AMRExtractedGridProxy
 
@@ -218,7 +218,7 @@ class ExtractedHierarchy(AMRHierarchy):
         # Now we utilize the existing machinery for generating the appropriate
         # arrays of grids, etc etc.
         self.base_pf = pf.base_pf
-        AMRHierarchy.__init__(self, pf, data_style)
+        GridGeometryHandler.__init__(self, pf, data_style)
 
         # Now a few cleanups
         self.pf.override["DomainRightEdge"] = self.max_right_edge
@@ -313,7 +313,7 @@ class ExtractedHierarchy(AMRHierarchy):
 
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
 class ExtractedParameterFile(StaticOutput):

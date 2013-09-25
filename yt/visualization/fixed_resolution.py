@@ -20,6 +20,8 @@ from yt.utilities.definitions import \
     axis_names
 from .volume_rendering.api import off_axis_projection
 from yt.data_objects.image_array import ImageArray
+from yt.utilities.lib.misc_utilities import \
+    pixelize_cylinder
 import _MPL
 import numpy as np
 import weakref
@@ -133,21 +135,24 @@ class FixedResolutionBuffer(object):
 
     def _get_data_source_fields(self):
         exclude = self.data_source._key_fields + list(self._exclude_fields)
-        for f in self.data_source.fields:
-            if f not in exclude:
+        fields = getattr(self.data_source, "fields", [])
+        fields += getattr(self.data_source, "field_data", {}).keys()
+        for f in fields:
+            if f not in exclude and f[0] not in self.data_source.pf.particle_types:
                 self[f]
 
     def _get_info(self, item):
         info = {}
+        ftype, fname = field = self.data_source._determine_fields(item)[0]
+        finfo = self.data_source.pf._get_field_info(*field)
         info['data_source'] = self.data_source.__str__()  
         info['axis'] = self.data_source.axis
         info['field'] = str(item)
-        info['units'] = self.data_source.pf.field_info[item].get_units()
+        info['units'] = finfo.get_units()
         info['xlim'] = self.bounds[:2]
         info['ylim'] = self.bounds[2:]
         info['length_to_cm'] = self.data_source.pf['cm']
-        info['projected_units'] = \
-                self.data_source.pf.field_info[item].get_projected_units()
+        info['projected_units'] = finfo.get_projected_units()
         info['center'] = self.data_source.center
         
         try:
@@ -160,9 +165,10 @@ class FixedResolutionBuffer(object):
         except AttributeError:
             pass
         
-        info['label'] = self.data_source.pf.field_info[item].display_name
+        info['label'] = finfo.display_name
         if info['label'] is None:
-            info['label'] = r'$\rm{'+item.replace('_','\/').title()+r'}$'
+            info['label'] = r'$\rm{'+fname+r'}$'
+            info['label'] = r'$\rm{'+fname.replace('_','\/').title()+r'}$'
         elif info['label'].find('$') == -1:
             info['label'] = info['label'].replace(' ','\/')
             info['label'] = r'$\rm{'+info['label']+r'}$'
@@ -409,6 +415,30 @@ class FixedResolutionBuffer(object):
         rv[yn] = (self.bounds[2], self.bounds[3])
         return rv
 
+class CylindricalFixedResolutionBuffer(FixedResolutionBuffer):
+
+    def __init__(self, data_source, radius, buff_size, antialias = True) :
+
+        self.data_source = data_source
+        self.pf = data_source.pf
+        self.radius = radius
+        self.buff_size = buff_size
+        self.antialias = antialias
+        self.data = {}
+        
+        h = getattr(data_source, "hierarchy", None)
+        if h is not None:
+            h.plots.append(weakref.proxy(self))
+
+    def __getitem__(self, item) :
+        if item in self.data: return self.data[item]
+        buff = pixelize_cylinder(self.data_source["r"], self.data_source["dr"],
+                                 self.data_source["theta"], self.data_source["dtheta"],
+                                 self.buff_size, self.data_source[item].astype("float64"),
+                                 self.radius)
+        self[item] = buff
+        return buff
+        
 class ObliqueFixedResolutionBuffer(FixedResolutionBuffer):
     """
     This object is a subclass of :class:`yt.visualization.fixed_resolution.FixedResolutionBuffer`
