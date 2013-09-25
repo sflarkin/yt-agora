@@ -52,9 +52,10 @@ ytcfgDefaults = dict(
     notebook_password = '',
     answer_testing_tolerance = '3',
     answer_testing_bitwise = 'False',
-    gold_standard_filename = 'gold010',
+    gold_standard_filename = 'gold310',
     local_standard_filename = 'local001',
-    sketchfab_api_key = 'None'
+    sketchfab_api_key = 'None',
+    thread_field_detection = 'False'
     )
 # Here is the upgrade.  We're actually going to parse the file in its entirety
 # here.  Then, if it has any of the Forbidden Sections, it will be rewritten

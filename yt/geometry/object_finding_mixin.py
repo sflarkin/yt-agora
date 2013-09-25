@@ -22,6 +22,8 @@ from yt.utilities.lib import \
 from yt.utilities.lib import \
     MatchPointsToGrids, \
     GridTree
+from yt.utilities.physical_constants import \
+    HUGE
 
 class ObjectFindingMixin(object) :
 
@@ -48,7 +50,7 @@ class ObjectFindingMixin(object) :
         """
         if (field, finest_levels) in self._max_locations:
             return self._max_locations[(field, finest_levels)]
-        mg, mc, mv, pos = self.find_max_cell_location(field, finest_levels)
+        mv, pos = self.find_max_cell_location(field, finest_levels)
         self._max_locations[(field, finest_levels)] = (mv, pos)
         return mv, pos
 
@@ -60,22 +62,20 @@ class ObjectFindingMixin(object) :
             source = self.all_data()
         mylog.debug("Searching %s grids for maximum value of %s",
                     len(source._grids), field)
-        max_val, maxi, mx, my, mz, mg = \
-            source.quantities["MaxLocation"]( field, lazy_reader=True)
-        max_grid = self.grids[mg]
-        mc = np.unravel_index(maxi, max_grid.ActiveDimensions)
-        mylog.info("Max Value is %0.5e at %0.16f %0.16f %0.16f in grid %s at level %s %s", \
-              max_val, mx, my, mz, max_grid, max_grid.Level, mc)
+        max_val, maxi, mx, my, mz = \
+            source.quantities["MaxLocation"]( field )
+        mylog.info("Max Value is %0.5e at %0.16f %0.16f %0.16f", 
+              max_val, mx, my, mz)
         self.parameters["Max%sValue" % (field)] = max_val
         self.parameters["Max%sPos" % (field)] = "%s" % ((mx,my,mz),)
-        return max_grid, mc, max_val, np.array((mx,my,mz), dtype='float64')
+        return max_val, np.array((mx,my,mz), dtype='float64')
 
     def find_min(self, field):
         """
         Returns (value, center) of location of minimum for a given field
         """
         gI = np.where(self.grid_levels >= 0) # Slow but pedantic
-        minVal = 1e100
+        minVal = HUGE
         for grid in self.grids[gI[0]]:
             mylog.debug("Checking %s (level %s)", grid.id, grid.Level)
             val, coord = grid.find_min(field)

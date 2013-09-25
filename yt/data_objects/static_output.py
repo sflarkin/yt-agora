@@ -27,8 +27,15 @@ from yt.utilities.parameter_file_storage import \
     output_type_registry
 from yt.data_objects.field_info_container import \
     FieldInfoContainer, NullFunc
+from yt.data_objects.particle_filters import \
+    filter_registry
 from yt.utilities.minimal_representation import \
     MinimalStaticOutput
+
+from yt.geometry.coordinate_handler import \
+    CartesianCoordinateHandler, \
+    PolarCoordinateHandler, \
+    CylindricalCoordinateHandler
 
 # We want to support the movie format in the future.
 # When such a thing comes to pass, I'll move all the stuff that is contant up
@@ -38,6 +45,17 @@ _cached_pfs = weakref.WeakValueDictionary()
 _pf_store = ParameterFileStore()
 
 class StaticOutput(object):
+
+    default_fluid_type = "gas"
+    fluid_types = ("gas","deposit")
+    particle_types = ("all",)
+    geometry = "cartesian"
+    coordinates = None
+    max_level = 99
+    storage_filename = None
+    _particle_mass_name = None
+    _particle_coordinates_name = None
+
     class __metaclass__(type):
         def __init__(cls, name, b, d):
             type.__init__(cls, name, b, d)
@@ -73,6 +91,7 @@ class StaticOutput(object):
         self.file_style = file_style
         self.conversion_factors = {}
         self.parameters = {}
+        self.known_filters = {}
 
         # path stuff
         self.parameter_filename = str(filename)
@@ -92,6 +111,7 @@ class StaticOutput(object):
         self.min_level = 0
 
         self._parse_parameter_file()
+        self._setup_coordinate_handler()
         self._set_units()
         self._set_derived_attrs()
 
@@ -223,8 +243,76 @@ class StaticOutput(object):
             # away the exising field_info.
             self.field_info = FieldInfoContainer.create_with_fallback(
                                 self._fieldinfo_fallback)
+            self.field_info.update(self.coordinates.coordinate_fields())
+        if getattr(self, "field_dependencies", None) is None:
+            self.field_dependencies = {}
 
-        
+    def _setup_coordinate_handler(self):
+        if self.geometry == "cartesian":
+            self.coordinates = CartesianCoordinateHandler(self)
+        elif self.geometry == "cylindrical":
+            self.coordinates = CylindricalCoordinateHandler(self)
+        elif self.geometry == "polar":
+            self.coordinates = PolarCoordinateHandler(self)
+        else:
+            raise YTGeometryNotSupported(self.geometry)
+
+    def add_particle_filter(self, filter):
+        # This is a dummy, which we set up to enable passthrough of "all"
+        # concatenation fields.
+        n = getattr(filter, "name", filter)
+        self.known_filters[n] = None
+        if isinstance(filter, types.StringTypes):
+            used = False
+            for f in filter_registry[filter]:
+                used = self.h._setup_filtered_type(f)
+                if used:
+                    filter = f
+                    break
+        else:
+            used = self.h._setup_filtered_type(filter)
+        if not used:
+            self.known_filters.pop(n, None)
+            return False
+        self.known_filters[filter.name] = filter
+        return True
+
+    _last_freq = (None, None)
+    _last_finfo = None
+    def _get_field_info(self, ftype, fname):
+        guessing_type = False
+        if ftype == "unknown" and self._last_freq[0] != None:
+            ftype = self._last_freq[0]
+            guessing_type = True
+        field = (ftype, fname)
+        if field == self._last_freq:
+            return self._last_finfo
+        if field in self.field_info:
+            self._last_freq = field
+            self._last_finfo = self.field_info[(ftype, fname)]
+            return self._last_finfo
+        if fname == self._last_freq[1]:
+            return self._last_finfo
+        if fname in self.field_info:
+            # Sometimes, if guessing_type == True, this will be switched for
+            # the type of field it is.  So we look at the field type and
+            # determine if we need to change the type.
+            fi = self._last_finfo = self.field_info[fname]
+            if fi.particle_type and self._last_freq[0] \
+                not in self.particle_types:
+                    field = "all", field[1]
+            elif not fi.particle_type and self._last_freq[0] \
+                not in self.fluid_types:
+                    field = self.default_fluid_type, field[1]
+            self._last_freq = field
+            return self._last_finfo
+        # We also should check "all" for particles, which can show up if you're
+        # mixing deposition/gas fields with particle fields.
+        if guessing_type and ("all", fname) in self.field_info:
+            self._last_freq = ("all", fname)
+            self._last_finfo = self.field_info["all", fname]
+            return self._last_finfo
+        raise YTFieldNotFound((ftype, fname), self)
 
 def _reconstruct_pf(*args, **kwargs):
     pfs = ParameterFileStore()

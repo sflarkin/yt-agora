@@ -384,7 +384,7 @@ class FieldValuesTest(AnswerTestingTest):
         return np.array([avg, mi, ma])
 
     def compare(self, new_result, old_result):
-        err_msg = "Field values for %s not equal." % self.field
+        err_msg = "Field values for %s not equal." % (self.field,)
         if self.decimals is None:
             assert_equal(new_result, old_result,
                          err_msg=err_msg, verbose=True)
@@ -435,7 +435,7 @@ class ProjectionValuesTest(AnswerTestingTest):
         else:
             obj = None
         if self.pf.domain_dimensions[self.axis] == 1: return None
-        proj = self.pf.h.proj(self.axis, self.field,
+        proj = self.pf.h.proj(self.field, self.axis,
                               weight_field=self.weight_field,
                               data_source = obj)
         return proj.field_data
@@ -475,15 +475,16 @@ class PixelizedProjectionValuesTest(AnswerTestingTest):
             obj = self.create_obj(self.pf, self.obj_type)
         else:
             obj = None
-        proj = self.pf.h.proj(self.axis, self.field,
+        proj = self.pf.h.proj(self.field, self.axis, 
                               weight_field=self.weight_field,
                               data_source = obj)
         frb = proj.to_frb((1.0, 'unitary'), 256)
         frb[self.field]
         frb[self.weight_field]
         d = frb.data
-        d.update( dict( (("%s_sum" % f, proj[f].sum(dtype="float64"))
-                         for f in proj.field_data.keys()) ) )
+        for f in proj.field_data:
+            # Sometimes f will be a tuple.
+            d["%s_sum" % (f,)] = proj.field_data[f].sum(dtype="float64")
         return d
 
     def compare(self, new_result, old_result):

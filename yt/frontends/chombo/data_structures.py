@@ -35,8 +35,8 @@ from .definitions import \
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
      AMRGridPatch
-from yt.data_objects.hierarchy import \
-     AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+     GridGeometryHandler
 from yt.data_objects.static_output import \
      StaticOutput
 from yt.utilities.definitions import \
@@ -84,7 +84,7 @@ class ChomboGrid(AMRGridPatch):
         self.dds = self.hierarchy.dds_list[self.Level]
         self.field_data['dx'], self.field_data['dy'], self.field_data['dz'] = self.dds
 
-class ChomboHierarchy(AMRHierarchy):
+class ChomboHierarchy(GridGeometryHandler):
 
     grid = ChomboGrid
 
@@ -102,8 +102,9 @@ class ChomboHierarchy(AMRHierarchy):
 
         self.float_type = self._handle['/level_0']['data:datatype=0'].dtype.name
         self._levels = self._handle.keys()[1:]
-        AMRHierarchy.__init__(self,pf,data_style)
+        GridGeometryHandler.__init__(self,pf,data_style)
         self._read_particles()
+        self._fhandle.close()
 
     def _read_particles(self):
         self.particle_filename = self.hierarchy_filename[:-4] + 'sink'
@@ -139,7 +140,7 @@ class ChomboHierarchy(AMRHierarchy):
           
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
     def _count_grids(self):
@@ -305,9 +306,10 @@ class ChomboStaticOutput(StaticOutput):
         return LE
 
     def __calc_right_edge(self):
-        fileh = self._handle
+        fileh = h5py.File(self.parameter_filename,'r')
         dx0 = fileh['/level_0'].attrs['dx']
         RE = dx0*((np.array(list(fileh['/level_0'].attrs['prob_domain'])))[3:] + 1)
+        fileh.close()
         return RE
 
     def __calc_domain_dimensions(self):

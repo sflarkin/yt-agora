@@ -14,8 +14,9 @@ API for yt.frontends.art
 #-----------------------------------------------------------------------------
 
 from .data_structures import \
-      ARTGrid, \
-      ARTHierarchy, \
+      ARTDomainFile,\
+      ARTDomainSubset,\
+      ARTGeometryHandler,\
       ARTStaticOutput
 
 from .fields import \
