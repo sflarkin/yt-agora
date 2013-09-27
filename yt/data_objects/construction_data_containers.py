@@ -1,29 +1,18 @@
 """
 Data containers that require processing before they can be utilized.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Author: Britton Smith <Britton.Smith@colorado.edu>
-Affiliation: University of Colorado at Boulder
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2007-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
 
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import numpy as np
 import math
@@ -338,7 +327,7 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         icoords = chunk.icoords
         i1 = icoords[:,x_dict[self.axis]]
         i2 = icoords[:,y_dict[self.axis]]
-        ilevel = chunk.ires
+        ilevel = chunk.ires * self.pf.ires_factor
         tree.initialize_chunk(i1, i2, ilevel)
 
     def _handle_chunk(self, chunk, fields, tree):
@@ -358,7 +347,7 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         icoords = chunk.icoords
         i1 = icoords[:,x_dict[self.axis]]
         i2 = icoords[:,y_dict[self.axis]]
-        ilevel = chunk.ires
+        ilevel = chunk.ires * self.pf.ires_factor
         tree.add_chunk_to_tree(i1, i2, ilevel, v, w)
 
     def to_pw(self, fields=None, center='c', width=None, axes_unit=None, 
