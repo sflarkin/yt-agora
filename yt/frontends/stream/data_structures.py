@@ -1,39 +1,34 @@
 """
 Data structures for Streaming, in-memory datasets
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: Columbia University
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import weakref
 import numpy as np
 import uuid
+from itertools import chain, product
 
 from yt.utilities.io_handler import io_registry
 from yt.funcs import *
 from yt.config import ytcfg
 from yt.data_objects.grid_patch import \
     AMRGridPatch
-from yt.data_objects.hierarchy import \
-    AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+    GridGeometryHandler
+from yt.geometry.particle_geometry_handler import \
+    ParticleGeometryHandler
+from yt.geometry.unstructured_mesh_handler import \
+           UnstructuredGeometryHandler
 from yt.data_objects.static_output import \
     StaticOutput
 from yt.utilities.logger import ytLogger as mylog
@@ -47,6 +42,10 @@ from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
 from yt.utilities.flagging_methods import \
     FlaggingGrid
+from yt.frontends.sph.data_structures import \
+    ParticleFile
+from yt.data_objects.unstructured_mesh import \
+           SemiStructuredMesh
 
 from .fields import \
     StreamFieldInfo, \
@@ -132,7 +131,7 @@ class StreamHandler(object):
         else :
             return False
         
-class StreamHierarchy(AMRHierarchy):
+class StreamHierarchy(GridGeometryHandler):
 
     grid = StreamGrid
 
@@ -143,32 +142,10 @@ class StreamHierarchy(AMRHierarchy):
         self.stream_handler = pf.stream_handler
         self.float_type = "float64"
         self.directory = os.getcwd()
-        AMRHierarchy.__init__(self, pf, data_style)
-
-    def _initialize_data_storage(self):
-        pass
+        GridGeometryHandler.__init__(self, pf, data_style)
 
     def _count_grids(self):
         self.num_grids = self.stream_handler.num_grids
-
-    def _setup_unknown_fields(self):
-        for field in self.field_list:
-            if field in self.parameter_file.field_info: continue
-            mylog.info("Adding %s to list of fields", field)
-            cf = None
-            if self.parameter_file.has_key(field):
-                def external_wrapper(f):
-                    def _convert_function(data):
-                        return data.convert(f)
-                    return _convert_function
-                cf = external_wrapper(field)
-            ptype = self.stream_handler.get_particle_type(field)
-            # Note that we call add_field on the field_info directly.  This
-            # will allow the same field detection mechanism to work for 1D, 2D
-            # and 3D fields.
-            self.pf.field_info.add_field(
-                    field, lambda a, b: None, particle_type = ptype,
-                    convert_function=cf, take_log=False)
 
     def _parse_hierarchy(self):
         self.grid_dimensions = self.stream_handler.dimensions
@@ -223,33 +200,15 @@ class StreamHierarchy(AMRHierarchy):
                 child._parent_id = i
 
     def _initialize_grid_arrays(self):
-        AMRHierarchy._initialize_grid_arrays(self)
+        GridGeometryHandler._initialize_grid_arrays(self)
         self.grid_procs = np.zeros((self.num_grids,1),'int32')
-
-    def save_data(self, *args, **kwargs):
-        pass
-
-    def _detect_fields(self):
-        self.field_list = list(set(self.stream_handler.get_fields()))
-
-    def _setup_derived_fields(self):
-        self.derived_field_list = []
-        for field in self.parameter_file.field_info:
-            try:
-                fd = self.parameter_file.field_info[field].get_dependencies(
-                            pf = self.parameter_file)
-            except:
-                continue
-            available = np.all([f in self.field_list for f in fd.requested])
-            if available: self.derived_field_list.append(field)
-        for field in self.field_list:
-            if field not in self.derived_field_list:
-                self.derived_field_list.append(field)
 
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
-        self.object_types.sort()
+        GridGeometryHandler._setup_classes(self, dd)
+
+    def _detect_fields(self):
+        self.field_list = list(set(self.stream_handler.get_fields()))
 
     def _populate_grid_objects(self):
         for g in self.grids:
@@ -272,6 +231,7 @@ class StreamHierarchy(AMRHierarchy):
         """
         
         particle_types = set_particle_types(data[0])
+        ftype = "all"
 
         for key in data[0].keys() :
             if key is "number_of_particles": continue
@@ -279,16 +239,18 @@ class StreamHierarchy(AMRHierarchy):
             if key not in self.field_list:
                 self.field_list.append(key)
                 
-        self._setup_unknown_fields()
-
         for i, grid in enumerate(self.grids) :
             if data[i].has_key("number_of_particles") :
                 grid.NumberOfParticles = data[i].pop("number_of_particles")
-            for key in data[i].keys() :
-                if key in grid.keys() : grid.field_data.pop(key, None)
-                self.stream_handler.fields[grid.id][key] = data[i][key]
+            for fname in data[i]:
+                if fname in grid.field_data:
+                    grid.field_data.pop(fname, None)
+                elif (ftype, fname) in grid.field_data:
+                    grid.field_data.pop( ("all", fname) )
+                self.stream_handler.fields[grid.id][fname] = data[i][fname]
             
         self._detect_fields()
+        self._setup_unknown_fields()
                 
 class StreamStaticOutput(StaticOutput):
     _hierarchy_class = StreamHierarchy
@@ -296,7 +258,7 @@ class StreamStaticOutput(StaticOutput):
     _fieldinfo_known = KnownStreamFields
     _data_style = 'stream'
 
-    def __init__(self, stream_handler):
+    def __init__(self, stream_handler, storage_filename = None):
         #if parameter_override is None: parameter_override = {}
         #self._parameter_override = parameter_override
         #if conversion_override is None: conversion_override = {}
@@ -322,6 +284,8 @@ class StreamStaticOutput(StaticOutput):
         self.periodicity = self.stream_handler.periodicity
         self.domain_dimensions = self.stream_handler.domain_dimensions
         self.current_time = self.stream_handler.simulation_time
+        self.parameters['Gamma'] = 5/3
+        self.parameters['EOSType'] = -1
         if self.stream_handler.cosmology_simulation:
             self.cosmological_simulation = 1
             self.current_redshift = self.stream_handler.current_redshift
@@ -372,11 +336,9 @@ def assign_particle_data(pf, pdata) :
     
     if pf.h.num_grids > 1 :
 
-        try :
-            x = pdata["particle_position_x"]
-            y = pdata["particle_position_y"]
-            z = pdata["particle_position_z"]
-        except:
+        try:
+            x, y, z = (pdata["all","particle_position_%s" % ax] for ax in 'xyz')
+        except KeyError:
             raise KeyError("Cannot decompose particle data without position fields!")
         
         particle_grids, particle_grid_inds = pf.h.find_points(x,y,z)
@@ -530,6 +492,14 @@ def load_uniform_grid(data, domain_dimensions, sim_unit_to_cm, bbox=None,
     # Now figure out where the particles go
 
     if number_of_particles > 0 :
+        if ("all", "particle_position_x") not in pdata:
+            pdata_ftype = {}
+            for f in [k for k in sorted(pdata)]:
+                if not hasattr(pdata[f], "shape"): continue
+                mylog.debug("Reassigning '%s' to ('all','%s')", f, f)
+                pdata_ftype["all",f] = pdata.pop(f)
+            pdata_ftype.update(pdata)
+            pdata = pdata_ftype
         assign_particle_data(spf, pdata)
     
     return spf
@@ -725,6 +695,281 @@ def refine_amr(base_pf, refinement_criteria, fluid_operators, max_level,
 
     # Now reassign particle data to grids
 
-    if number_of_particles > 0 : assign_particle_data(pf, pdata)
+    if number_of_particles > 0:
+        if ("all", "particle_position_x") not in pdata:
+            pdata_ftype = {}
+            for f in [k for k in sorted(pdata)]:
+                if not hasattr(pdata[f], "shape"): continue
+                mylog.debug("Reassigning '%s' to ('all','%s')", f, f)
+                pdata_ftype["all",f] = pdata.pop(f)
+            pdata_ftype.update(pdata)
+            pdata = pdata_ftype
+        assign_particle_data(pf, pdata)
     
     return pf
+
+class StreamParticleGeometryHandler(ParticleGeometryHandler):
+
+    
+    def __init__(self, pf, data_style = None):
+        self.stream_handler = pf.stream_handler
+        super(StreamParticleGeometryHandler, self).__init__(pf, data_style)
+
+    def _setup_data_io(self):
+        if self.stream_handler.io is not None:
+            self.io = self.stream_handler.io
+        else:
+            self.io = io_registry[self.data_style](self.stream_handler)
+
+class StreamParticleFile(ParticleFile):
+    pass
+
+class StreamParticlesStaticOutput(StreamStaticOutput):
+    _hierarchy_class = StreamParticleGeometryHandler
+    _file_class = StreamParticleFile
+    _fieldinfo_fallback = StreamFieldInfo
+    _fieldinfo_known = KnownStreamFields
+    _data_style = "stream_particles"
+    file_count = 1
+    filename_template = "stream_file"
+    n_ref = 64
+    over_refine_factor = 1
+
+def load_particles(data, sim_unit_to_cm, bbox=None,
+                      sim_time=0.0, periodicity=(True, True, True),
+                      n_ref = 64, over_refine_factor = 1):
+    r"""Load a set of particles into yt as a
+    :class:`~yt.frontends.stream.data_structures.StreamParticleHandler`.
+
+    This should allow a collection of particle data to be loaded directly into
+    yt and analyzed as would any others.  This comes with several caveats:
+        * Units will be incorrect unless the data has already been converted to
+          cgs.
+        * Some functions may behave oddly, and parallelism will be
+          disappointing or non-existent in most cases.
+
+    This will initialize an Octree of data.  Note that fluid fields will not
+    work yet, or possibly ever.
+    
+    Parameters
+    ----------
+    data : dict
+        This is a dict of numpy arrays, where the keys are the field names.
+        Particles positions must be named "particle_position_x",
+        "particle_position_y", "particle_position_z".
+    sim_unit_to_cm : float
+        Conversion factor from simulation units to centimeters
+    bbox : array_like (xdim:zdim, LE:RE), optional
+        Size of computational domain in units sim_unit_to_cm
+    sim_time : float, optional
+        The simulation time in seconds
+    periodicity : tuple of booleans
+        Determines whether the data will be treated as periodic along
+        each axis
+    n_ref : int
+        The number of particles that result in refining an oct used for
+        indexing the particles.
+
+    Examples
+    --------
+
+    >>> pos = [np.random.random(128*128*128) for i in range(3)]
+    >>> data = dict(particle_position_x = pos[0],
+    ...             particle_position_y = pos[1],
+    ...             particle_position_z = pos[2])
+    >>> bbox = np.array([[0., 1.0], [0.0, 1.0], [0.0, 1.0]])
+    >>> pf = load_particles(data, 3.08e24, bbox=bbox)
+
+    """
+
+    domain_dimensions = np.ones(3, "int32") * 2
+    nprocs = 1
+    if bbox is None:
+        bbox = np.array([[0.0, 1.0], [0.0, 1.0], [0.0, 1.0]], 'float64')
+    domain_left_edge = np.array(bbox[:, 0], 'float64')
+    domain_right_edge = np.array(bbox[:, 1], 'float64')
+    grid_levels = np.zeros(nprocs, dtype='int32').reshape((nprocs,1))
+
+    sfh = StreamDictFieldHandler()
+    
+    particle_types = set_particle_types(data)
+    
+    sfh.update({'stream_file':data})
+    grid_left_edges = domain_left_edge
+    grid_right_edges = domain_right_edge
+    grid_dimensions = domain_dimensions.reshape(nprocs,3).astype("int32")
+
+    # I'm not sure we need any of this.
+    handler = StreamHandler(
+        grid_left_edges,
+        grid_right_edges,
+        grid_dimensions,
+        grid_levels,
+        -np.ones(nprocs, dtype='int64'),
+        np.zeros(nprocs, dtype='int64').reshape(nprocs,1), # Temporary
+        np.zeros(nprocs).reshape((nprocs,1)),
+        sfh,
+        particle_types=particle_types,
+        periodicity=periodicity
+    )
+
+    handler.name = "ParticleData"
+    handler.domain_left_edge = domain_left_edge
+    handler.domain_right_edge = domain_right_edge
+    handler.refine_by = 2
+    handler.dimensionality = 3
+    handler.domain_dimensions = domain_dimensions
+    handler.simulation_time = sim_time
+    handler.cosmology_simulation = 0
+
+    spf = StreamParticlesStaticOutput(handler)
+    spf.n_ref = n_ref
+    spf.over_refine_factor = over_refine_factor
+    spf.units["cm"] = sim_unit_to_cm
+    spf.units['1'] = 1.0
+    spf.units["unitary"] = 1.0
+    box_in_mpc = sim_unit_to_cm / mpc_conversion['cm']
+    for unit in mpc_conversion.keys():
+        spf.units[unit] = mpc_conversion[unit] * box_in_mpc
+
+    return spf
+
+def hexahedral_connectivity(xgrid, ygrid, zgrid):
+    nx = len(xgrid)
+    ny = len(ygrid)
+    nz = len(zgrid)
+    coords = np.fromiter(chain.from_iterable(product(xgrid, ygrid, zgrid)),
+                    dtype=np.float64, count = nx*ny*nz*3)
+    coords.shape = (nx*ny*nz, 3)
+    cis = np.fromiter(chain.from_iterable(product([0,1], [0,1], [0,1])),
+                    dtype=np.int64, count = 8*3)
+    cis.shape = (8, 3)
+    cycle = np.fromiter(chain.from_iterable(product(*map(range, (nx-1, ny-1, nz-1)))),
+                    dtype=np.int64, count = (nx-1)*(ny-1)*(nz-1)*3)
+    cycle.shape = ((nx-1)*(ny-1)*(nz-1), 3)
+    off = cis + cycle[:, np.newaxis]
+    connectivity = ((off[:,:,0] * ny) + off[:,:,1]) * nz + off[:,:,2]
+    return coords, connectivity
+
+class StreamHexahedralMesh(SemiStructuredMesh):
+    _connectivity_length = 8
+    _index_offset = 0
+
+class StreamHexahedralHierarchy(UnstructuredGeometryHandler):
+
+    def __init__(self, pf, data_style = None):
+        self.stream_handler = pf.stream_handler
+        super(StreamHexahedralHierarchy, self).__init__(pf, data_style)
+
+    def _initialize_mesh(self):
+        coords = self.stream_handler.fields.pop('coordinates')
+        connec = self.stream_handler.fields.pop('connectivity')
+        self.meshes = [StreamHexahedralMesh(0,
+          self.hierarchy_filename, connec, coords, self)]
+
+    def _setup_data_io(self):
+        if self.stream_handler.io is not None:
+            self.io = self.stream_handler.io
+        else:
+            self.io = io_registry[self.data_style](self.stream_handler)
+
+    def _detect_fields(self):
+        self.field_list = list(set(self.stream_handler.get_fields()))
+
+class StreamHexahedralStaticOutput(StreamStaticOutput):
+    _hierarchy_class = StreamHexahedralHierarchy
+    _fieldinfo_fallback = StreamFieldInfo
+    _fieldinfo_known = KnownStreamFields
+    _data_style = "stream_hexahedral"
+
+def load_hexahedral_mesh(data, connectivity, coordinates,
+                         sim_unit_to_cm, bbox=None,
+                         sim_time=0.0, periodicity=(True, True, True)):
+    r"""Load a hexahedral mesh of data into yt as a
+    :class:`~yt.frontends.stream.data_structures.StreamHandler`.
+
+    This should allow a semistructured grid of data to be loaded directly into
+    yt and analyzed as would any others.  This comes with several caveats:
+        * Units will be incorrect unless the data has already been converted to
+          cgs.
+        * Some functions may behave oddly, and parallelism will be
+          disappointing or non-existent in most cases.
+        * Particles may be difficult to integrate.
+
+    Particle fields are detected as one-dimensional fields. The number of particles
+    is set by the "number_of_particles" key in data.
+    
+    Parameters
+    ----------
+    data : dict
+        This is a dict of numpy arrays, where the keys are the field names.
+        There must only be one.
+    connectivity : array_like
+        This should be of size (N,8) where N is the number of zones.
+    coordinates : array_like
+        This should be of size (M,3) where M is the number of vertices
+        indicated in the connectivity matrix.
+    sim_unit_to_cm : float
+        Conversion factor from simulation units to centimeters
+    bbox : array_like (xdim:zdim, LE:RE), optional
+        Size of computational domain in units sim_unit_to_cm
+    sim_time : float, optional
+        The simulation time in seconds
+    periodicity : tuple of booleans
+        Determines whether the data will be treated as periodic along
+        each axis
+
+    """
+
+    domain_dimensions = np.ones(3, "int32") * 2
+    nprocs = 1
+    if bbox is None:
+        bbox = np.array([[0.0, 1.0], [0.0, 1.0], [0.0, 1.0]], 'float64')
+    domain_left_edge = np.array(bbox[:, 0], 'float64')
+    domain_right_edge = np.array(bbox[:, 1], 'float64')
+    grid_levels = np.zeros(nprocs, dtype='int32').reshape((nprocs,1))
+
+    sfh = StreamDictFieldHandler()
+    
+    particle_types = set_particle_types(data)
+    
+    sfh.update({'connectivity': connectivity,
+                'coordinates': coordinates,
+                0: data})
+    grid_left_edges = domain_left_edge
+    grid_right_edges = domain_right_edge
+    grid_dimensions = domain_dimensions.reshape(nprocs,3).astype("int32")
+
+    # I'm not sure we need any of this.
+    handler = StreamHandler(
+        grid_left_edges,
+        grid_right_edges,
+        grid_dimensions,
+        grid_levels,
+        -np.ones(nprocs, dtype='int64'),
+        np.zeros(nprocs, dtype='int64').reshape(nprocs,1), # Temporary
+        np.zeros(nprocs).reshape((nprocs,1)),
+        sfh,
+        particle_types=particle_types,
+        periodicity=periodicity
+    )
+
+    handler.name = "HexahedralMeshData"
+    handler.domain_left_edge = domain_left_edge
+    handler.domain_right_edge = domain_right_edge
+    handler.refine_by = 2
+    handler.dimensionality = 3
+    handler.domain_dimensions = domain_dimensions
+    handler.simulation_time = sim_time
+    handler.cosmology_simulation = 0
+
+    spf = StreamHexahedralStaticOutput(handler)
+    spf.units["cm"] = sim_unit_to_cm
+    spf.units['1'] = 1.0
+    spf.units["unitary"] = 1.0
+    box_in_mpc = sim_unit_to_cm / mpc_conversion['cm']
+    for unit in mpc_conversion.keys():
+        spf.units[unit] = mpc_conversion[unit] * box_in_mpc
+
+    return spf
+

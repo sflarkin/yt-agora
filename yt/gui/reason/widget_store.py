@@ -1,27 +1,17 @@
 """
 This is a place to store widgets, and to create them.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: Columbia University
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from yt.mods import *
 import weakref
@@ -73,7 +63,7 @@ class WidgetStore(dict):
             center = np.array(center)
         axis = inv_axis_names[axis.lower()]
         coord = center[axis]
-        sl = pf.h.slice(axis, coord, center = center, periodic = True)
+        sl = pf.h.slice(axis, coord, center = center)
         xax, yax = x_dict[axis], y_dict[axis]
         DLE, DRE = pf.domain_left_edge, pf.domain_right_edge
         pw = PWViewerExtJS(sl, (DLE[xax], DRE[xax], DLE[yax], DRE[yax]), 
@@ -93,7 +83,7 @@ class WidgetStore(dict):
     def create_proj(self, pf, axis, field, weight):
         if weight == "None": weight = None
         axis = inv_axis_names[axis.lower()]
-        proj = pf.h.proj(axis,field, weight_field=weight, periodic = True)
+        proj = pf.h.proj(field, axis, weight_field=weight)
         xax, yax = x_dict[axis], y_dict[axis]
         DLE, DRE = pf.domain_left_edge, pf.domain_right_edge
         pw = PWViewerExtJS(proj, (DLE[xax], DRE[xax], DLE[yax], DRE[yax]),

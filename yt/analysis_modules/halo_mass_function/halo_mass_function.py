@@ -1,27 +1,17 @@
 """
 halo_mass_function - Halo Mass Function and supporting functions.
 
-Author: Stephen Skory <s@skory.us>
-Affiliation: UC San Diego / CASS
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2011 Stephen Skory (and others).  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import numpy as np
 import math, time
@@ -31,6 +21,11 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelDummy, \
     ParallelAnalysisInterface, \
     parallel_blocking_call
+from yt.utilities.physical_constants import \
+    cm_per_mpc, \
+    mass_sun_cgs, \
+    rho_crit_now
+
 
 class HaloMassFcn(ParallelAnalysisInterface):
     """
@@ -259,7 +254,9 @@ class HaloMassFcn(ParallelAnalysisInterface):
         sigma8_unnorm = math.sqrt(self.sigma_squared_of_R(R));
         sigma_normalization = self.sigma8input / sigma8_unnorm;
 
-        rho0 = self.omega_matter0 * 2.78e+11; # in units of h^2 Msolar/Mpc^3
+        # rho0 in units of h^2 Msolar/Mpc^3
+        rho0 = self.omega_matter0 * \
+                rho_crit_now * cm_per_mpc**3 / mass_sun_cgs
 
         # spacing in mass of our sigma calculation
         dm = (float(self.log_mass_max) - self.log_mass_min)/self.num_sigma_bins;
@@ -294,7 +291,9 @@ class HaloMassFcn(ParallelAnalysisInterface):
     def dndm(self):
         
         # constants - set these before calling any functions!
-        rho0 = self.omega_matter0 * 2.78e+11; # in units of h^2 Msolar/Mpc^3
+        # rho0 in units of h^2 Msolar/Mpc^3
+        rho0 = self.omega_matter0 * \
+                rho_crit_now * cm_per_mpc**3 / mass_sun_cgs
         self.delta_c0 = 1.69;  # critical density for turnaround (Press-Schechter)
         
         nofmz_cum = 0.0;  # keep track of cumulative number density

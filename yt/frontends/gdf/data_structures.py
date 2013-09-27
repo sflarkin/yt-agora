@@ -1,31 +1,17 @@
 """
 Data structures for GDF.
 
-Author: Samuel W. Skillman <samskillman@gmail.com>
-Affiliation: University of Colorado at Boulder
-Author: Matthew Turk <matthewturk@gmail.com>
-Author: J. S. Oishi <jsoishi@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2011 Samuel W. Skillman, Matthew Turk, J. S. Oishi.
-  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import h5py
 import numpy as np
@@ -33,12 +19,14 @@ import weakref
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
            AMRGridPatch
-from yt.data_objects.hierarchy import \
-           AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+           GridGeometryHandler
 from yt.data_objects.static_output import \
            StaticOutput
 from yt.utilities.lib import \
     get_box_grids_level
+from yt.utilities.io_handler import \
+    io_registry
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
 
@@ -79,18 +67,23 @@ class GDFGrid(AMRGridPatch):
             if self.pf.dimensionality < 3: self.dds[2] = 1.0
         self.field_data['dx'], self.field_data['dy'], self.field_data['dz'] = self.dds
 
-class GDFHierarchy(AMRHierarchy):
+    @property
+    def filename(self):
+        return None
+
+class GDFHierarchy(GridGeometryHandler):
 
     grid = GDFGrid
 
     def __init__(self, pf, data_style='grid_data_format'):
         self.parameter_file = weakref.proxy(pf)
         self.data_style = data_style
+        self.max_level = 10  # FIXME
         # for now, the hierarchy file is the parameter file!
         self.hierarchy_filename = self.parameter_file.parameter_filename
         self.directory = os.path.dirname(self.hierarchy_filename)
         self._fhandle = h5py.File(self.hierarchy_filename,'r')
-        AMRHierarchy.__init__(self,pf,data_style)
+        GridGeometryHandler.__init__(self,pf,data_style)
 
         self._fhandle.close()
 
@@ -102,7 +95,7 @@ class GDFHierarchy(AMRHierarchy):
 
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
     def _count_grids(self):
@@ -160,11 +153,25 @@ class GDFHierarchy(AMRHierarchy):
     def _setup_derived_fields(self):
         self.derived_field_list = []
 
+    def _get_box_grids(self, left_edge, right_edge):
+        """
+        Gets back all the grids between a left edge and right edge
+        """
+        eps = np.finfo(np.float64).eps
+        grid_i = np.where((np.all((self.grid_right_edge - left_edge) > eps, axis=1) \
+                        &  np.all((right_edge - self.grid_left_edge) > eps, axis=1)) == True)
+
+        return self.grids[grid_i], grid_i
+
+
     def _get_grid_children(self, grid):
         mask = np.zeros(self.num_grids, dtype='bool')
-        grids, grid_ind = self.get_box_grids(grid.LeftEdge, grid.RightEdge)
+        grids, grid_ind = self._get_box_grids(grid.LeftEdge, grid.RightEdge)
         mask[grid_ind] = True
         return [g for g in self.grids[mask] if g.Level == grid.Level + 1]
+
+    def _setup_data_io(self):
+        self.io = io_registry[self.data_style](self.parameter_file)
 
 class GDFStaticOutput(StaticOutput):
     _hierarchy_class = GDFHierarchy
@@ -203,7 +210,10 @@ class GDFStaticOutput(StaticOutput):
             else:
                 self.units[field_name] = 1.0
             if 'field_units' in current_field.attrs:
-                current_fields_unit = just_one(current_field.attrs['field_units'])
+                if type(current_field.attrs['field_units']) == str:
+                    current_fields_unit = current_field.attrs['field_units']
+                else:
+                    current_fields_unit = just_one(current_field.attrs['field_units'])
             else:
                 current_fields_unit = ""
             self._fieldinfo_known.add_field(field_name, function=NullFunc, take_log=False,

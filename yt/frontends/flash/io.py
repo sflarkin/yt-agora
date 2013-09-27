@@ -1,33 +1,24 @@
 """
 FLASH-specific IO functions
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: UCSD
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2010-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import numpy as np
 import h5py
 
 from yt.utilities.io_handler import \
     BaseIOHandler
+from yt.utilities.logger import ytLogger as mylog
 
 class IOHandlerFLASH(BaseIOHandler):
     _particle_reader = False
@@ -53,7 +44,7 @@ class IOHandlerFLASH(BaseIOHandler):
             count_list, conv_factors):
         pass
 
-    def _read_data(self, grid, field):
+    def _read_data_set(self, grid, field):
         f = self._handle
         f_part = self._particle_handle
         if field in self._particle_fields:
@@ -65,3 +56,34 @@ class IOHandlerFLASH(BaseIOHandler):
         else:
             tr = f["/%s" % field][grid.id - grid._id_offset,:,:,:].transpose()
         return tr.astype("float64")
+
+    def _read_data_slice(self, grid, field, axis, coord):
+        sl = [slice(None), slice(None), slice(None)]
+        sl[axis] = slice(coord, coord + 1)
+        f = self._handle
+        tr = f["/%s" % field][grid.id - grid._id_offset].transpose()[sl]
+        return tr.astype("float64")
+
+    def _read_fluid_selection(self, chunks, selector, fields, size):
+        chunks = list(chunks)
+        if any((ftype != "gas" for ftype, fname in fields)):
+            raise NotImplementedError
+        f = self._handle
+        rv = {}
+        for field in fields:
+            ftype, fname = field
+            dt = f["/%s" % fname].dtype
+            if dt == "float32": dt = "float64"
+            rv[field] = np.empty(size, dtype=dt)
+        ng = sum(len(c.objs) for c in chunks)
+        mylog.debug("Reading %s cells of %s fields in %s blocks",
+                    size, [f2 for f1, f2 in fields], ng)
+        for field in fields:
+            ftype, fname = field
+            ds = f["/%s" % fname]
+            ind = 0
+            for chunk in chunks:
+                for g in chunk.objs:
+                    data = ds[g.id - g._id_offset,:,:,:].transpose()
+                    ind += g.select(selector, data, rv[field], ind) # caches
+        return rv

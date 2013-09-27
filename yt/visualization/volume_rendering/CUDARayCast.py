@@ -1,27 +1,17 @@
 """
 An attempt at putting the ray-casting operation into CUDA
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2009 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import sys;sys.path.insert(0,'.')
 
@@ -29,6 +19,8 @@ from yt.mods import *
 import yt.extensions.HierarchySubset as hs
 import numpy as np
 import h5py, time
+from yt.utilities.physical_constants import \
+    mass_hydrogen_cgs
 
 import matplotlib;matplotlib.use("Agg");import pylab
 
@@ -62,7 +54,7 @@ if __name__ == "__main__":
 
     print "Constructing transfer function."
     if "Data" in fn:
-        mh = np.log10(1.67e-24)
+        mh = np.log10(mass_hydrogen_cgs)
         tf = ColorTransferFunction((7.5+mh, 14.0+mh))
         tf.add_gaussian( 8.25+mh, 0.002, [0.2, 0.2, 0.4, 0.1])
         tf.add_gaussian( 9.75+mh, 0.002, [0.0, 0.0, 0.3, 0.1])

@@ -1,27 +1,17 @@
 """
 Marching cubes implementation
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: Columbia University
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 cimport numpy as np
 cimport cython
@@ -462,7 +452,7 @@ cdef int march_cubes(
 @cython.cdivision(True)
 def march_cubes_grid(np.float64_t isovalue,
                      np.ndarray[np.float64_t, ndim=3] values,
-                     np.ndarray[np.int32_t, ndim=3] mask,
+                     np.ndarray[np.uint8_t, ndim=3, cast=True] mask,
                      np.ndarray[np.float64_t, ndim=1] left_edge,
                      np.ndarray[np.float64_t, ndim=1] dxs,
                      obj_sample = None, int sample_type = 1):
@@ -565,7 +555,7 @@ def march_cubes_grid_flux(
                      np.ndarray[np.float64_t, ndim=3] v2,
                      np.ndarray[np.float64_t, ndim=3] v3,
                      np.ndarray[np.float64_t, ndim=3] flux_field,
-                     np.ndarray[np.int32_t, ndim=3] mask,
+                     np.ndarray[np.uint8_t, ndim=3, cast=True] mask,
                      np.ndarray[np.float64_t, ndim=1] left_edge,
                      np.ndarray[np.float64_t, ndim=1] dxs):
     cdef int dims[3]

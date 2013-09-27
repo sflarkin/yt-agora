@@ -1,33 +1,23 @@
 """
 TIGER-specific data structures
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: UCSD
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2010-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
            AMRGridPatch
-from yt.data_objects.hierarchy import \
-           AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+           GridGeometryHandler
 from yt.data_objects.static_output import \
            StaticOutput
 
@@ -57,14 +47,14 @@ class TigerGrid(AMRGridPatch):
     def __repr__(self):
         return "TigerGrid_%04i (%s)" % (self.id, self.ActiveDimensions)
 
-class TigerHierarchy(AMRHierarchy):
+class TigerHierarchy(GridGeometryHandler):
 
     grid = TigerGrid
 
     def __init__(self, pf, data_style):
         self.directory = pf.fullpath
         self.data_style = data_style
-        AMRHierarchy.__init__(self, pf, data_style)
+        GridGeometryHandler.__init__(self, pf, data_style)
 
     def _count_grids(self):
         # Tiger is unigrid
@@ -75,7 +65,7 @@ class TigerHierarchy(AMRHierarchy):
 
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
     def _parse_hierarchy(self):

@@ -16,7 +16,7 @@
 
 DEST_SUFFIX="yt-`uname -m`"
 DEST_DIR="`pwd`/${DEST_SUFFIX/ /}"   # Installation location
-BRANCH="yt" # This is the branch to which we will forcibly update.
+BRANCH="yt-3.0" # This is the branch to which we will forcibly update.
 
 if [ ${REINST_YT} ] && [ ${REINST_YT} -eq 1 ] && [ -n ${YT_DEST} ]
 then
@@ -419,7 +419,7 @@ get_willwont ${INST_0MQ}
 echo "be installing ZeroMQ"
 
 printf "%-15s = %s so I " "INST_ROCKSTAR" "${INST_ROCKSTAR}"
-get_willwont ${INST_0MQ}
+get_willwont ${INST_ROCKSTAR}
 echo "be installing Rockstar"
 
 echo
@@ -804,9 +804,9 @@ then
         ( ${HG_EXEC} --debug clone https://bitbucket.org/yt_analysis/yt/ ./yt-hg 2>&1 ) 1>> ${LOG_FILE}
         # Now we update to the branch we're interested in.
         ( ${HG_EXEC} -R ${YT_DIR} up -C ${BRANCH} 2>&1 ) 1>> ${LOG_FILE}
-    elif [ -e yt-hg ]
+    elif [ -e yt-3.0-hg ] 
     then
-        YT_DIR="$PWD/yt-hg/"
+        YT_DIR="$PWD/yt-3.0-hg/"
     fi
     echo Setting YT_DIR=${YT_DIR}
 fi
@@ -832,8 +832,8 @@ else
 	    echo "Building BLAS"
 	    cd BLAS
 	    gfortran -O2 -fPIC -fno-second-underscore -c *.f
-	    ar r libfblas.a *.o 2>> ${LOG_FILE}
-	    ranlib libfblas.a 1>> ${LOG_FILE}
+	    ( ar r libfblas.a *.o 2>&1 ) 1>> ${LOG_FILE}
+	    ( ranlib libfblas.a 2>&1 ) 1>> ${LOG_FILE}
 	    rm -rf *.o
 	    touch done
 	    cd ..
@@ -844,7 +844,7 @@ else
 	    echo "Building LAPACK"
 	    cd $LAPACK/
 	    cp INSTALL/make.inc.gfortran make.inc
-	    make lapacklib OPTS="-fPIC -O2" NOOPT="-fPIC -O0" CFLAGS=-fPIC LDFLAGS=-fPIC 1>> ${LOG_FILE} || do_exit
+	    ( make lapacklib OPTS="-fPIC -O2" NOOPT="-fPIC -O0" CFLAGS=-fPIC LDFLAGS=-fPIC 2>&1 ) 1>> ${LOG_FILE} || do_exit
 	    touch done
 	    cd ..
 	fi
@@ -877,6 +877,11 @@ fi
 mkdir -p ${DEST_DIR}/src/$MATPLOTLIB
 echo "[directories]" >> ${DEST_DIR}/src/$MATPLOTLIB/setup.cfg
 echo "basedirlist = ${DEST_DIR}" >> ${DEST_DIR}/src/$MATPLOTLIB/setup.cfg
+if [ `uname` = "Darwin" ]
+then
+   echo "[gui_support]" >> ${DEST_DIR}/src/$MATPLOTLIB/setup.cfg
+   echo "macosx = False" >> ${DEST_DIR}/src/$MATPLOTLIB/setup.cfg
+fi
 do_setup_py $MATPLOTLIB
 if [ -n "${OLD_LDFLAGS}" ]
 then
@@ -943,10 +948,10 @@ echo $HDF5_DIR > hdf5.cfg
 touch done
 cd $MY_PWD
 
-if !(${DEST_DIR}/bin/python2.7 -c "import readline" >> ${LOG_FILE})
+if !( ( ${DEST_DIR}/bin/python2.7 -c "import readline" 2>&1 )>> ${LOG_FILE})
 then
     echo "Installing pure-python readline"
-    ${DEST_DIR}/bin/pip install readline 1>> ${LOG_FILE}
+    ( ${DEST_DIR}/bin/pip install readline 2>&1 ) 1>> ${LOG_FILE}
 fi
 
 if [ $INST_ENZO -eq 1 ]

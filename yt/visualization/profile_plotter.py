@@ -1,27 +1,17 @@
 """
 This is a simple mechanism for interfacing with Profile and Phase plots
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: Columbia University
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import base64
 import types
@@ -144,19 +134,30 @@ class ImagePlotContainer(object):
 
         im = self.image
         if self.cbar.scale == 'log':
-            norm = mpl.matplotlib.colors.LogNorm()
+            norm = mpl.matplotlib.colors.LogNorm(
+                vmin = self.cbar.bounds[0],
+                vmax = self.cbar.bounds[1])
         else:
-            norm = mpl.matplotlib.colors.Normalize()
+            norm = mpl.matplotlib.colors.Normalize(
+                vmin = self.cbar.bounds[0],
+                vmax = self.cbar.bounds[1])
         if use_mesh:
-            pcm = axes.pcolormesh(x_bins, y_bins, self.image, norm=norm,
+            mappable = axes.pcolormesh(
+                                  x_bins, y_bins, self.image, norm=norm,
                                   shading='flat', cmap = self.cbar.cmap,
                                   rasterized=True)
             if self.x_spec.scale == 'log': axes.set_xscale("log")
             if self.y_spec.scale == 'log': axes.set_yscale("log")
         else:
-            axes.imshow(self.image, origin='lower', interpolation='nearest',
+            mappable = axes.imshow(
+                        self.image, origin='lower', interpolation='nearest',
                         cmap = self.cbar.cmap, extent = [xmi,xma,ymi,yma],
                         norm = norm)
+        cbar = figure.colorbar(mappable)
+        cbar.set_label(self.cbar.title)
+        mappable.cmap.set_bad("w")
+        mappable.cmap.set_under("w")
+        mappable.cmap.set_over("w")
         if self.x_spec.title is not None:
             axes.set_xlabel(self.x_spec.title)
         if self.y_spec.title is not None:
@@ -174,10 +175,10 @@ class PhasePlotter(object):
                  weight="CellMassMsun", accumulation=False,
                  x_bins=128, x_log=True, x_bounds=None,
                  y_bins=128, y_log=True, y_bounds=None,
-                 lazy_reader=True, fractional=False):
+                 fractional=False):
         r"""From an existing object, create a 2D, binned profile.
 
-        This function will accept an existing `AMRData` source and from that,
+        This function will accept an existing `YTDataContainer` source and from that,
         it will generate a `Binned2DProfile`, based on the specified options.
         This is useful if you have extracted a region, or if you wish to bin
         some set of massages data -- or even if you wish to bin anything other
@@ -187,8 +188,8 @@ class PhasePlotter(object):
 
         Parameters
         ----------
-        data_source : `yt.data_objects.api.AMRData`
-            This is a data source respecting the `AMRData` protocol (i.e., it
+        data_source : `yt.data_objects.api.YTDataContainer`
+            This is a data source respecting the `YTDataContainer` protocol (i.e., it
             has grids and so forth) that will be used as input to the profile
             generation.
         fields : list of strings
@@ -225,11 +226,6 @@ class PhasePlotter(object):
             If specified, the boundary values for the binning.  If unspecified,
             the min/max from the data_source will be used.  (Non-zero min/max
             in case of log-spacing.)
-        lazy_reader : boolean, optional
-            If this is false, all of the data will be read into memory before
-            any processing occurs.  It defaults to true, and grids are binned
-            on a one-by-one basis.  Note that parallel computation requires
-            this to be true.
         fractional : boolean
             If true, the plot will be normalized to the sum of all the binned
             values.
@@ -257,20 +253,17 @@ class PhasePlotter(object):
         """
         if x_bounds is None:
             x_min, x_max = data_source.quantities["Extrema"](
-                                    field_x, non_zero = x_log,
-                                    lazy_reader=lazy_reader)[0]
+                                    field_x, non_zero = x_log)[0]
         else:
             x_min, x_max = x_bounds
         if y_bounds is None:
             y_min, y_max = data_source.quantities["Extrema"](
-                                    field_y, non_zero = y_log,
-                                    lazy_reader=lazy_reader)[0]
+                                    field_y, non_zero = y_log)[0]
         else:
             y_min, y_max = y_bounds
         profile = BinnedProfile2D(data_source,
                                   x_bins, field_x, x_min, x_max, x_log,
-                                  y_bins, field_y, y_min, y_max, y_log,
-                                  lazy_reader)
+                                  y_bins, field_y, y_min, y_max, y_log)
         # This is a fallback, in case we forget.
         if field_z.startswith("CellMass") or \
            field_z.startswith("CellVolume"):
@@ -301,12 +294,9 @@ class PhasePlotter(object):
 
         cbar = ColorbarSpec()
         cbar.title = self._current_field
-        if self.scale == 'log':
-            nz = (self.profile[self._current_field] > 0)
-            mi = self.profile[self._current_field][nz].min()
-        else:
-            mi = self.profile[self._current_field].min()
-        ma = self.profile[self._current_field].max()
+        nz = self.profile["UsedBins"]
+        mi = self.profile[self._current_field][nz].min()
+        ma = self.profile[self._current_field][nz].max()
         cbar.bounds = (mi, ma)
         cbar.cmap = 'algae'
         cbar.scale = self.scale
@@ -391,16 +381,14 @@ class ProfilePlotter(object):
     def __init__(self, data_source, field_x, field_y, 
                  weight="CellMassMsun", accumulation=False,
                  x_bins=128, x_log=True, x_bounds=None,
-                 lazy_reader=True, fractional=False):
+                 fractional=False):
         if x_bounds is None:
             x_min, x_max = data_source.quantities["Extrema"](
-                                    field_x, non_zero = x_log,
-                                    lazy_reader=lazy_reader)[0]
+                                    field_x, non_zero = x_log)[0]
         else:
             x_min, x_max = x_bounds
         profile = BinnedProfile1D(data_source,
-                                  x_bins, field_x, x_min, x_max, x_log,
-                                  lazy_reader)
+                                  x_bins, field_x, x_min, x_max, x_log)
         # This is a fallback, in case we forget.
         if field_y.startswith("CellMass") or \
            field_y.startswith("CellVolume"):

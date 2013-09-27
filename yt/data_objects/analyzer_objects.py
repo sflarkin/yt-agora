@@ -1,27 +1,17 @@
 """
 Analyzer objects for time series datasets
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: UCSD
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2010-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import inspect
 
@@ -46,7 +36,7 @@ class AnalysisTask(object):
         self.__dict__.update(kwargs)
 
     def __repr__(self):
-        # Stolen from AMRData.__repr__
+        # Stolen from YTDataContainer.__repr__
         s = "%s: " % (self.__class__.__name__)
         s += ", ".join(["%s=%s" % (i, getattr(self,i))
                        for i in self._params])
@@ -63,7 +53,7 @@ def analysis_task(params = None):
 @analysis_task(('field',))
 def MaximumValue(params, data_object):
     v = data_object.quantities["MaxLocation"](
-            params.field, lazy_reader=True)[0]
+            params.field)[0]
     return v
 
 @analysis_task()
@@ -80,14 +70,14 @@ class SlicePlotDataset(AnalysisTask):
 
     def eval(self, pf):
         slc = self.SlicePlot(pf, self.axis, self.field, center = self.center)
-        return pc.save()
+        return slc.save()
 
 class QuantityProxy(AnalysisTask):
     _params = None
     quantity_name = None
 
     def __repr__(self):
-        # Stolen from AMRData.__repr__
+        # Stolen from YTDataContainer.__repr__
         s = "%s: " % (self.__class__.__name__)
         s += ", ".join(["%s" % [arg for arg in self.args]])
         s += ", ".join(["%s=%s" % (k,v) for k, v in self.kwargs.items()])

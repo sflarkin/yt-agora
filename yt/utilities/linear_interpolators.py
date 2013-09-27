@@ -2,27 +2,17 @@
 A collection of helper functions, most generally for things
 that SciPy doesn't have that I expected it to
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2007-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import numpy as np
 
@@ -85,7 +75,8 @@ class UnilinearFieldInterpolator:
 
         my_vals = np.zeros(x_vals.shape, dtype='float64')
         lib.UnilinearlyInterpolate(self.table, x_vals, self.x_bins, x_i, my_vals)
-        return my_vals.reshape(orig_shape)
+        my_vals.shape = orig_shape
+        return my_vals
 
 class BilinearFieldInterpolator:
     def __init__(self, table, boundaries, field_names, truncate=False):
@@ -157,7 +148,8 @@ class BilinearFieldInterpolator:
         lib.BilinearlyInterpolate(self.table,
                                  x_vals, y_vals, self.x_bins, self.y_bins,
                                  x_i, y_i, my_vals)
-        return my_vals.reshape(orig_shape)
+        my_vals.shape = orig_shape
+        return my_vals
 
 class TrilinearFieldInterpolator:
     def __init__(self, table, boundaries, field_names, truncate = False):
@@ -240,31 +232,8 @@ class TrilinearFieldInterpolator:
                                  x_vals, y_vals, z_vals,
                                  self.x_bins, self.y_bins, self.z_bins,
                                  x_i, y_i, z_i, my_vals)
-        return my_vals.reshape(orig_shape)
-
-        # Use notation from Paul Bourke's page on interpolation
-        # http://local.wasp.uwa.edu.au/~pbourke/other/interpolation/
-        x = (x_vals - self.x_bins[x_i]) / (self.x_bins[x_i+1] - self.x_bins[x_i])
-        y = (y_vals - self.y_bins[y_i]) / (self.y_bins[y_i+1] - self.y_bins[y_i])
-        z = (z_vals - self.z_bins[z_i]) / (self.z_bins[z_i+1] - self.z_bins[z_i])
-        xm = (self.x_bins[x_i+1] - x_vals) / (self.x_bins[x_i+1] - self.x_bins[x_i])
-        ym = (self.y_bins[y_i+1] - y_vals) / (self.y_bins[y_i+1] - self.y_bins[y_i])
-        zm = (self.z_bins[z_i+1] - z_vals) / (self.z_bins[z_i+1] - self.z_bins[z_i])
-        if np.any(np.isnan(self.table)):
-            raise ValueError
-        if np.any(np.isnan(x) | np.isnan(y) | np.isnan(z)):
-            raise ValueError
-        if np.any(np.isnan(xm) | np.isnan(ym) | np.isnan(zm)):
-            raise ValueError
-        my_vals  = self.table[x_i  ,y_i  ,z_i  ] * (xm*ym*zm)
-        my_vals += self.table[x_i+1,y_i  ,z_i  ] * (x *ym*zm)
-        my_vals += self.table[x_i  ,y_i+1,z_i  ] * (xm*y *zm)
-        my_vals += self.table[x_i  ,y_i  ,z_i+1] * (xm*ym*z )
-        my_vals += self.table[x_i+1,y_i  ,z_i+1] * (x *ym*z )
-        my_vals += self.table[x_i  ,y_i+1,z_i+1] * (xm*y *z )
-        my_vals += self.table[x_i+1,y_i+1,z_i  ] * (x *y *zm)
-        my_vals += self.table[x_i+1,y_i+1,z_i+1] * (x *y *z )
-        return my_vals.reshape(orig_shape)
+        my_vals.shape = orig_shape
+        return my_vals
 
 def get_centers(pf, filename, center_cols, radius_col, unit='1'):
     """

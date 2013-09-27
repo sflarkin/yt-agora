@@ -1,27 +1,17 @@
 """
 Data structures for Castro.
 
-Author: J. S. Oishi <jsoishi@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2010 J. S. Oishi.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import re
 import os
@@ -36,7 +26,7 @@ import numpy as np
 from yt.funcs import *
 from yt.data_objects.field_info_container import FieldInfoContainer, NullFunc
 from yt.data_objects.grid_patch import AMRGridPatch
-from yt.data_objects.hierarchy import AMRHierarchy
+from yt.geometry.grid_geometry_handler import GridGeometryHandler
 from yt.data_objects.static_output import StaticOutput
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
@@ -111,7 +101,7 @@ class CastroGrid(AMRGridPatch):
     def __repr__(self):
         return "CastroGrid_%04i" % (self.id)
 
-class CastroHierarchy(AMRHierarchy):
+class CastroHierarchy(GridGeometryHandler):
     grid = CastroGrid
 
     def __init__(self, pf, data_style='castro_native'):
@@ -412,7 +402,7 @@ class CastroHierarchy(AMRHierarchy):
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
         dd["field_indexes"] = self.field_indexes
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         #self._add_object_class('grid', "CastroGrid", CastroGridBase, dd)
         self.object_types.sort()
 
@@ -467,7 +457,7 @@ class CastroHierarchy(AMRHierarchy):
         pass
 
     def _initialize_state_variables(self):
-        """override to not re-initialize num_grids in AMRHierarchy.__init__
+        """override to not re-initialize num_grids in GridGeometryHandler.__init__
 
         """
         self._parallel_locking = False

@@ -1,27 +1,17 @@
 """
 This module contains a routine to search for topologically connected sets
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2007-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from itertools import chain
 import numpy as np
@@ -133,7 +123,7 @@ def identify_contours(data_source, field, min_val, max_val,
     pbar.finish()
     data_source._flush_data_to_grids("tempContours", -1, dtype='int64')
     del data_source.field_data["tempContours"] # Force a reload from the grids
-    data_source.get_data("tempContours", in_grids=True)
+    data_source.get_data("tempContours")
     contour_ind = {}
     i = 0
     for contour_id in np.unique(data_source["tempContours"]):

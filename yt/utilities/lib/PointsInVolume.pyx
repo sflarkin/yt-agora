@@ -1,27 +1,17 @@
 """
 Checks for points contained in a volume
 
-Author: John Wise <jwise77@gmail.com>
-Affiliation: Princeton
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2009 John.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 
 import numpy as np
@@ -221,7 +211,7 @@ def calculate_fill_grids(int fill_level, int refratio, int last_level,
                          np.ndarray[np.int32_t, ndim=1] cg_dims,
                          np.ndarray[np.int64_t, ndim=1] g_start_index,
                          np.ndarray[np.int32_t, ndim=1] g_dims,
-                         np.ndarray[np.int32_t, ndim=3] g_child_mask):
+                         np.ndarray[np.uint8_t, ndim=3, cast=True] g_child_mask):
     cdef np.int64_t cgstart[3], gstart[3]
     cdef np.int64_t cgend[3], gend[3]
     cdef np.int64_t dw[3]

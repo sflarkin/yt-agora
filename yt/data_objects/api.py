@@ -1,44 +1,26 @@
-"""
+""" 
 API for yt.data_objects
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: UCSD
-Author: J.S. Oishi <jsoishi@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Author: Britton Smith <brittonsmith@gmail.com>
-Affiliation: MSU
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2010-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
-
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from grid_patch import \
     AMRGridPatch
 
-from hierarchy import \
-    AMRHierarchy
+from octree_subset import \
+    OctreeSubset
 
 from static_output import \
     StaticOutput
-
-from object_finding_mixin import \
-    ObjectFindingMixin
 
 from particle_io import \
     ParticleIOHandler, \
@@ -60,6 +42,9 @@ from analyzer_objects import \
 
 from data_containers import \
     data_object_registry
+
+import construction_data_containers as __cdc
+import selection_data_containers as __sdc
 
 from derived_quantities import \
     quantity_info, \
@@ -89,3 +74,6 @@ from field_info_container import \
 
 from particle_trajectories import \
     ParticleTrajectoryCollection
+
+from particle_filters import \
+    particle_filter

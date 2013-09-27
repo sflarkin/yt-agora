@@ -1,27 +1,17 @@
 """
 Easy plotting.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: UCSD
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2010-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from _mpl_imports import *
 from yt.data_objects.profiles import BinnedProfile1D
@@ -55,10 +45,9 @@ class EasyPDFPlot(EasyPlot):
         self.data_source = data_source
         # Now we just make the plot
         x_min, x_max = self.data_source.quantities["Extrema"](
-                x_field, non_zero = x_log, lazy_reader = True)[0]
+                x_field, non_zero = x_log)[0]
         self.profile = BinnedProfile1D(self.data_source,
-            n_bins, self.x_field, x_min, x_max, x_log,
-            lazy_reader = True)
+            n_bins, self.x_field, x_min, x_max, x_log)
         self.profile.add_fields(["CellMassMsun"], weight=None)
         self.profile["CellMassMsun"] /= self.profile["CellMassMsun"].sum()
         self.figure = matplotlib.figure.Figure(**figure_args)

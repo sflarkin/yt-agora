@@ -1,27 +1,17 @@
 """
 Data structures for Orion. 
 
-Author: J. S. Oishi <jsoishi@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2011 J. S. Oishi.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import os
 import re
@@ -36,7 +26,7 @@ import numpy as np
 from yt.funcs import *
 from yt.data_objects.field_info_container import FieldInfoContainer, NullFunc
 from yt.data_objects.grid_patch import AMRGridPatch
-from yt.data_objects.hierarchy import AMRHierarchy
+from yt.geometry.grid_geometry_handler import GridGeometryHandler
 from yt.data_objects.static_output import StaticOutput
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
@@ -109,7 +99,7 @@ class OrionGrid(AMRGridPatch):
     def __repr__(self):
         return "OrionGrid_%04i" % (self.id)
 
-class OrionHierarchy(AMRHierarchy):
+class OrionHierarchy(GridGeometryHandler):
     grid = OrionGrid
     def __init__(self, pf, data_style='orion_native'):
         self.field_indexes = {}
@@ -120,7 +110,7 @@ class OrionHierarchy(AMRHierarchy):
 
         self.readGlobalHeader(header_filename,self.parameter_file.paranoid_read) # also sets up the grid objects
         self.__cache_endianness(self.levels[-1].grids[-1])
-        AMRHierarchy.__init__(self,pf, self.data_style)
+        GridGeometryHandler.__init__(self,pf, self.data_style)
         self._populate_hierarchy()
         self._read_particles()
 
@@ -388,7 +378,7 @@ class OrionHierarchy(AMRHierarchy):
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
         dd["field_indexes"] = self.field_indexes
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         #self._add_object_class('grid', "OrionGrid", OrionGridBase, dd)
         self.object_types.sort()
 
@@ -423,7 +413,7 @@ class OrionHierarchy(AMRHierarchy):
         pass
 
     def _initialize_state_variables(self):
-        """override to not re-initialize num_grids in AMRHierarchy.__init__
+        """override to not re-initialize num_grids in GridGeometryHandler.__init__
 
         """
         self._parallel_locking = False

@@ -1,28 +1,17 @@
 """
 Data structures for Pluto.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Author: J. S. Oishi <jsoishi@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2011 Matthew Turk, J. S. Oishi.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import h5py
 import re
@@ -46,8 +35,8 @@ from .definitions import \
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
      AMRGridPatch
-from yt.data_objects.hierarchy import \
-     AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+     GridGeometryHandler
 from yt.data_objects.static_output import \
      StaticOutput
 from yt.utilities.definitions import \
@@ -95,7 +84,7 @@ class PlutoGrid(AMRGridPatch):
         self.dds = self.hierarchy.dds_list[self.Level]
         self.field_data['dx'], self.field_data['dy'], self.field_data['dz'] = self.dds
 
-class PlutoHierarchy(AMRHierarchy):
+class PlutoHierarchy(GridGeometryHandler):
 
     grid = PlutoGrid
 
@@ -113,7 +102,7 @@ class PlutoHierarchy(AMRHierarchy):
 
         self.float_type = self._handle['/level_0']['data:datatype=0'].dtype.name
         self._levels = self._handle.keys()[2:]
-        AMRHierarchy.__init__(self,pf,data_style)
+        GridGeometryHandler.__init__(self,pf,data_style)
 
     def _detect_fields(self):
         ncomp = int(self._handle['/'].attrs['num_components'])
@@ -121,7 +110,7 @@ class PlutoHierarchy(AMRHierarchy):
           
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
     def _count_grids(self):

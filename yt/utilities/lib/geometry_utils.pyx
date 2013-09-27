@@ -1,32 +1,23 @@
 """
 Simple integrators for the radiative transfer equation
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: Columbia University
-Homepage: http://yt.enzotools.org/
-License:
-  Copyright (C) 2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import numpy as np
 cimport numpy as np
 cimport cython
 from libc.stdlib cimport malloc, free
+from fp_utils cimport fclip
 
 cdef extern from "math.h":
     double exp(double x) nogil
@@ -39,178 +30,11 @@ cdef extern from "math.h":
     long int lrint(double x) nogil
     double fabs(double x) nogil
 
-# These routines are separated into a couple different categories:
-#
-#   * Routines for identifying intersections of an object with a bounding box
-#   * Routines for identifying cells/points inside a bounding box that
-#     intersect with an object
-#   * Routines that speed up some type of geometric calculation
-
-# First, bounding box / object intersection routines.
-# These all respect the interface "dobj" and a set of left_edges, right_edges,
-# sometimes also accepting level and mask information.
-
-def ortho_ray_grids(dobj, np.ndarray[np.float64_t, ndim=2] left_edges,
-                          np.ndarray[np.float64_t, ndim=2] right_edges):
-    cdef int i
-    cdef int ng = left_edges.shape[0]
-    cdef int px_ax = dobj.px_ax
-    cdef int py_ax = dobj.py_ax
-    cdef np.float64_t px = dobj.px
-    cdef np.float64_t py = dobj.py
-    cdef np.ndarray[np.uint8_t, ndim=1] gridi = np.zeros(ng, dtype='uint8')
-    for i in range(ng):
-        if (    (px >= left_edges[i, px])
-            and (px < right_edges[i, px])
-            and (py >= left_edges[i, py])
-            and (py < right_edges[i, py])):
-            gridi[i] = 1
-    return gridi
-
-def ray_grids(dobj, np.ndarray[np.float64_t, ndim=2] left_edges,
-                    np.ndarray[np.float64_t, ndim=2] right_edges):
-    cdef int i, ax
-    cdef int i1, i2
-    cdef int ng = left_edges.shape[0]
-    cdef np.ndarray[np.uint8_t, ndim=1] gridi = np.zeros(ng, dtype='uint8')
-    cdef np.float64_t vs[3], t, p0[3], p1[3], v[3]
-    for i in range(3):
-        p0[i] = dobj.start_point[i]
-        p1[i] = dobj.end_point[i]
-        v[i] = dobj.vec[i]
-    # We check first to see if at any point, the ray intersects a grid face
-    for gi in range(ng):
-        for ax in range(3):
-            i1 = (ax+1) % 3
-            i2 = (ax+2) % 3
-            t = (left_edges[gi,ax] - p0[ax])/v[ax]
-            for i in range(3):
-                vs[i] = t * v[i] + p0[i]
-            if left_edges[gi,i1] <= vs[i1] and \
-               right_edges[gi,i1] >= vs[i1] and \
-               left_edges[gi,i2] <= vs[i2] and \
-               right_edges[gi,i2] >= vs[i2]:
-                gridi[gi] = 1
-                break
-            t = (right_edges[gi,ax] - p0[ax])/v[ax]
-            for i in range(3):
-                vs[i] = t * v[i] + p0[i]
-            if left_edges[gi,i1] <= vs[i1] and \
-               right_edges[gi,i1] >= vs[i1] and \
-               left_edges[gi,i2] <= vs[i2] and \
-               right_edges[gi,i2] >= vs[i2]:
-                gridi[gi] = 1
-                break
-        if gridi[gi] == 1: continue
-        # if the point is fully enclosed, we count the grid
-        if left_edges[gi,0] <= p0[0] and \
-           right_edges[gi,0] >= p0[0] and \
-           left_edges[gi,1] <= p0[1] and \
-           right_edges[gi,1] >= p0[1] and \
-           left_edges[gi,2] <= p0[2] and \
-           right_edges[gi,2] >= p0[2]:
-            gridi[gi] = 1
-            continue
-        if left_edges[gi,0] <= p1[0] and \
-           right_edges[gi,0] >= p1[0] and \
-           left_edges[gi,1] <= p1[1] and \
-           right_edges[gi,1] >= p1[1] and \
-           left_edges[gi,2] <= p1[2] and \
-           right_edges[gi,2] >= p1[2]:
-            gridi[gi] = 1
-            continue
-    return gridi
-
-def slice_grids(dobj, np.ndarray[np.float64_t, ndim=2] left_edges,
-                      np.ndarray[np.float64_t, ndim=2] right_edges):
-    cdef int i, ax
-    cdef int ng = left_edges.shape[0]
-    cdef np.ndarray[np.uint8_t, ndim=1] gridi = np.zeros(ng, dtype='uint8')
-    ax = dobj.axis
-    cdef np.float64_t coord = dobj.coord
-    for i in range(ng):
-        if left_edges[i, ax] <= coord and \
-           right_edges[i, ax] > coord:
-            gridi[i] = 1
-    return gridi
-
-def cutting_plane_grids(dobj, np.ndarray[np.float64_t, ndim=2] left_edges,
-                        np.ndarray[np.float64_t, ndim=2] right_edges):
-    cdef int i
-    cdef int ng = left_edges.shape[0]
-    cdef np.ndarray[np.uint8_t, ndim=1] gridi = np.zeros(ng, dtype='uint8')
-    cdef np.float64_t *arr[2]
-    arr[0] = <np.float64_t *> left_edges.data
-    arr[1] = <np.float64_t *> right_edges.data
-    cdef np.float64_t x, y, z
-    cdef np.float64_t norm_vec[3]
-    cdef np.float64_t d = dobj._d # offset to center
-    cdef np.float64_t gd # offset to center
-    cdef np.int64_t all_under, all_over
-    for i in range(3):
-        norm_vec[i] = dobj._norm_vec[i]
-    for i in range(ng):
-        all_under = 1
-        all_over = 1
-        # Check each corner
-        for xi in range(2):
-            x = arr[xi][i * 3 + 0]
-            for yi in range(2):
-                y = arr[yi][i * 3 + 1]
-                for zi in range(2):
-                    z = arr[zi][i * 3 + 2]
-                    gd = ( x*norm_vec[0]
-                         + y*norm_vec[1]
-                         + z*norm_vec[2]) + d
-                    if gd <= 0: all_over = 0
-                    if gd >= 0: all_under = 0
-        if not (all_over == 1 or all_under == 1):
-            gridi[i] = 1
-    return gridi
-
-@cython.boundscheck(False)
-@cython.wraparound(False)
-@cython.cdivision(True)
-cdef inline int cutting_plane_cell(
-                        np.float64_t x, np.float64_t y, np.float64_t z,
-                        np.float64_t norm_vec[3], np.float64_t d,
-                        np.float64_t dist):
-    cdef np.float64_t cd = x*norm_vec[0] + y*norm_vec[1] + z*norm_vec[2] + d
-    if fabs(cd) <= dist: return 1
-    return 0
-
-@cython.boundscheck(False)
-@cython.wraparound(False)
-@cython.cdivision(True)
-def cutting_plane_cells(dobj, gobj):
-    cdef np.ndarray[np.uint8_t, ndim=3] mask
-    cdef np.ndarray[np.float64_t, ndim=1] left_edge = gobj.LeftEdge
-    cdef np.ndarray[np.float64_t, ndim=1] dds = gobj.dds
-    cdef int i, j, k
-    cdef np.float64_t x, y, z, dist
-    cdef np.float64_t norm_vec[3]
-    cdef np.float64_t d = dobj._d
-
-    mask = np.zeros(gobj.ActiveDimensions, dtype='uint8')
-    for i in range(3): norm_vec[i] = dobj._norm_vec[i]
-    dist = 0.5*(dds[0]*dds[0] + dds[1]*dds[1] + dds[2]*dds[2])**0.5
-    x = left_edge[0] + dds[0] * 0.5
-    for i in range(mask.shape[0]):
-        y = left_edge[1] + dds[1] * 0.5
-        for j in range(mask.shape[1]):
-            z = left_edge[2] + dds[2] * 0.5
-            for k in range(mask.shape[2]):
-                mask[i,j,k] = cutting_plane_cell(x, y, z, norm_vec, d, dist)
-                z += dds[1]
-            y += dds[1]
-        x += dds[0]
-    return mask
-
 # Finally, miscellaneous routines.
 
+@cython.cdivision(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
-@cython.cdivision(True)
 def find_values_at_point(np.ndarray[np.float64_t, ndim=1] point,
                          np.ndarray[np.float64_t, ndim=2] left_edges,
                          np.ndarray[np.float64_t, ndim=2] right_edges,
@@ -243,9 +67,9 @@ def find_values_at_point(np.ndarray[np.float64_t, ndim=1] point,
         return rv
     raise KeyError
 
+@cython.cdivision(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
-@cython.cdivision(True)
 def obtain_rvec(data):
     # This is just to let the pointers exist and whatnot.  We can't cdef them
     # inside conditionals.
@@ -285,6 +109,284 @@ def obtain_rvec(data):
                     rg[1,i,j,k] = yg[i,j,k] - c[1]
                     rg[2,i,j,k] = zg[i,j,k] - c[2]
         return rg
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef np.int64_t graycode(np.int64_t x):
+    return x^(x>>1)
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef np.int64_t igraycode(np.int64_t x):
+    cdef np.int64_t i, j
+    if x == 0:
+        return x
+    m = <np.int64_t> ceil(log2(x)) + 1
+    i, j = x, 1
+    while j < m:
+        i = i ^ (x>>j)
+        j += 1
+    return i
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef np.int64_t direction(np.int64_t x, np.int64_t n):
+    #assert x < 2**n
+    if x == 0:
+        return 0
+    elif x%2 == 0:
+        return tsb(x-1, n)%n
+    else:
+        return tsb(x, n)%n
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef np.int64_t tsb(np.int64_t x, np.int64_t width):
+    #assert x < 2**width
+    cdef np.int64_t i = 0
+    while x&1 and i <= width:
+        x = x >> 1
+        i += 1
+    return i
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef np.int64_t bitrange(np.int64_t x, np.int64_t width,
+                         np.int64_t start, np.int64_t end):
+    return x >> (width-end) & ((2**(end-start))-1)
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef np.int64_t rrot(np.int64_t x, np.int64_t i, np.int64_t width):
+    i = i%width
+    x = (x>>i) | (x<<width-i)
+    return x&(2**width-1)
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef np.int64_t lrot(np.int64_t x, np.int64_t i, np.int64_t width):
+    i = i%width
+    x = (x<<i) | (x>>width-i)
+    return x&(2**width-1)
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef np.int64_t transform(np.int64_t entry, np.int64_t direction,
+                          np.int64_t width, np.int64_t x):
+    return rrot((x^entry), direction + 1, width)
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef np.int64_t entry(np.int64_t x):
+    if x == 0: return 0
+    return graycode(2*((x-1)/2))
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef np.int64_t setbit(np.int64_t x, np.int64_t w, np.int64_t i, np.int64_t b):
+    if b == 1:
+        return x | 2**(w-i-1)
+    elif b == 0:
+        return x & ~2**(w-i-1)
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef np.int64_t point_to_hilbert(int order, np.int64_t p[3]):
+    cdef np.int64_t h, e, d, l, b, w, i, x
+    h = e = d = 0
+    for i in range(order):
+        l = 0
+        for x in range(3):
+            b = bitrange(p[3-x-1], order, i, i+1)
+            l |= (b<<x)
+        l = transform(e, d, 3, l)
+        w = igraycode(l)
+        e = e ^ lrot(entry(w), d+1, 3)
+        d = (d + direction(w, 3) + 1)%3
+        h = (h<<3)|w
+    return h
+
+#def hilbert_point(dimension, order, h):
+#    """
+#        Convert an index on the Hilbert curve of the specified dimension and
+#        order to a set of point coordinates.
+#    """
+#    #    The bit widths in this function are:
+#    #        p[*]  - order
+#    #        h     - order*dimension
+#    #        l     - dimension
+#    #        e     - dimension
+#    hwidth = order*dimension
+#    e, d = 0, 0
+#    p = [0]*dimension
+#    for i in range(order):
+#        w = utils.bitrange(h, hwidth, i*dimension, i*dimension+dimension)
+#        l = utils.graycode(w)
+#        l = itransform(e, d, dimension, l)
+#        for j in range(dimension):
+#            b = utils.bitrange(l, dimension, j, j+1)
+#            p[j] = utils.setbit(p[j], order, i, b)
+#        e = e ^ utils.lrot(entry(w), d+1, dimension)
+#        d = (d + direction(w, dimension) + 1)%dimension
+#    return p
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef void hilbert_to_point(int order, np.int64_t h, np.int64_t *p):
+    cdef np.int64_t hwidth, e, d, w, l, b
+    cdef int i, j
+    hwidth = 3 * order
+    e = d = p[0] = p[1] = p[2] = 0
+    for i in range(order):
+        w = bitrange(h, hwidth, i*3, i*3+3)
+        l = graycode(w)
+        l = lrot(l, d +1, 3)^e
+        for j in range(3):
+            b = bitrange(l, 3, j, j+1)
+            p[j] = setbit(p[j], order, i, b)
+        e = e ^ lrot(entry(w), d+1, 3)
+        d = (d + direction(w, 3) + 1)%3
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def get_hilbert_indices(int order, np.ndarray[np.int64_t, ndim=2] left_index):
+    # This is inspired by the scurve package by user cortesi on GH.
+    cdef int i
+    cdef np.int64_t p[3]
+    cdef np.ndarray[np.int64_t, ndim=1] hilbert_indices
+    hilbert_indices = np.zeros(left_index.shape[0], 'int64')
+    for i in range(left_index.shape[0]):
+        p[0] = left_index[i, 0]
+        p[1] = left_index[i, 1]
+        p[2] = left_index[i, 2]
+        hilbert_indices[i] = point_to_hilbert(order, p)
+    return hilbert_indices
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def get_hilbert_points(int order, np.ndarray[np.int64_t, ndim=1] indices):
+    # This is inspired by the scurve package by user cortesi on GH.
+    cdef int i, j
+    cdef np.int64_t p[3]
+    cdef np.ndarray[np.int64_t, ndim=2] positions
+    positions = np.zeros((indices.shape[0], 3), 'int64')
+    for i in range(indices.shape[0]):
+        hilbert_to_point(order, indices[i], p)
+        for j in range(3):
+            positions[i, j] = p[j]
+    return positions
+
+# yt did not invent these! :)
+cdef np.uint64_t _const20 = 0x000001FFC00003FF
+cdef np.uint64_t _const10 = 0x0007E007C00F801F
+cdef np.uint64_t _const04 = 0x00786070C0E181C3
+cdef np.uint64_t _const2a = 0x0199219243248649
+cdef np.uint64_t _const2b = 0x0649249249249249
+cdef np.uint64_t _const2c = 0x1249249249249249
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef inline np.uint64_t spread_bits(np.uint64_t x):
+    # This magic comes from http://stackoverflow.com/questions/1024754/how-to-compute-a-3d-morton-number-interleave-the-bits-of-3-ints
+    x=(x|(x<<20))&_const20
+    x=(x|(x<<10))&_const10
+    x=(x|(x<<4))&_const04
+    x=(x|(x<<2))&_const2a
+    x=(x|(x<<2))&_const2b
+    x=(x|(x<<2))&_const2c
+    return x
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def get_morton_indices(np.ndarray[np.uint64_t, ndim=2] left_index):
+    cdef np.int64_t i, mi
+    cdef np.ndarray[np.uint64_t, ndim=1] morton_indices
+    morton_indices = np.zeros(left_index.shape[0], 'uint64')
+    for i in range(left_index.shape[0]):
+        mi = 0
+        mi |= spread_bits(left_index[i,2])<<0
+        mi |= spread_bits(left_index[i,1])<<1
+        mi |= spread_bits(left_index[i,0])<<2
+        morton_indices[i] = mi
+    return morton_indices
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def get_morton_indices_unravel(np.ndarray[np.uint64_t, ndim=1] left_x,
+                               np.ndarray[np.uint64_t, ndim=1] left_y,
+                               np.ndarray[np.uint64_t, ndim=1] left_z,):
+    cdef np.int64_t i, mi
+    cdef np.ndarray[np.uint64_t, ndim=1] morton_indices
+    morton_indices = np.zeros(left_x.shape[0], 'uint64')
+    for i in range(left_x.shape[0]):
+        mi = 0
+        mi |= spread_bits(left_z[i])<<0
+        mi |= spread_bits(left_y[i])<<1
+        mi |= spread_bits(left_x[i])<<2
+        morton_indices[i] = mi
+    return morton_indices
+
+ctypedef fused anyfloat:
+    np.float32_t
+    np.float64_t
+
+cdef position_to_morton(np.ndarray[anyfloat, ndim=1] pos_x,
+                        np.ndarray[anyfloat, ndim=1] pos_y,
+                        np.ndarray[anyfloat, ndim=1] pos_z,
+                        np.float64_t dds[3], np.float64_t DLE[3],
+                        np.ndarray[np.uint64_t, ndim=1] ind):
+    cdef np.uint64_t mi, ii[3]
+    cdef np.float64_t p[3]
+    cdef np.int64_t i, j
+    for i in range(pos_x.shape[0]):
+        p[0] = <np.float64_t> pos_x[i]
+        p[1] = <np.float64_t> pos_y[i]
+        p[2] = <np.float64_t> pos_z[i]
+        for j in range(3):
+            ii[j] = <np.uint64_t> ((p[j] - DLE[j])/dds[j])
+        mi = 0
+        mi |= spread_bits(ii[2])<<0
+        mi |= spread_bits(ii[1])<<1
+        mi |= spread_bits(ii[0])<<2
+        ind[i] = mi
+
+DEF ORDER_MAX=20
+        
+def compute_morton(np.ndarray pos_x, np.ndarray pos_y, np.ndarray pos_z,
+                   domain_left_edge, domain_right_edge):
+    cdef int i
+    cdef np.float64_t dds[3], DLE[3], DRE[3]
+    for i in range(3):
+        DLE[i] = domain_left_edge[i]
+        DRE[i] = domain_right_edge[i]
+        dds[i] = (DRE[i] - DLE[i]) / (1 << ORDER_MAX)
+    cdef np.ndarray[np.uint64_t, ndim=1] ind
+    ind = np.zeros(pos_x.shape[0], dtype="uint64")
+    if pos_x.dtype == np.float32:
+        position_to_morton[np.float32_t](pos_x, pos_y, pos_z, dds, DLE, ind)
+    elif pos_x.dtype == np.float64:
+        position_to_morton[np.float64_t](pos_x, pos_y, pos_z, dds, DLE, ind)
+    else:
+        print "Could not identify dtype.", pos_x.dtype
+        raise NotImplementedError
+    return ind
 
 @cython.boundscheck(False)
 @cython.wraparound(False)

@@ -1,29 +1,16 @@
 """
 Writing yt data to a GDF file.
 
-Authors: Casey W. Stark <caseywstark@gmail.com>
-Affiliation: UC Berkeley
-
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2012 Casey W. Stark.  All Rights Reserved.
-
-  This file is part of yt.
-
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import os
 import sys
@@ -136,10 +123,11 @@ def _write_field_to_gdf(pf, fhandle, field_name, particle_type_name, field_param
         # add the field data to the grid group
         # Check if this is a real field or particle data.
         field_obj = pf.field_info[field_name]
+        grid.get_data(field_name)
         if field_obj.particle_type:  # particle data
-            pt_group[field_name] = grid.get_data(field_name)
+            pt_group[field_name] = grid[field_name]
         else:  # a field
-            grid_group[field_name] = grid.get_data(field_name)
+            grid_group[field_name] = grid[field_name]
 
 def _create_new_gdf(pf, gdf_path, data_author=None, data_comment=None,
                    particle_type_name="dark_matter"):

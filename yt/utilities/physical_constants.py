@@ -8,7 +8,7 @@
 # http://physics.nist.gov/cuu/Constants/index.html
 
 # Masses
-mass_electron_cgs = 9.109382-28  # g
+mass_electron_cgs = 9.109382e-28  # g
 amu_cgs           = 1.660538921e-24  # g
 mass_hydrogen_cgs = 1.007947*amu_cgs  # g
 mass_sun_cgs = 1.98841586e33  # g
@@ -96,3 +96,7 @@ kboltz = boltzmann_constant_cgs
 hcgs = planck_constant_cgs
 sigma_thompson = cross_section_thompson_cgs
 Na = 1 / amu_cgs
+
+# Miscellaneous
+HUGE = 1.0e90
+TINY = 1.0e-40

@@ -1,29 +1,17 @@
 """
 Data structures for Maestro - borrows heavily from Orion frontend.
 
-Author: J. S. Oishi <jsoishi@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Author: Chris Malone <chris.m.malone@gmail.com>
-Affiliation: SUNY Stony Brook
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2011 J. S. Oishi.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import re
 import os
@@ -41,8 +29,8 @@ from stat import \
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
            AMRGridPatch
-from yt.data_objects.hierarchy import \
-           AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+           GridGeometryHandler
 from yt.data_objects.static_output import \
            StaticOutput
 from yt.utilities.definitions import \
@@ -112,7 +100,7 @@ class MaestroGrid(AMRGridPatch):
     def __repr__(self):
         return "MaestroGrid_%04i" % (self.id)
 
-class MaestroHierarchy(AMRHierarchy):
+class MaestroHierarchy(GridGeometryHandler):
     grid = MaestroGrid
     def __init__(self, pf, data_style='maestro'):
         self.field_indexes = {}
@@ -128,7 +116,7 @@ class MaestroHierarchy(AMRHierarchy):
         pf.current_time = self.Time
         
         self.__cache_endianness(self.levels[-1].grids[-1])
-        AMRHierarchy.__init__(self,pf, self.data_style)
+        GridGeometryHandler.__init__(self,pf, self.data_style)
         self._setup_data_io()
         self._setup_field_list()
         self._populate_hierarchy()
@@ -344,7 +332,7 @@ class MaestroHierarchy(AMRHierarchy):
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
         dd["field_indexes"] = self.field_indexes
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
     def _get_grid_children(self, grid):
@@ -391,7 +379,7 @@ class MaestroHierarchy(AMRHierarchy):
         pass
 
     def _initialize_state_variables(self):
-        """override to not re-initialize num_grids in AMRHierarchy.__init__
+        """override to not re-initialize num_grids in GridGeometryHandler.__init__
 
         """
         self._parallel_locking = False

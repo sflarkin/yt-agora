@@ -1,27 +1,17 @@
 """
 A means of extracting a subset of the hierarchy
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import h5py, os.path
 import numpy as np
@@ -32,8 +22,8 @@ from yt.data_objects.grid_patch import \
     AMRGridPatch
 from yt.data_objects.static_output import \
     StaticOutput
-from yt.data_objects.hierarchy import \
-    AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+    GridGeometryHandler
 
 class DummyHierarchy(object):
     pass
@@ -195,7 +185,7 @@ class OldExtractedHierarchy(object):
     def _convert_coords(self, val):
         return (val - self.left_edge_offset)*self.mult_factor
 
-class ExtractedHierarchy(AMRHierarchy):
+class ExtractedHierarchy(GridGeometryHandler):
 
     grid = AMRExtractedGridProxy
 
@@ -228,7 +218,7 @@ class ExtractedHierarchy(AMRHierarchy):
         # Now we utilize the existing machinery for generating the appropriate
         # arrays of grids, etc etc.
         self.base_pf = pf.base_pf
-        AMRHierarchy.__init__(self, pf, data_style)
+        GridGeometryHandler.__init__(self, pf, data_style)
 
         # Now a few cleanups
         self.pf.override["DomainRightEdge"] = self.max_right_edge
@@ -323,7 +313,7 @@ class ExtractedHierarchy(AMRHierarchy):
 
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
 class ExtractedParameterFile(StaticOutput):
