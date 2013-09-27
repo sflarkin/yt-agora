@@ -1,27 +1,17 @@
 """
 Import the components of the volume rendering extension
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2009 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import __builtin__
 import numpy as np
@@ -237,7 +227,7 @@ class Camera(ParallelAnalysisInterface):
                    max_level=None):
         r"""Draws Grids on an existing volume rendering.
 
-        By mapping grid level to a color, drawes edges of grids on 
+        By mapping grid level to a color, draws edges of grids on 
         a volume rendering using the camera orientation.
 
         Parameters
@@ -2053,29 +2043,17 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
     positions += inner_radius * dx * vs
     vs *= radius
     uv = np.ones(3, dtype='float64')
-    if data_source is not None:
-        grids = data_source._grids
-    else:
-        grids = pf.h.sphere(center, radius)._grids
+    if data_source is None:
+        data_source = pf.h.sphere(center, radius)
     sampler = ProjectionSampler(positions, vs, center, (0.0, 0.0, 0.0, 0.0),
                                 image, uv, uv, np.zeros(3, dtype='float64'))
-    pb = get_pbar("Sampling ", len(grids))
-    for i,grid in enumerate(grids):
-        if data_source is not None:
-            data = [grid[field] * data_source._get_cut_mask(grid) * \
-                grid.child_mask.astype('float64')
-                for field in fields]
-        else:
-            data = [grid[field] * grid.child_mask.astype('float64')
-                for field in fields]
+    for i, (grid, mask) in enumerate(data_source.blocks):
+        data = [(grid[field] * mask).astype("float64") for field in fields]
         pg = PartitionedGrid(
             grid.id, data,
             grid.LeftEdge, grid.RightEdge,
             grid.ActiveDimensions.astype("int64"))
-        grid.clear_data()
         sampler(pg)
-        pb.update(i)
-    pb.finish()
     image = sampler.aimage
     dd = self.pf.h.all_data()
     field = dd._determine_fields([field])[0]
