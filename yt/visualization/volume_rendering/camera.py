@@ -1,27 +1,17 @@
 """
 Import the components of the volume rendering extension
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2009 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import __builtin__
 import numpy as np
@@ -82,6 +72,9 @@ class Camera(ParallelAnalysisInterface):
         cubical, but if not, it is left/right, top/bottom, front/back.
     resolution : int or list of ints
         The number of pixels in each direction.
+    transfer_function : `yt.visualization.volume_rendering.TransferFunction`
+        The transfer function used to map values to colors in an image.  If
+        not specified, defaults to a ProjectionTransferFunction.
     north_vector : array_like, optional
         The 'up' direction for the plane of rays.  If not specific, calculated
         automatically.
@@ -194,7 +187,7 @@ class Camera(ParallelAnalysisInterface):
     _tf_figure = None
     _render_figure = None
     def __init__(self, center, normal_vector, width,
-                 resolution, transfer_function,
+                 resolution, transfer_function = None,
                  north_vector = None, steady_north=False,
                  volume = None, fields = None,
                  log_fields = None,
@@ -277,7 +270,7 @@ class Camera(ParallelAnalysisInterface):
                    max_level=None):
         r"""Draws Grids on an existing volume rendering.
 
-        By mapping grid level to a color, drawes edges of grids on 
+        By mapping grid level to a color, draws edges of grids on 
         a volume rendering using the camera orientation.
 
         Parameters
@@ -582,7 +575,7 @@ class Camera(ParallelAnalysisInterface):
                 (-self.width[0]/2.0, self.width[0]/2.0,
                  -self.width[1]/2.0, self.width[1]/2.0),
                 image, self.orienter.unit_vectors[0], self.orienter.unit_vectors[1],
-                np.array(self.width), self.transfer_function, self.sub_samples)
+                np.array(self.width, dtype='float64'), self.transfer_function, self.sub_samples)
         return args
 
     star_trees = None
@@ -1130,19 +1123,22 @@ class PerspectiveCamera(Camera):
                     if np.any(np.isnan(data)):
                         raise RuntimeError
 
-        view_pos = self.front_center
         for brick in self.volume.traverse(self.front_center):
             sampler(brick, num_threads=num_threads)
             total_cells += np.prod(brick.my_data[0].shape)
             pbar.update(total_cells)
 
         pbar.finish()
-        image = sampler.aimage
-        self.finalize_image(image)
+        image = self.finalize_image(sampler.aimage)
         return image
 
     def finalize_image(self, image):
+        view_pos = self.front_center
         image.shape = self.resolution[0], self.resolution[0], 4
+        image = self.volume.reduce_tree_images(image, view_pos)
+        if self.transfer_function.grey_opacity is False:
+            image[:,:,3]=1.0
+        return image
 
 def corners(left_edge, right_edge):
     return np.array([
@@ -1165,6 +1161,10 @@ class HEALpixCamera(Camera):
                  sub_samples = 5, log_fields = None, volume = None,
                  pf = None, use_kd=True, no_ghost=False, use_light=False,
                  inner_radius = 10):
+        print "Because of recent relicensing, we currently cannot provide"
+        print "HEALpix functionality.  Please visit yt-users for more"
+        print "information."
+        raise NotImplementedError
         ParallelAnalysisInterface.__init__(self)
         if pf is not None: self.pf = pf
         self.center = np.array(center, dtype='float64')
@@ -1308,6 +1308,7 @@ class AdaptiveHEALpixCamera(Camera):
                  sub_samples = 5, log_fields = None, volume = None,
                  pf = None, use_kd=True, no_ghost=False,
                  rays_per_cell = 0.1, max_nside = 8192):
+        raise NotImplementedError
         ParallelAnalysisInterface.__init__(self)
         if pf is not None: self.pf = pf
         self.center = np.array(center, dtype='float64')
@@ -1467,7 +1468,7 @@ class FisheyeCamera(Camera):
 
 class MosaicCamera(Camera):
     def __init__(self, center, normal_vector, width,
-                 resolution, transfer_function,
+                 resolution, transfer_function = None,
                  north_vector = None, steady_north=False,
                  volume = None, fields = None,
                  log_fields = None,
@@ -2055,6 +2056,10 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
     """
     # We manually modify the ProjectionTransferFunction to get it to work the
     # way we want, with a second field that's also passed through.
+    print "Because of recent relicensing, we currently cannot provide"
+    print "HEALpix functionality.  Please visit yt-users for more"
+    print "information."
+    raise NotImplementedError
     fields = [field]
     center = np.array(center, dtype='float64')
     if weight is not None:
@@ -2119,6 +2124,10 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
 
 def plot_allsky_healpix(image, nside, fn, label = "", rotation = None,
                         take_log = True, resolution=512, cmin=None, cmax=None):
+    print "Because of recent relicensing, we currently cannot provide"
+    print "HEALpix functionality.  Please visit yt-users for more"
+    print "information."
+    raise NotImplementedError
     import matplotlib.figure
     import matplotlib.backends.backend_agg
     if rotation is None: rotation = np.eye(3).astype("float64")
@@ -2189,10 +2198,10 @@ class ProjectionCamera(Camera):
     def get_sampler_args(self, image):
         rotp = np.concatenate([self.orienter.inv_mat.ravel('F'), self.back_center.ravel()])
         args = (rotp, self.box_vectors[2], self.back_center,
-            (-self.width[0]/2, self.width[0]/2,
-             -self.width[1]/2, self.width[1]/2),
+            (-self.width[0]/2., self.width[0]/2.,
+             -self.width[1]/2., self.width[1]/2.),
             image, self.orienter.unit_vectors[0], self.orienter.unit_vectors[1],
-                np.array(self.width), self.sub_samples)
+                np.array(self.width, dtype='float64'), self.sub_samples)
         return args
 
     def finalize_image(self,image):
