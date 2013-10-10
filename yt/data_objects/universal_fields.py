@@ -3,27 +3,17 @@ The basic field info container resides here.  These classes, code specific and
 universal, are the means by which we access fields across YT, both derived and
 native.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import types
 import numpy as np
@@ -801,6 +791,8 @@ def get_radius(data, field_prefix):
         rdw = radius.copy()
     for i, ax in enumerate('xyz'):
         np.subtract(data["%s%s" % (field_prefix, ax)], center[i], r)
+        if data.pf.dimensionality < i+1:
+            break
         if data.pf.periodicity[i] == True:
             np.abs(r, r)
             np.subtract(r, DW[i], rdw)
@@ -1415,7 +1407,7 @@ def _VorticityGrowthTimescale(field, data):
     domegax_dt = data["VorticityX"] / data["VorticityGrowthX"]
     domegay_dt = data["VorticityY"] / data["VorticityGrowthY"]
     domegaz_dt = data["VorticityZ"] / data["VorticityGrowthZ"]
-    return np.sqrt(domegax_dt**2 + domegay_dt**2 + domegaz_dt)
+    return np.sqrt(domegax_dt**2 + domegay_dt**2 + domegaz_dt**2)
 add_field("VorticityGrowthTimescale", function=_VorticityGrowthTimescale,
           validators=[ValidateSpatial(1, 
                       ["x-velocity", "y-velocity", "z-velocity"])],
