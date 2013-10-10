@@ -1,31 +1,17 @@
 """
 Various non-grid data containers.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Author: Britton Smith <Britton.Smith@colorado.edu>
-Affiliation: University of Colorado at Boulder
-Author: Geoffrey So <gsiisg@gmail.com>
-Affiliation: UCSD Physics/CASS
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2007-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 data_object_registry = {}
 
@@ -955,7 +941,7 @@ class AMR2DData(AMRData, GridPropertiesMixin, ParallelAnalysisInterface):
         interpolated using the nearest neighbor method, with *side* points on a
         side.
         """
-        import yt.utilities.delaunay as de
+        import matplotlib.delaunay.triangulate as de
         if log_spacing:
             zz = np.log10(self[field])
         else:
@@ -3690,7 +3676,6 @@ class AMRCoveringGridBase(AMR3DData):
     Examples
     --------
     cube = pf.h.covering_grid(2, left_edge=[0.0, 0.0, 0.0], \
-                              right_edge=[1.0, 1.0, 1.0],
                               dims=[128, 128, 128])
     """
     _spatial = True
@@ -3703,7 +3688,8 @@ class AMRCoveringGridBase(AMR3DData):
         self.left_edge = np.array(left_edge)
         self.level = level
         rdx = self.pf.domain_dimensions*self.pf.refine_by**level
-        self.dds = self.pf.domain_width/rdx.astype("float64")
+        rdx[np.where(dims - 2 * num_ghost_zones <= 1)] = 1   # issue 602
+        self.dds = self.pf.domain_width / rdx.astype("float64")
         self.ActiveDimensions = np.array(dims, dtype='int32')
         self.right_edge = self.left_edge + self.ActiveDimensions*self.dds
         self._num_ghost_zones = num_ghost_zones
