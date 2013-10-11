@@ -135,8 +135,11 @@ def amrspace(extent, levels=7, cells=8):
 
     return left, right, level
 
-def fake_random_pf(ndims, peak_value = 1.0, fields = ("Density",),
-                   negative = False, nprocs = 1):
+def fake_random_pf(
+        ndims, peak_value = 1.0,
+        fields = ("density", "x-velocity", "y-velocity", "z-velocity"),
+        units = ('g/cm**3', 'cm/s', 'cm/s', 'cm/s'),
+        negative = False, nprocs = 1):
     from yt.data_objects.api import data_object_registry
     from yt.frontends.stream.api import load_uniform_grid
     if not iterable(ndims):
@@ -152,9 +155,10 @@ def fake_random_pf(ndims, peak_value = 1.0, fields = ("Density",),
             offsets.append(0.5)
         else:
             offsets.append(0.0)
-    data = dict((field, (np.random.random(ndims) - offset) * peak_value)
-                 for field,offset in zip(fields,offsets))
-    ug = load_uniform_grid(data, ndims, 1.0, nprocs = nprocs)
+            data = dict( \
+                (field, (((np.random.random(ndims) - offset) * peak_value),u)) \
+                 for field, offset, u in zip(fields,offsets,units) )
+    ug = load_uniform_grid(data, ndims, 1.0, nprocs=nprocs)
     return ug
 
 def expand_keywords(keywords, full=False):

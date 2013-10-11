@@ -208,14 +208,19 @@ class GeometryHandler(ParallelAnalysisInterface):
                         return _convert_function
                     cf = external_wrapper(field)
                 # Note that we call add_field on the field_info directly.  This
-                # will allow the same field detection mechanism to work for 1D, 2D
-                # and 3D fields.
+                # will allow the same field detection mechanism to work for 1D,
+                # 2D and 3D fields.
                 self.pf.field_info.add_field(
-                        field, NullFunc, particle_type = particle_type,
-                        convert_function=cf, take_log=False, units=r"Unknown")
+                    field, NullFunc, particle_type=particle_type,
+                    take_log=False,
+                    units=self.parameter_file.field_units[field])
             else:
                 mylog.debug("Adding known field %s to list of fields", field)
                 self.parameter_file.field_info[field] = field_info[field]
+                if field in self.parameter_file.field_units:
+                    unit = self.parameter_file.field_units[field]
+                    if unit != '':
+                        self.parameter_file.field_info[field].units = unit
 
     def _setup_derived_fields(self):
         self.derived_field_list = []
@@ -490,9 +495,6 @@ class GeometryHandler(ParallelAnalysisInterface):
         for field in fields_to_read:
             ftype, fname = field
             finfo = self.pf._get_field_info(*field)
-            conv_factor = finfo._convert_function(self)
-            np.multiply(fields_to_return[field], conv_factor,
-                        fields_to_return[field])
         return fields_to_return, fields_to_generate
 
     def _read_fluid_fields(self, fields, dobj, chunk = None):
@@ -508,16 +510,10 @@ class GeometryHandler(ParallelAnalysisInterface):
         if len(fields_to_read) == 0:
             return {}, fields_to_generate
         fields_to_return = self.io._read_fluid_selection(
-            self._chunk_io(dobj, cache = False),
+            self._chunk_io(dobj),
             selector,
             fields_to_read,
             chunk_size)
-        for field in fields_to_read:
-            ftype, fname = field
-            finfo = self.pf._get_field_info(*field)
-            conv_factor = finfo._convert_function(self)
-            np.multiply(fields_to_return[field], conv_factor,
-                        fields_to_return[field])
         #mylog.debug("Don't know how to read %s", fields_to_generate)
         return fields_to_return, fields_to_generate
 

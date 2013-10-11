@@ -1,5 +1,5 @@
 """
-Callbacks to add additional functionality on to plots.
+Callbacksr to add additional functionality on to plots.
 
 
 
@@ -26,6 +26,7 @@ from yt.utilities.physical_constants import \
     sec_per_Gyr, sec_per_Myr, \
     sec_per_kyr, sec_per_year, \
     sec_per_day, sec_per_hr
+from yt.data_objects.yt_array import YTQuantity
 from yt.visualization.image_writer import apply_colormap
 
 import _MPL
@@ -490,8 +491,8 @@ def get_smallest_appropriate_unit(v, pf):
     max_nu = 1e30
     good_u = None
     for unit in ['mpc', 'kpc', 'pc', 'au', 'rsun', 'km', 'cm']:
-        vv = v*pf[unit]
-        if vv < max_nu and vv > 1.0:
+        uq = YTQuantity(1.0, unit)
+        if uq/v < max_nu and uq/v > 1.0:
             good_u = unit
             max_nu = v*pf[unit]
     if good_u is None : good_u = 'cm'

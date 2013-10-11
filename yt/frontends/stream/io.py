@@ -22,6 +22,7 @@ import numpy as np
 from yt.utilities.io_handler import \
     BaseIOHandler, _axis_ids
 from yt.utilities.logger import ytLogger as mylog
+from yt.data_objects.yt_array import YTArray
 from yt.utilities.lib.geometry_utils import compute_morton
 from yt.utilities.exceptions import *
 
@@ -31,6 +32,7 @@ class IOHandlerStream(BaseIOHandler):
 
     def __init__(self, pf):
         self.fields = pf.stream_handler.fields
+        self.field_units = pf.stream_handler.field_units
         super(IOHandlerStream, self).__init__(pf)
 
     def _read_data_set(self, grid, field):
@@ -51,7 +53,8 @@ class IOHandlerStream(BaseIOHandler):
         rv = {}
         for field in fields:
             ftype, fname = field
-            rv[field] = np.empty(size, dtype="float64")
+            rv[field] = YTArray(np.empty(size, dtype="float64"),
+                                self.field_units[fname])
         ng = sum(len(c.objs) for c in chunks)
         mylog.debug("Reading %s cells of %s fields in %s blocks",
                     size, [f2 for f1, f2 in fields], ng)

@@ -73,19 +73,19 @@ add_field("dz", function=dz)
 
 def _convertDensity(data):
     return data.convert("Density")
-KnownRAMSESFields["Density"]._units = r"\rm{g}/\rm{cm}^3"
-KnownRAMSESFields["Density"]._projected_units = r"\rm{g}/\rm{cm}^2"
+KnownRAMSESFields["Density"].units = "g / cm**3"
 KnownRAMSESFields["Density"]._convert_function=_convertDensity
 
 def _convertPressure(data):
     return data.convert("Pressure")
-KnownRAMSESFields["Pressure"]._units=r"\rm{dyne}/\rm{cm}^{2}/\mu"
+KnownRAMSESFields["Pressure"]._units="dyne/cm**2"
 KnownRAMSESFields["Pressure"]._convert_function=_convertPressure
 
 def _convertVelocity(data):
     return data.convert("x-velocity")
 for ax in ['x','y','z']:
     f = KnownRAMSESFields["%s-velocity" % ax]
+    f.units = "cm / s"
     f._convert_function = _convertVelocity
     f.take_log = False
 
@@ -104,7 +104,7 @@ def _setup_particle_fields(registry, ptype):
         fn = "particle_velocity_%s" % ax
         registry.add_field((ptype, fn), function=NullFunc,
                   convert_function=_convertVelocity,
-                  units = r"\rm{cm}/\rm{s}",
+                  units = "cm / s",
                   take_log = False,
                   particle_type=True)
     for fn in ["particle_position_%s" % ax for ax in 'xyz'] + \
@@ -116,14 +116,15 @@ def _setup_particle_fields(registry, ptype):
       function=TranslationFunc((ptype, "particle_identifier")),
       particle_type = True)
     registry.add_field((ptype, "particle_mass"), function=NullFunc, 
-              particle_type=True, convert_function = _convertParticleMass)
+              particle_type=True, convert_function = _convertParticleMass,
+              units = "g")
     return
 
 def _Temperature(field, data):
     rv = data["Pressure"]/data["Density"]
     rv *= mass_hydrogen_cgs/boltzmann_constant_cgs
     return rv
-add_field("Temperature", function=_Temperature, units=r"\rm{K}")
+add_field("Temperature", function=_Temperature, units="K")
 
 # We'll add a bunch of species fields here.  In the not too distant future,
 # we'll be moving all of these to a unified field location, so they can be
@@ -171,15 +172,19 @@ for species in _speciesList:
     add_field("%s_Density" % species,
              function = _SpeciesDensity,
              display_name = "%s\/Density" % species,
-             units = r"\rm{g}/\rm{cm}^3",
-             projected_units = r"\rm{g}/\rm{cm}^2")
+             convert_function = _convertDensity,
+             units = "g/cm**3")
+    add_field("%s_Fraction" % species,
+             function=_SpeciesFraction,
+             validators=ValidateDataField("%s_Density" % species),
+             display_name="%s\/Fraction" % species)
     add_field("Comoving_%s_Density" % species,
              function=_SpeciesComovingDensity,
              display_name="Comoving\/%s\/Density" % species)
-    add_field("%s_Mass" % species, units=r"\rm{g}", 
+    add_field("%s_Mass" % species, units="g", 
               function=_SpeciesMass, 
               display_name="%s\/Mass" % species)
-    add_field("%s_MassMsun" % species, units=r"M_{\odot}", 
+    add_field("%s_MassMsun" % species, units="Msun",
               function=_SpeciesMass, 
               convert_function=_convertCellMassMsun,
               display_name="%s\/Mass" % species)

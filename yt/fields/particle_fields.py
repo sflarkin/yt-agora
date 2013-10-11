@@ -95,10 +95,8 @@ def particle_deposition_functions(ptype, coord_name, mass_name, registry):
              function = particle_mass,
              validators = [ValidateSpatial()],
              display_name = "\\mathrm{%s Mass}" % ptype,
-             units = r"\mathrm{g}",
-             projected_units = r"\mathrm{g}\/\mathrm{cm}",
-             projection_conversion = 'cm')
-
+             units = "g")
+             
     def particle_density(field, data):
         pos = data[ptype, coord_name]
         d = data.deposit(pos, [data[ptype, mass_name]], method = "sum")
@@ -109,9 +107,7 @@ def particle_deposition_functions(ptype, coord_name, mass_name, registry):
              function = particle_density,
              validators = [ValidateSpatial()],
              display_name = "\\mathrm{%s Density}" % ptype,
-             units = r"\mathrm{g}/\mathrm{cm}^{3}",
-             projected_units = r"\mathrm{g}/\mathrm{cm}^{2}",
-             projection_conversion = 'cm')
+             units = "g/cm**3")
 
     def particle_cic(field, data):
         pos = data[ptype, coord_name]
@@ -123,9 +119,7 @@ def particle_deposition_functions(ptype, coord_name, mass_name, registry):
              function = particle_cic,
              validators = [ValidateSpatial()],
              display_name = "\\mathrm{%s CIC Density}" % ptype,
-             units = r"\mathrm{g}/\mathrm{cm}^{3}",
-             projected_units = r"\mathrm{g}/\mathrm{cm}^{2}",
-             projection_conversion = 'cm')
+             units = "g/cm**3")
 
     # Now some translation functions.
 
@@ -140,7 +134,7 @@ def particle_deposition_functions(ptype, coord_name, mass_name, registry):
     registry.add_field((ptype, "ParticleMass"),
             function = TranslationFunc((ptype, mass_name)),
             particle_type = True,
-            units = r"\mathrm{g}")
+            units = "g")
 
     def _ParticleMassMsun(field, data):
         return data[ptype, mass_name].copy()
@@ -151,7 +145,7 @@ def particle_deposition_functions(ptype, coord_name, mass_name, registry):
             function = _ParticleMassMsun,
             convert_function = _conv_Msun,
             particle_type = True,
-            units = r"\mathrm{M}_\odot")
+            units = "Msun")
 
     def particle_mesh_ids(field, data):
         pos = data[ptype, coord_name]
@@ -214,135 +208,135 @@ def standard_particle_fields(registry, ptype,
                              svel = "particle_velocity_%s"):
     # This function will set things up based on the scalar fields and standard
     # yt field names.
-    
-    def _ParticleVelocityMagnitude(field, data):
+
+    def _particle_velocity_magnitude(field, data):
+        """ M{|v|} """
         bulk_velocity = data.get_field_parameter("bulk_velocity")
-        if bulk_velocity == None:
+        if bulk_velocity is None:
             bulk_velocity = np.zeros(3)
-        return ( (data[ptype, svel % 'x']-bulk_velocity[0])**2.0 + \
-                 (data[ptype, svel % 'y']-bulk_velocity[1])**2.0 + \
-                 (data[ptype, svel % 'z']-bulk_velocity[2])**2.0 )**(1.0/2.0)
-    registry.add_field((ptype, "ParticleVelocityMagnitude"),
-              function=_ParticleVelocityMagnitude,
-              particle_type=True, 
-              take_log=False, units=r"\rm{cm}/\rm{s}")
+        return np.sqrt((data[ptype, svel % 'x'] - bulk_velocity[0])**2
+                     + (data[ptype, svel % 'y'] - bulk_velocity[1])**2
+                     + (data[ptype, svel % 'z'] - bulk_velocity[2])**2 )
+    
+        registry.add_field((ptype, "particle_velocity_magnitude"),
+                  function=_particle_velocity_magnitude,
+                  particle_type=True,
+                  take_log=False,
+                  units="cm/s")
 
-    # Angular momentum
-    def _ParticleSpecificAngularMomentumX(field, data):
+    def _particle_specific_angular_momentum(field, data):
+        """
+        Calculate the angular of a particle velocity.  Returns a vector for each
+        particle.
+        """
         if data.has_field_parameter("bulk_velocity"):
             bv = data.get_field_parameter("bulk_velocity")
-        else: bv = np.zeros(3, dtype='float64')
-        center = data.get_field_parameter('center')
-        y = data[ptype, spos % 'y'] - center[1]
-        z = data[ptype, spos % 'z'] - center[2]
+        else: bv = np.zeros(3, dtype=np.float64)
+        xv = data[ptype, svel % 'x'] - bv[0]
         yv = data[ptype, svel % 'y'] - bv[1]
         zv = data[ptype, svel % 'z'] - bv[2]
+        center = data.get_field_parameter('center')
+        coords = np.array([data[ptype, spos % 'x'],
+                           data[ptype, spos % 'y'],
+                           data[ptype, spos % 'z']], dtype=np.float64)
+        new_shape = tuple([3] + [1]*(len(coords.shape)-1))
+        r_vec = coords - np.reshape(center,new_shape)
+        v_vec = np.array([xv,yv,zv], dtype=np.float64)
+        return np.cross(r_vec, v_vec, axis=0)
+
+    registry.add_field((ptype, "particle_specific_angular_momentum"),
+              function=_particle_specific_angular_momentum,
+              particle_type=True,
+              units="cm**2/s",
+              validators=[ValidateParameter("center")])
+
+    def _particle_specific_angular_momentum_x(field, data):
+        if data.has_field_parameter("bulk_velocity"):
+            bv = data.get_field_parameter("bulk_velocity")
+        else: bv = np.zeros(3, dtype=np.float64)
+        center = data.get_field_parameter('center')
+        y = data[ptype, spos % "y"] - center[1]
+        z = data[ptype, spos % "z"] - center[2]
+        yv = data[ptype, svel % "y"] - bv[1]
+        zv = data[ptype, svel % "z"] - bv[2]
         return yv*z - zv*y
-    registry.add_field((ptype, "ParticleSpecificAngularMomentumX"), 
-              function=_ParticleSpecificAngularMomentumX,
+
+    registry.add_field((ptype, "particle_specific_angular_momentum_x"),
+              function=_particle_specific_angular_momentum_x,
               particle_type=True,
-              convert_function=_get_conv("cm"),
-              units=r"\rm{cm}^2/\rm{s}",
-              validators=[ValidateParameter("center")])
-    def _ParticleSpecificAngularMomentumY(field, data):
-        if data.has_field_parameter("bulk_velocity"):
-            bv = data.get_field_parameter("bulk_velocity")
-        else: bv = np.zeros(3, dtype='float64')
-        center = data.get_field_parameter('center')
-        x = data[ptype, spos % 'x'] - center[0]
-        z = data[ptype, spos % 'z'] - center[2]
-        xv = data[ptype, svel % 'x'] - bv[0]
-        zv = data[ptype, svel % 'z'] - bv[2]
-        return -(xv*z - zv*x)
-    registry.add_field((ptype, "ParticleSpecificAngularMomentumY"), 
-              function=_ParticleSpecificAngularMomentumY,
-              particle_type=True,
-              convert_function=_get_conv("cm"),
-              units=r"\rm{cm}^2/\rm{s}",
-              validators=[ValidateParameter("center")])
-    def _ParticleSpecificAngularMomentumZ(field, data):
-        if data.has_field_parameter("bulk_velocity"):
-            bv = data.get_field_parameter("bulk_velocity")
-        else: bv = np.zeros(3, dtype='float64')
-        center = data.get_field_parameter('center')
-        x = data[ptype, spos % 'x'] - center[0]
-        y = data[ptype, spos % 'y'] - center[1]
-        xv = data[ptype, svel % 'x'] - bv[0]
-        yv = data[ptype, svel % 'y'] - bv[1]
-        return xv*y - yv*x
-    registry.add_field((ptype, "ParticleSpecificAngularMomentumZ"), 
-              function=_ParticleSpecificAngularMomentumZ,
-              particle_type=True,
-              convert_function=_get_conv("cm"),
-              units=r"\rm{cm}^2/\rm{s}",
+              units="cm**2/s",
               validators=[ValidateParameter("center")])
 
-    def _ParticleAngularMomentumX(field, data):
+    def _particle_specific_angular_momentum_y(field, data):
+        if data.has_field_parameter("bulk_velocity"):
+            bv = data.get_field_parameter("bulk_velocity")
+        else: bv = np.zeros(3, dtype=np.float64)
+        center = data.get_field_parameter('center')
+        x = data[ptype, spos % "x"] - center[0]
+        z = data[ptype, spos % "z"] - center[2]
+        xv = data[ptype, svel % "x"] - bv[0]
+        zv = data[ptype, svel % "z"] - bv[2]
+        return -(xv*z - zv*x)
+
+    registry.add_field((ptype, "particle_specific_angular_momentum_y"),
+              function=_particle_specific_angular_momentum_y,
+              particle_type=True,
+              units="cm**2/s",
+              validators=[ValidateParameter("center")])
+
+    def _particle_specific_angular_momentum_z(field, data):
+        if data.has_field_parameter("bulk_velocity"):
+            bv = data.get_field_parameter("bulk_velocity")
+        else: bv = np.zeros(3, dtype=np.float64)
+        center = data.get_field_parameter('center')
+        x = data[ptype, spos % "x"] - center[0]
+        y = data[ptype, spos % "y"] - center[1]
+        xv = data[ptype, svel % "x"] - bv[0]
+        yv = data[ptype, svel % "y"] - bv[1]
+        return xv*y - yv*x
+
+    registry.add_field((ptype, "particle_specific_angular_momentum_z"),
+              function=_particle_specific_angular_momentum_z,
+              particle_type=True,
+              units="cm**2/s",
+              validators=[ValidateParameter("center")])
+
+    def _particle_angular_momentum(field, data):
+        return data[ptype, "particle_mass"] \
+             * data[ptype, "particle_specific_angular_momentum"]
+
+    def _particle_angular_momentum_x(field, data):
         return data[ptype, "particle_mass"] * \
-            data[ptype, "ParticleSpecificAngularMomentumX"]
-    registry.add_field((ptype, "ParticleAngularMomentumX"),
-             function=_ParticleAngularMomentumX,
-             units=r"\rm{g}\/\rm{cm}^2/\rm{s}", particle_type=True,
+               data[ptype, "particle_specific_angular_momentum_x"]
+    registry.add_field((ptype, "particle_angular_momentum_x"),
+             function=_particle_angular_momentum_x,
+             units="g*cm**2/s", particle_type=True,
              validators=[ValidateParameter('center')])
-    def _ParticleAngularMomentumY(field, data):
+
+    def _particle_angular_momentum_y(field, data):
         return data[ptype, "particle_mass"] * \
-            data[ptype, "ParticleSpecificAngularMomentumY"]
-    registry.add_field((ptype, "ParticleAngularMomentumY"),
-             function=_ParticleAngularMomentumY,
-             units=r"\rm{g}\/\rm{cm}^2/\rm{s}", particle_type=True,
+               data[ptype, "particle_specific_angular_momentum_y"]
+    registry.add_field((ptype, "particle_angular_momentum_y"),
+             function=_particle_angular_momentum_y,
+             units="g*cm**2/s", particle_type=True,
              validators=[ValidateParameter('center')])
-    def _ParticleAngularMomentumZ(field, data):
+
+    def _particle_angular_momentum_z(field, data):
         return data[ptype, "particle_mass"] * \
-            data[ptype, "ParticleSpecificAngularMomentumZ"]
-    registry.add_field((ptype, "ParticleAngularMomentumZ"),
-             function=_ParticleAngularMomentumZ,
-             units=r"\rm{g}\/\rm{cm}^2/\rm{s}", particle_type=True,
+               data[ptype, "particle_specific_angular_momentum_z"]
+    registry.add_field((ptype, "particle_angular_momentum_z"),
+             function=_particle_angular_momentum_z,
+             units="g*cm**2/s", particle_type=True,
              validators=[ValidateParameter('center')])
 
     def _ParticleRadius(field, data):
         return get_radius(data, "particle_position_")
+    registry.add_field((ptype, "particle_radius"),
+              function=_particle_radius,
+              validators=[ValidateParameter("center")],
+              units="cm", particle_type = True,
+              display_name = "Particle Radius")
 
-    registry.add_field((ptype, "ParticleRadius"),
-              function=_ParticleRadius,
-              validators=[ValidateParameter("center")],
-              convert_function = _get_conv("cm"), units=r"\rm{cm}",
-              particle_type = True,
-              display_name = "Particle Radius")
-    registry.add_field((ptype, "ParticleRadiusMpc"),
-              function=_ParticleRadius,
-              validators=[ValidateParameter("center")],
-              convert_function = _get_conv("mpc"), units=r"\rm{Mpc}",
-              particle_type=True,
-              display_name = "Particle Radius")
-    registry.add_field((ptype, "ParticleRadiuskpc"),
-              function=_ParticleRadius,
-              validators=[ValidateParameter("center")],
-              convert_function = _get_conv("kpc"), units=r"\rm{kpc}",
-              particle_type=True,
-              display_name = "Particle Radius")
-    registry.add_field((ptype, "ParticleRadiuskpch"),
-              function=_ParticleRadius,
-              validators=[ValidateParameter("center")],
-              convert_function = _get_conv("kpch"), units=r"\rm{kpc}/\rm{h}",
-              particle_type=True,
-              display_name = "Particle Radius")
-    registry.add_field((ptype, "ParticleRadiuspc"),
-              function=_ParticleRadius,
-              validators=[ValidateParameter("center")],
-              convert_function = _get_conv("pc"), units=r"\rm{pc}",
-              particle_type=True,
-              display_name = "Particle Radius")
-    registry.add_field((ptype, "ParticleRadiusAU"),
-              function=_ParticleRadius,
-              validators=[ValidateParameter("center")],
-              convert_function = _get_conv("au"), units=r"\rm{AU}",
-              particle_type=True,
-              display_name = "Particle Radius")
-    registry.add_field((ptype, "ParticleRadiusCode"),
-              function=_ParticleRadius,
-              validators=[ValidateParameter("center")],
-              particle_type=True,
-              display_name = "Particle Radius (code)")
     def _ParticleRadiusSpherical(field, data):
         normal = data.get_field_parameter('normal')
         center = data.get_field_parameter('center')

@@ -7,33 +7,35 @@
 # http://goldbook.iupac.org/list_goldbook_phys_constants_defs.html
 # http://physics.nist.gov/cuu/Constants/index.html
 
+from yt.data_objects.yt_array import YTQuantity
+
 # Masses
-mass_electron_cgs = 9.109382e-28  # g
-amu_cgs           = 1.660538921e-24  # g
-mass_hydrogen_cgs = 1.007947*amu_cgs  # g
-mass_sun_cgs = 1.98841586e33  # g
+mass_electron_cgs = YTQuantity(9.109382e-28, 'g')
+amu_cgs           = YTQuantity(1.660538921e-24, 'g')
+mass_hydrogen_cgs = 1.007947*amu_cgs
+mass_sun_cgs = YTQuantity(1.98841586e33, 'g')
+
 # Velocities
-speed_of_light_cgs = 2.99792458e10  # cm/s, exact
+speed_of_light_cgs = YTQuantity(2.99792458e10, 'cm/s')
 
 # Cross Sections
 # 8*pi/3 (alpha*hbar*c/(2*pi))**2
-cross_section_thompson_cgs = 6.65245854533e-25  # cm^2
+cross_section_thompson_cgs = YTQuantity(6.65245854533e-25, 'cm**2')
 
 # Charge
-charge_proton_cgs = 4.8032056e-10  # esu = 1.602176487e-19  Coulombs
+charge_proton_cgs = YTQuantity(4.8032056e-10, 'esu')
 
 # Physical Constants
-boltzmann_constant_cgs = 1.3806488e-16  # erg K^-1
-gravitational_constant_cgs  = 6.67384e-8  # cm^3 g^-1 s^-2
-planck_constant_cgs   = 6.62606957e-27  # erg s
-stefan_boltzmann_constant_cgs = 5.670373e-5 # erg cm^-2 s^-1 K^-4
+boltzmann_constant_cgs = YTQuantity(1.3806488e-16, 'erg/K')
+gravitational_constant_cgs  = YTQuantity(6.67384-8, 'cm**3/g/s**2')
+planck_constant_cgs   = YTQuantity(6.62606957e-27, 'erg*s')
+stefan_boltzmann_constant_cgs = YTQuantity(5.670373e-5, 'erg/cm**2/s**1/K**4')
 # The following value was calcualted assuming H = 100 km/s/Mpc.
 # To get the correct value for your cosmological parameters, 
 # you'll need to multiply through by h^2
 # [where h = H / (100 km/s/Mpc)].  See the Overdensity field in
-# yt.fields.universal_fields.
-rho_crit_now = 1.8788e-29  # g/cm^3 (cosmological critical density)
-
+# yt.data_objects.universal_fields.
+rho_crit_now = YTQuantity(1.8788e-29, 'g/cm**3/h**2') # (cosmology critical density)
 
 # Misc. Approximations
 mass_mean_atomic_cosmology = 1.22
@@ -84,7 +86,7 @@ erg_per_eV = 1.602176562e-12
 erg_per_keV = erg_per_eV * 1.0e3
 K_per_keV = erg_per_keV / boltzmann_constant_cgs
 keV_per_K = 1.0 / K_per_keV
-Tcmb = 2.726 # Current CMB temperature
+Tcmb = YTQuantity(2.726, 'K') # Current CMB temperature
 
 #Short cuts
 G = gravitational_constant_cgs

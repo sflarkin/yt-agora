@@ -38,11 +38,11 @@ unparsed_args = __startup_tasks.unparsed_args
 from yt.funcs import *
 from yt.utilities.logger import ytLogger as mylog
 from yt.utilities.performance_counters import yt_counters, time_function
-from yt.config import ytcfg, ytcfgDefaults
+from yt.config import ytcfg, ytcfg_defaults
 import yt.utilities.physical_constants as physical_constants
 
 from yt.utilities.logger import level as __level
-if __level >= int(ytcfgDefaults["loglevel"]):
+if __level >= int(ytcfg_defaults["loglevel"]):
     # This won't get displayed.
     mylog.debug("Turning off NumPy error reporting")
     np.seterr(all = 'ignore')
@@ -60,75 +60,75 @@ from yt.data_objects.api import \
 from yt.data_objects.derived_quantities import \
     add_quantity, quantity_info
 
-from yt.frontends.enzo.api import \
-    EnzoStaticOutput, EnzoStaticOutputInMemory, \
-    EnzoSimulation, EnzoFieldInfo, \
-    add_enzo_field, add_enzo_1d_field, add_enzo_2d_field
+#from yt.frontends.enzo.api import \
+#    EnzoStaticOutput, EnzoStaticOutputInMemory, \
+#    EnzoSimulation, EnzoFieldInfo, \
+#    add_enzo_field, add_enzo_1d_field, add_enzo_2d_field
 
 # Boxlib stuff
-from yt.frontends.boxlib.api import \
-    BoxlibStaticOutput
+#from yt.frontends.boxlib.api import \
+#    BoxlibStaticOutput
 
 # Orion stuff
-from yt.frontends.boxlib.api import \
-    OrionStaticOutput, OrionFieldInfo, add_orion_field
+#from yt.frontends.boxlib.api import \
+#    OrionStaticOutput, OrionFieldInfo, add_orion_field
 
 # Maestro stuff
-from yt.frontends.boxlib.api import \
-    MaestroStaticOutput
+#from yt.frontends.boxlib.api import \
+#    MaestroStaticOutput
 
 # Castro stuff
-from yt.frontends.boxlib.api import \
-    CastroStaticOutput
+#from yt.frontends.boxlib.api import \
+#    CastroStaticOutput
 
-from yt.frontends.flash.api import \
-    FLASHStaticOutput, FLASHFieldInfo, add_flash_field
+#from yt.frontends.flash.api import \
+#    FLASHStaticOutput, FLASHFieldInfo, add_flash_field
 
-from yt.frontends.tiger.api import \
-    TigerStaticOutput, TigerFieldInfo, add_tiger_field
+#from yt.frontends.tiger.api import \
+#    TigerStaticOutput, TigerFieldInfo, add_tiger_field
 
-from yt.frontends.artio.api import \
-    ARTIOStaticOutput, ARTIOFieldInfo, add_artio_field
+#from yt.frontends.artio.api import \
+#    ARTIOStaticOutput, ARTIOFieldInfo, add_artio_field
 
 #from yt.frontends.artio2.api import \
 #    Artio2StaticOutput
 
-from yt.frontends.ramses.api import \
-    RAMSESStaticOutput, RAMSESFieldInfo, add_ramses_field
+#from yt.frontends.ramses.api import \
+#    RAMSESStaticOutput, RAMSESFieldInfo, add_ramses_field
 
-from yt.frontends.chombo.api import \
-    ChomboStaticOutput, ChomboFieldInfo, add_chombo_field
+#from yt.frontends.chombo.api import \
+#    ChomboStaticOutput, ChomboFieldInfo, add_chombo_field
 
-from yt.frontends.gdf.api import \
-    GDFStaticOutput, GDFFieldInfo, add_gdf_field
+#from yt.frontends.gdf.api import \
+#    GDFStaticOutput, GDFFieldInfo, add_gdf_field
 
-from yt.frontends.moab.api import \
-    MoabHex8StaticOutput, MoabFieldInfo, add_moab_field, \
-    PyneMoabHex8StaticOutput
+#from yt.frontends.moab.api import \
+#    MoabHex8StaticOutput, MoabFieldInfo, add_moab_field, \
+#    PyneMoabHex8StaticOutput
 
-from yt.frontends.athena.api import \
-    AthenaStaticOutput, AthenaFieldInfo, add_athena_field
+#from yt.frontends.athena.api import \
+#    AthenaStaticOutput, AthenaFieldInfo, add_athena_field
 
-from yt.frontends.art.api import \
-    ARTStaticOutput, ARTFieldInfo, add_art_field
+#from yt.frontends.art.api import \
+#    ARTStaticOutput, ARTFieldInfo, add_art_field
 
-from yt.frontends.pluto.api import \
-     PlutoStaticOutput, PlutoFieldInfo, add_pluto_field
+#from yt.frontends.pluto.api import \
+#     PlutoStaticOutput, PlutoFieldInfo, add_pluto_field
 
 from yt.frontends.stream.api import \
     StreamStaticOutput, StreamFieldInfo, add_stream_field, \
     StreamHandler, load_uniform_grid, load_amr_grids, \
     load_particles, load_hexahedral_mesh, load_octree
 
-from yt.frontends.sph.api import \
-    OWLSStaticOutput, OWLSFieldInfo, add_owls_field, \
-    GadgetStaticOutput, GadgetHDF5StaticOutput, \
-    GadgetFieldInfo, add_gadget_field, \
-    TipsyStaticOutput, TipsyFieldInfo, add_tipsy_field
+#from yt.frontends.sph.api import \
+#    OWLSStaticOutput, OWLSFieldInfo, add_owls_field, \
+#    GadgetStaticOutput, GadgetHDF5StaticOutput, \
+#    GadgetFieldInfo, add_gadget_field, \
+#    TipsyStaticOutput, TipsyFieldInfo, add_tipsy_field
 
-from yt.analysis_modules.list_modules import \
-    get_available_modules, amods
-available_analysis_modules = get_available_modules()
+#from yt.analysis_modules.list_modules import \
+#    get_available_modules, amods
+#available_analysis_modules = get_available_modules()
 
 # Import our analysis modules
 from yt.analysis_modules.halo_finding.api import \

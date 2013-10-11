@@ -25,6 +25,7 @@ from yt.utilities.parameter_file_storage import \
     ParameterFileStore, \
     NoParameterShelf, \
     output_type_registry
+from yt.utilities.units import Unit, UnitRegistry, dimensionless
 from yt.data_objects.field_info_container import \
     FieldInfoContainer, NullFunc
 from yt.data_objects.particle_filters import \
@@ -69,6 +70,7 @@ class StaticOutput(object):
             mylog.debug("Registering: %s as %s", name, cls)
 
     def __new__(cls, filename=None, *args, **kwargs):
+        from yt.frontends.stream.data_structures import StreamHandler
         if not isinstance(filename, types.StringTypes):
             obj = object.__new__(cls)
             # The Stream frontend uses a StreamHandler object to pass metadata
@@ -133,6 +135,8 @@ class StaticOutput(object):
 
         self.create_field_info()
 
+        self.set_units()
+
     def _set_derived_attrs(self):
         self.domain_center = 0.5 * (self.domain_right_edge + self.domain_left_edge)
         self.domain_width = self.domain_right_edge - self.domain_left_edge
@@ -170,10 +174,7 @@ class StaticOutput(object):
 
     def __getitem__(self, key):
         """ Returns units, parameters, or conversion_factors in that order. """
-        for d in [self.units, self.time_units, self.parameters, \
-                  self.conversion_factors]:
-            if key in d: return d[key]
-        raise KeyError(key)
+        return self.parameters[key]
 
     def keys(self):
         """
@@ -207,10 +208,7 @@ class StaticOutput(object):
         Checks units, parameters, and conversion factors. Returns a boolean.
 
         """
-        return key in self.units or \
-               key in self.time_units or \
-               key in self.parameters or \
-               key in self.conversion_factors
+        return key in self.parameters
 
     _instantiated_hierarchy = None
     @property
@@ -365,8 +363,59 @@ class StaticOutput(object):
     def relative_refinement(self, l0, l1):
         return self.refine_by**(l1-l0)
 
+    def set_units(self):
+        """
+        Creates the unit registry for this dataset.
+
+        """
+        self.unit_registry = UnitRegistry()
+
+        self.set_code_units()
+
+        if hasattr(self, "cosmological_simulation") \
+           and getattr(self, "cosmological_simulation"):
+            # this dataset is cosmological, so add cosmological units.
+            self.unit_registry.add("h", self.hubble_constant, dimensionless)
+            # Comoving lengths: pc, AU, m... anything else?
+            #self.unit_registry.add("pccm", ...)
+
+        # @todo: Can we remove this now?
+        for field in self.field_info.values():
+            field.unit_obj = self.get_unit_from_registry(field.units)
+
+    def get_unit_from_registry(self, unit_str):
+        """
+        Creates a unit object matching the string expression, using this
+        dataset's unit registry.
+
+        Parameters
+        ----------
+        unit_str : str
+            string that we can parse for a sympy Expr.
+
+        """
+        new_unit = Unit(unit_str, registry=self.unit_registry)
+        return new_unit
+
+
 def _reconstruct_pf(*args, **kwargs):
     pfs = ParameterFileStore()
     pf = pfs.get_pf_hash(*args)
     return pf
 
+class ParticleFile(object):
+    def __init__(self, pf, io, filename, file_id):
+        self.pf = pf
+        self.io = weakref.proxy(io)
+        self.filename = filename
+        self.file_id = file_id
+        self.total_particles = self.io._count_particles(self)
+
+    def select(self, selector):
+        pass
+
+    def count(self, selector):
+        pass
+
+    def _calculate_offsets(self, fields):
+        pass
