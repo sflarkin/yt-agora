@@ -1,10 +1,6 @@
 """
-API for yt.frontends.orion
-
-
-
+API for sunyaev_zeldovich
 """
-
 #-----------------------------------------------------------------------------
 # Copyright (c) 2013, yt Development Team.
 #
@@ -13,14 +9,4 @@ API for yt.frontends.orion
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
-from .data_structures import \
-      OrionGrid, \
-      OrionHierarchy, \
-      OrionStaticOutput
-
-from .fields import \
-      OrionFieldInfo, \
-      add_orion_field
-
-from .io import \
-      IOHandlerNative
+from projection import SZProjection
