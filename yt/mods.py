@@ -47,6 +47,12 @@ if __level >= int(ytcfg_defaults["loglevel"]):
     mylog.debug("Turning off NumPy error reporting")
     np.seterr(all = 'ignore')
 
+from yt.fields.api import \
+    field_plugins, \
+    DerivedField, \
+    FieldDetector, \
+    FieldInfoContainer
+
 from yt.data_objects.api import \
     BinnedProfile1D, BinnedProfile2D, BinnedProfile3D, \
     data_object_registry, \
@@ -60,10 +66,9 @@ from yt.data_objects.api import \
 from yt.data_objects.derived_quantities import \
     add_quantity, quantity_info
 
-#from yt.frontends.enzo.api import \
-#    EnzoStaticOutput, EnzoStaticOutputInMemory, \
-#    EnzoSimulation, EnzoFieldInfo, \
-#    add_enzo_field, add_enzo_1d_field, add_enzo_2d_field
+from yt.frontends.enzo.api import \
+    EnzoStaticOutput, EnzoStaticOutputInMemory, \
+    EnzoSimulation, EnzoFieldInfo, add_enzo_field
 
 # Boxlib stuff
 #from yt.frontends.boxlib.api import \

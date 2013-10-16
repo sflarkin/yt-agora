@@ -220,7 +220,7 @@ class YTDataContainer(object):
         """
         Deletes a field
         """
-        if key  not in self.field_data:
+        if key not in self.field_data:
             key = self._determine_fields(key)[0]
         del self.field_data[key]
 
@@ -536,8 +536,10 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
             self._spatial)
         # We now split up into readers for the types of fields
         fluids, particles = [], []
+        finfos = {}
         for ftype, fname in fields_to_get:
             finfo = self.pf._get_field_info(ftype, fname)
+            finfos[ftype, fname] = finfo
             if finfo.particle_type:
                 particles.append((ftype, fname))
             elif (ftype, fname) not in fluids:
@@ -547,11 +549,16 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
         # need to be generated.
         read_fluids, gen_fluids = self.hierarchy._read_fluid_fields(
                                         fluids, self, self._current_chunk)
-        self.field_data.update(read_fluids)
+        for f, v in read_fluids.items():
+            self.field_data[f] = YTArray(v, input_units = finfos[f].units,
+                                         registry = self.pf.unit_registry)
 
         read_particles, gen_particles = self.hierarchy._read_particle_fields(
                                         particles, self, self._current_chunk)
-        self.field_data.update(read_particles)
+        for f, v in read_particles.items():
+            self.field_data[f] = YTArray(v, input_units = finfos[f].units,
+                                         registry = self.pf.unit_registry)
+
         fields_to_generate += gen_fluids + gen_particles
         self._generate_fields(fields_to_generate)
 
@@ -568,14 +575,15 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
                 field = fields_to_generate[index % len(fields_to_generate)]
                 index += 1
                 if field in self.field_data: continue
+                fi = self.pf._get_field_info(*field)
                 try:
                     fd = self._generate_field(field)
                     if type(fd) == np.ndarray:
-                        fd = YTArray(fd, self.pf._get_field_info(*field).units,
-                                     self.pf.unit_registry)
-                    if fd == None:
+                        fd = YTArray(fd, fi.units, self.pf.unit_registry)
+                    if fd is None:
                         raise RuntimeError
                     self.field_data[field] = fd
+                    fd.convert_to_units(fi.units)
                 except GenerationInProgress as gip:
                     for f in gip.fields:
                         if f not in fields_to_generate:

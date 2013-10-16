@@ -35,9 +35,11 @@ from yt.data_objects.particle_unions import \
 from yt.utilities.minimal_representation import \
     MinimalStaticOutput
 
-from yt.geometry.coordinate_handler import \
-    CartesianCoordinateHandler, \
-    PolarCoordinateHandler, \
+from yt.geometry.cartesian_coordinates import \
+    CartesianCoordinateHandler
+from yt.geometry.polar_coordinates import \
+    PolarCoordinateHandler
+from yt.geometry.cylindrical_coordinates import \
     CylindricalCoordinateHandler
 
 # We want to support the movie format in the future.
@@ -50,7 +52,7 @@ _pf_store = ParameterFileStore()
 class StaticOutput(object):
 
     default_fluid_type = "gas"
-    fluid_types = ("gas","deposit")
+    fluid_types = ("gas", "deposit", "index")
     particle_types = ("io",) # By default we have an 'all'
     particle_types_raw = ("io",)
     geometry = "cartesian"
@@ -122,7 +124,6 @@ class StaticOutput(object):
         self._parse_parameter_file()
         self._setup_coordinate_handler()
         self._set_units()
-        self._set_derived_attrs()
 
         # Because we need an instantiated class to check the pf's existence in
         # the cache, we move that check to here from __new__.  This avoids
@@ -133,13 +134,17 @@ class StaticOutput(object):
             pass
         self.print_key_parameters()
 
-        self.create_field_info()
-
         self.set_units()
+        self._set_derived_attrs()
 
     def _set_derived_attrs(self):
         self.domain_center = 0.5 * (self.domain_right_edge + self.domain_left_edge)
         self.domain_width = self.domain_right_edge - self.domain_left_edge
+        for attr in ("center", "width", "left_edge", "right_edge"):
+            n = "domain_%s" % attr
+            v = getattr(self, n)
+            v = YTArray(v, "code_length", registry = self.unit_registry)
+            setattr(self, n, v)
 
     def __reduce__(self):
         args = (self._hash(),)
@@ -219,10 +224,8 @@ class StaticOutput(object):
             self._instantiated_hierarchy = self._hierarchy_class(
                 self, data_style=self.data_style)
             # Now we do things that we need an instantiated hierarchy for
-            if "all" not in self.particle_types:
-                mylog.debug("Creating Particle Union 'all'")
-                pu = ParticleUnion("all", list(self.particle_types_raw))
-                self.add_particle_union(pu)
+            # ...first off, we create our field_info now.
+            self.create_field_info()
         return self._instantiated_hierarchy
     h = hierarchy  # alias
 
@@ -246,16 +249,21 @@ class StaticOutput(object):
                 mylog.info("Parameters: %-25s = %s", a, v)
 
     def create_field_info(self):
-        if getattr(self, "field_info", None) is None:
-            # The setting up of fields occurs in the hierarchy, which is only
-            # instantiated once.  So we have to double check to make sure that,
-            # in the event of double-loads of a parameter file, we do not blow
-            # away the exising field_info.
-            self.field_info = FieldInfoContainer.create_with_fallback(
-                                self._fieldinfo_fallback)
-            self.field_info.update(self.coordinates.coordinate_fields())
-        if getattr(self, "field_dependencies", None) is None:
-            self.field_dependencies = {}
+        self.field_dependencies = {}
+        self.h.derived_field_list = []
+        self.field_info = self._field_info_class(self, self.h.field_list)
+        self.coordinates.setup_fields(self.field_info)
+        self.field_info.setup_fluid_fields()
+        for ptype in self.particle_types:
+            self.field_info.setup_particle_fields(ptype)
+        if "all" not in self.particle_types:
+            mylog.debug("Creating Particle Union 'all'")
+            pu = ParticleUnion("all", list(self.particle_types_raw))
+            self.add_particle_union(pu)
+        deps, unloaded = self.field_info.check_derived_fields()
+        self.field_dependencies.update(deps)
+        mylog.info("Loading field plugins.")
+        self.field_info.load_all_plugins()
 
     def _setup_coordinate_handler(self):
         if self.geometry == "cartesian":
@@ -266,6 +274,21 @@ class StaticOutput(object):
             self.coordinates = PolarCoordinateHandler(self)
         else:
             raise YTGeometryNotSupported(self.geometry)
+
+    def add_particle_union(self, union):
+        # No string lookups here, we need an actual union.
+        f = self.particle_fields_by_type
+        fields = set_intersection([f[s] for s in union
+                                   if s in self.particle_types_raw])
+        self.particle_types += (union.name,)
+        self.particle_unions[union.name] = union
+        fields = [ (union.name, field) for field in fields]
+        self.h.field_list.extend(fields)
+        # Give ourselves a chance to add them here, first, then...
+        # ...if we can't find them, we set them up as defaults.
+        self.h._setup_particle_types([union.name])
+        #self.h._setup_unknown_fields(fields, self.field_info,
+        #                             skip_removal = True)
 
     def add_particle_filter(self, filter):
         # This is a dummy, which we set up to enable passthrough of "all"
@@ -291,9 +314,9 @@ class StaticOutput(object):
     _last_finfo = None
     def _get_field_info(self, ftype, fname):
         guessing_type = False
-        if ftype == "unknown" and self._last_freq[0] != None:
-            ftype = self._last_freq[0]
+        if ftype == "unknown":
             guessing_type = True
+            ftype = self._last_freq[0] or ftype
         field = (ftype, fname)
         if field == self._last_freq:
             return self._last_finfo
@@ -319,27 +342,15 @@ class StaticOutput(object):
         # We also should check "all" for particles, which can show up if you're
         # mixing deposition/gas fields with particle fields.
         if guessing_type:
-            for ftype in ("all", self.default_fluid_type):
+            to_guess = ["all", self.default_fluid_type] \
+                     + list(self.fluid_types) \
+                     + list(self.particle_types)
+            for ftype in to_guess:
                 if (ftype, fname) in self.field_info:
                     self._last_freq = (ftype, fname)
                     self._last_finfo = self.field_info[(ftype, fname)]
                     return self._last_finfo
         raise YTFieldNotFound((ftype, fname), self)
-
-    def add_particle_union(self, union):
-        # No string lookups here, we need an actual union.
-        f = self.particle_fields_by_type
-        fields = set_intersection([f[s] for s in union
-                                   if s in self.particle_types_raw])
-        self.particle_types += (union.name,)
-        self.particle_unions[union.name] = union
-        fields = [ (union.name, field) for field in fields]
-        self.h.field_list.extend(fields)
-        # Give ourselves a chance to add them here, first, then...
-        # ...if we can't find them, we set them up as defaults.
-        self.h._setup_particle_types([union.name])
-        self.h._setup_unknown_fields(fields, self.field_info,
-                                     skip_removal = True)
 
     def _setup_particle_type(self, ptype):
         mylog.debug("Don't know what to do with %s", ptype)
@@ -378,10 +389,6 @@ class StaticOutput(object):
             self.unit_registry.add("h", self.hubble_constant, dimensionless)
             # Comoving lengths: pc, AU, m... anything else?
             #self.unit_registry.add("pccm", ...)
-
-        # @todo: Can we remove this now?
-        for field in self.field_info.values():
-            field.unit_obj = self.get_unit_from_registry(field.units)
 
     def get_unit_from_registry(self, unit_str):
         """
