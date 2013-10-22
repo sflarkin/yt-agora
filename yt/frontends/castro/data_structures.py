@@ -18,7 +18,6 @@ import os
 import weakref
 import itertools
 from collections import defaultdict
-from string import strip, rstrip
 from stat import ST_CTIME
 
 import numpy as np
@@ -573,7 +572,8 @@ class CastroStaticOutput(StaticOutput):
                 continue
 
             try:
-                param, vals = map(strip, map(rstrip, line.split("=")))
+                param, vals = [i.strip() for i in
+                                (j.rstrip() for j in line.split("="))]
             except ValueError:
                 mylog.error("ValueError: '%s'", line)
 
@@ -630,10 +630,12 @@ class CastroStaticOutput(StaticOutput):
         lines = open(self.fparameter_filename).readlines()
         for line in lines:
             if line.count("=") == 1:
-                param, vals = map(strip, map(rstrip, line.split("=")))
+                param, vals = [i.strip() for i in
+                                (j.rstrip() for j in line.split("="))]
                 if vals.count("'") == 0 and vals.count("\"") == 0:
                     try:
-                        t = map(float, [a.replace('D','e').replace('d','e') for a in vals.split()]) # all are floating point.
+                        t = [float(a.replace('D','e').replace('d','e'))
+                                   for a in in vals.split()])
                     except ValueError:
                         print "Failed on line", line
                 else:

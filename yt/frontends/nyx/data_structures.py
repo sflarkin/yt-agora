@@ -18,7 +18,6 @@ import itertools
 import os
 import re
 from stat import ST_CTIME
-from string import strip, rstrip
 import weakref
 
 import numpy as np
@@ -566,7 +565,9 @@ class NyxStaticOutput(StaticOutput):
                 continue
 
             try:
-                param, val_string = map(strip, line.split("="))
+                param, vals = [strip(i) for i in
+                                (j.rstrip() for j in line.split("="))]
+                #param, val_string = map(strip, line.split("="))
             except ValueError:
                 mylog.error("ValueError: '%s'", line)
 
@@ -645,7 +646,9 @@ class NyxStaticOutput(StaticOutput):
         lines = open(self.fparameter_file_path).readlines()
         for line in lines:
             if line.count("=") == 1:
-                nyx_param, val_string = map(strip, line.split("="))
+                param, vals = [strip(i) for i in
+                                (j.rstrip() for j in line.split("="))]
+                #nyx_param, val_string = map(strip, line.split("="))
 
                 # Check if we care about this param. If so, translate it.
                 if nyx_to_enzo_dict.has_key(nyx_param):

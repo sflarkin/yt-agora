@@ -13,7 +13,6 @@ Python-based grid handler, not to be confused with the SWIG-handler
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
-import exceptions
 import pdb
 import weakref
 
@@ -120,7 +119,7 @@ class AMRGridPatch(object):
             # First we check the validator
             try:
                 self.pf.field_info[field].check_available(self)
-            except NeedsGridType, ngt_exception:
+            except NeedsGridType as ngt_exception:
                 # This is only going to be raised if n_gz > 0
                 n_gz = ngt_exception.ghost_zones
                 f_gz = ngt_exception.fields
@@ -134,7 +133,7 @@ class AMRGridPatch(object):
             else:
                 self[field] = self.pf.field_info[field](self)
         else: # Can't find the field, try as it might
-            raise exceptions.KeyError(field)
+            raise KeyError(field)
 
     def has_key(self, key):
         return (key in self.field_data)
