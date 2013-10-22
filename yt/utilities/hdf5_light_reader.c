@@ -17,6 +17,7 @@
 #include <math.h>
 #include <signal.h>
 #include <ctype.h>
+#include <string.h>
 #include "hdf5.h"
 
 #include "numpy/ndarrayobject.h"
@@ -27,10 +28,46 @@
 
 #define MIN(a,b) ((a) <= (b) ? (a) : (b))
 
+#if PY_MAJOR_VERSION >= 3
+#define PYINTCONV_AS   PyLong_AsLong
+#define PYINTCONV_FROM PyLong_FromLong
+#else
+#define PYINTCONV_AS   PyInt_AsLong
+#define PYINTCONV_FROM PyInt_FromLong
+#endif
+
 static PyObject *_hdf5ReadError;
 herr_t iterate_dataset(hid_t loc_id, const char *name, void *nodelist);
 
 /* Structures for particle reading */
+
+PyObject *char_to_obj(char *cs) {
+  /* This returns a *new* reference */
+  PyObject *tr;
+#if PY_MAJOR_VERSION >= 3
+  tr = PyBytes_FromString(cs);
+#else
+  tr = PyString_FromString(cs);
+#endif
+  return tr;
+}
+
+char *obj_to_char(PyObject *po) {
+  /* This returns a *new* reference */
+  char *tr, *nc;
+  PyObject *as = NULL;
+#if PY_MAJOR_VERSION >= 3
+  /* Reference count increased for 'as' */
+  as = PyUnicode_AsASCIIString(po);
+  nc = PyBytes_AsString(as);
+#else
+  nc = PyString_AsString(po);
+#endif
+  tr = strdup(nc);
+  if (as != NULL) Py_XDECREF(as);
+  /* In both cases, tr needs to be de-allocated */
+  return tr;
+}
 
 typedef struct particle_validation_ {
     int total_valid_particles;
@@ -547,7 +584,7 @@ herr_t iterate_dataset(hid_t loc_id, const char *name, void *nodelist)
 
     H5Gget_objinfo(loc_id, name, 0, &statbuf);
     if (statbuf.type == H5G_DATASET) {
-        node_name = PyString_FromString(name);
+        node_name = char_to_obj(name);
         if (node_name == NULL) {return -1;}
         if (PyList_Append((PyObject *)nodelist, node_name)) {return -1;}
     }
@@ -606,7 +643,7 @@ Py_ReadMultipleGrids(PyObject *obj, PyObject *args)
 
     for(i = 0; i < num_grids; i++) {
         grid_key = PyList_GetItem(grid_ids, i);
-        id = PyInt_AsLong(grid_key);
+        id = PYINTCONV_AS(grid_key);
         sprintf(grid_node_name, "Grid%08li", id);
         grid_data = PyDict_New(); // New reference
         PyDict_SetItem(grids_dict, grid_key, grid_data);
@@ -620,11 +657,12 @@ Py_ReadMultipleGrids(PyObject *obj, PyObject *args)
         for(n = 0; n < num_sets; n++) {
             // This points to the in-place internal char*
             oset_name = PyList_GetItem(set_names, n);
-            set_name = PyString_AsString(oset_name);
+            set_name = obj_to_char(oset_name);
             cur_data = get_array_from_nodename(set_name, grid_node);
             if (cur_data != NULL) {
                 PyDict_SetItem(grid_data, oset_name, (PyObject *) cur_data);
             }
+            free(set_name);
             Py_XDECREF(cur_data); // still one left
         }
         // We just want the one reference from the grids_dict value set
@@ -843,13 +881,14 @@ Py_ReadParticles(PyObject *obj, PyObject *args)
 
     for (ig = 0; ig < ngrids ; ig++) {
       temp = PyList_GetItem(filename_list, ig);
-      filename = PyString_AsString(temp);
+      filename = obj_to_char(temp);
       temp = PyList_GetItem(grid_ids, ig);
-      id = PyInt_AsLong(temp);
+      id = PYINTCONV_AS(temp);
       //fprintf(stderr, "Counting from grid %d\n", id);
       if(run_validators(&pv, filename, id, 0, packed, ig) < 0) {
         goto _fail;
       }
+      free(filename);
     }
     if(pv.file_id >= 0) {
       H5Fclose(pv.file_id);
@@ -867,7 +906,7 @@ Py_ReadParticles(PyObject *obj, PyObject *args)
     for (ifield = 0; ifield < nfields; ifield++) {
         pv.return_values[ifield] = NULL;
         pv.npy_types[ifield] = -999;
-        pv.field_names[ifield] = PyString_AsString(PyList_GetItem(field_list, ifield));
+        pv.field_names[ifield] = obj_to_char(PyList_GetItem(field_list, ifield));
     }
 
     /* Now we know how many particles we want. */
@@ -877,13 +916,14 @@ Py_ReadParticles(PyObject *obj, PyObject *args)
          in a stride, without checking particle positions,
          if it's fully-enclosed. */
       temp = PyList_GetItem(filename_list, ig);
-      filename = PyString_AsString(temp);
+      filename = obj_to_char(temp);
       temp = PyList_GetItem(grid_ids, ig);
-      id = PyInt_AsLong(temp);
+      id = PYINTCONV_AS(temp);
       //fprintf(stderr, "Reading from grid %d\n", id);
       if(run_validators(&pv, filename, id, 1, packed, ig) < 0) {
         goto _fail;
       }
+      free(filename);
     }
     if(pv.file_id >= 0) {H5Fclose(pv.file_id); pv.file_id = -1;}
 
@@ -897,6 +937,9 @@ Py_ReadParticles(PyObject *obj, PyObject *args)
     /* Now we do some finalization */
     free(pv.mask);
     free(pv.field_names);
+    for (ifield = 0; ifield < nfields; ifield++) {
+        free(pv.field_names[ifield]);
+     }
     free(pv.return_values); /* Has to happen after packing our return value */
     free(pv.npy_types);
     for (i = 0; i<3; i++) {
@@ -954,7 +997,7 @@ int setup_validator_region(particle_validation *data, PyObject *InputData)
         rv->right_edge[i] = *(npy_float64*) PyArray_GETPTR1(right_edge, i);
     }
 
-    rv->periodic = PyInt_AsLong(operiodic);
+    rv->periodic = PYINTCONV_AS(operiodic);
     if(rv->periodic == 1) {
       PyArrayObject *domain_left_edge = (PyArrayObject *) PyTuple_GetItem(InputData, 3);
       PyArrayObject *domain_right_edge = (PyArrayObject *) PyTuple_GetItem(InputData, 4);
@@ -996,7 +1039,7 @@ int setup_validator_sphere(particle_validation *data, PyObject *InputData)
 
     sv->radius = (npy_float64) PyFloat_AsDouble(radius);
 
-    sv->periodic = PyInt_AsLong(operiodic);
+    sv->periodic = PYINTCONV_AS(operiodic);
     if(sv->periodic == 1) {
       PyArrayObject *domain_left_edge = (PyArrayObject *) PyTuple_GetItem(InputData, 3);
       PyArrayObject *domain_right_edge = (PyArrayObject *) PyTuple_GetItem(InputData, 4);
@@ -1835,12 +1878,37 @@ static PyMethodDef _hdf5LightReaderMethods[] = {
 __declspec(dllexport)
 #endif
 
-void inithdf5_light_reader(void)
+
+PyMODINIT_FUNC
+#if PY_MAJOR_VERSION >= 3
+#define _RETVAL m
+PyInit_hdf5_light_reader(void)
+#else
+#define _RETVAL 
+inithdf5_light_reader(void)
+#endif
 {
     PyObject *m, *d;
+#if PY_MAJOR_VERSION >= 3
+    static struct PyModuleDef moduledef = {
+        PyModuleDef_HEAD_INIT,
+        "hdf5_light_reader",           /* m_name */
+        "Light HDF5 reading.\n",
+                             /* m_doc */
+        -1,                  /* m_size */
+        _hdf5LightReaderMethods,    /* m_methods */
+        NULL,                /* m_reload */
+        NULL,                /* m_traverse */
+        NULL,                /* m_clear */
+        NULL,                /* m_free */
+    };
+    m = PyModule_Create(&moduledef); 
+#else
     m = Py_InitModule("hdf5_light_reader", _hdf5LightReaderMethods);
+#endif
     d = PyModule_GetDict(m);
     _hdf5ReadError = PyErr_NewException("hdf5_light_reader.ReadingError", NULL, NULL);
     PyDict_SetItemString(d, "ReadingError", _hdf5ReadError);
     import_array();
+    return _RETVAL;
 }

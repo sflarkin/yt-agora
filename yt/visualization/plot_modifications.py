@@ -28,7 +28,7 @@ from yt.utilities.physical_constants import \
     sec_per_day, sec_per_hr
 from yt.visualization.image_writer import apply_colormap
 
-import _MPL
+from . import _MPL
 
 callback_registry = {}
 

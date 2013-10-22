@@ -18,7 +18,6 @@ data_object_registry = {}
 import numpy as np
 import math
 import weakref
-import exceptions
 import itertools
 import shelve
 import cStringIO
@@ -340,7 +339,7 @@ class AMRData(object):
             # First we check the validator
             try:
                 self.pf.field_info[field].check_available(self)
-            except NeedsGridType, ngt_exception:
+            except NeedsGridType as ngt_exception:
                 # We leave this to be implementation-specific
                 self._generate_field_in_grids(field, ngt_exception.ghost_zones)
                 return False
