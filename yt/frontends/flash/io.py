@@ -1,27 +1,17 @@
 """
 FLASH-specific IO functions
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: UCSD
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2010-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import numpy as np
 import h5py
@@ -34,11 +24,9 @@ class IOHandlerFLASH(BaseIOHandler):
     _particle_reader = False
     _data_style = "flash_hdf5"
 
-    def __init__(self, pf, *args, **kwargs):
-        self._num_per_stride = kwargs.pop("num_per_stride", 1000000)
-        BaseIOHandler.__init__(self, *args, **kwargs)
+    def __init__(self, pf):
+        super(IOHandlerFLASH, self).__init__(pf)
         # Now we cache the particle fields
-        self.pf = pf
         self._handle = pf._handle
         self._particle_handle = pf._particle_handle
         

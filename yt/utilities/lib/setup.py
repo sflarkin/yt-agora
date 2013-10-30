@@ -10,52 +10,46 @@ def check_for_png():
     return check_for_dependencies("PNG_DIR", "png.cfg", "png.h", "png")
 
 
-def check_for_freetype():
-    return check_for_dependencies(
-        "FTYPE_DIR", "freetype.cfg", "ft2build.h", "freetype"
-    )
-
-
 def check_for_openmp():
     # Create a temporary directory
     tmpdir = tempfile.mkdtemp()
     curdir = os.getcwd()
-    os.chdir(tmpdir)
+    exit_code = 1
 
-    # Get compiler invocation
-    compiler = os.getenv('CC', 'cc')
+    try:
+        os.chdir(tmpdir)
 
-    # Attempt to compile a test script.
-    # See http://openmp.org/wp/openmp-compilers/
-    filename = r'test.c'
-    file = open(filename,'w', 0)
-    file.write(
-        "#include <omp.h>\n"
-        "#include <stdio.h>\n"
-        "int main() {\n"
-        "#pragma omp parallel\n"
-        "printf(\"Hello from thread %d, nthreads %d\\n\", omp_get_thread_num(), omp_get_num_threads());\n"
-        "}"
-        )
-    with open(os.devnull, 'w') as fnull:
-        exit_code = subprocess.call([compiler, '-fopenmp', filename],
-                                    stdout=fnull, stderr=fnull)
+        # Get compiler invocation
+        compiler = os.getenv('CC', 'cc')
 
-    # Clean up
-    file.close()
-    os.chdir(curdir)
-    shutil.rmtree(tmpdir)
+        # Attempt to compile a test script.
+        # See http://openmp.org/wp/openmp-compilers/
+        filename = r'test.c'
+        file = open(filename,'w', 0)
+        file.write(
+            "#include <omp.h>\n"
+            "#include <stdio.h>\n"
+            "int main() {\n"
+            "#pragma omp parallel\n"
+            "printf(\"Hello from thread %d, nthreads %d\\n\", omp_get_thread_num(), omp_get_num_threads());\n"
+            "}"
+            )
+        with open(os.devnull, 'w') as fnull:
+            exit_code = subprocess.call([compiler, '-fopenmp', filename],
+                                        stdout=fnull, stderr=fnull)
 
-    if exit_code == 0:
-        return True
-    else:
-        return False
+        # Clean up
+        file.close()
+    finally:
+        os.chdir(curdir)
+        shutil.rmtree(tmpdir)
+
+    return exit_code == 0
 
 def configuration(parent_package='',top_path=None):
     from numpy.distutils.misc_util import Configuration
     config = Configuration('lib',parent_package,top_path)
     png_inc, png_lib = check_for_png()
-    freetype_inc, freetype_lib = check_for_freetype()
     if check_for_openmp() == True:
         omp_args = ['-fopenmp']
     else:
@@ -79,12 +73,6 @@ def configuration(parent_package='',top_path=None):
                 ["yt/utilities/lib/fortran_reader.pyx"],
                 include_dirs=["yt/utilities/lib/"],
                 libraries=["m"], depends=["yt/utilities/lib/fp_utils.pxd"])
-    config.add_extension("freetype_writer", 
-                ["yt/utilities/lib/freetype_writer.pyx"],
-                include_dirs = [freetype_inc,os.path.join(freetype_inc, "freetype2"),
-                                "yt/utilities/lib"],
-                library_dirs = [freetype_lib], libraries=["freetype"],
-                depends=["yt/utilities/lib/freetype_includes.h"])
     config.add_extension("geometry_utils", 
                 ["yt/utilities/lib/geometry_utils.pyx"],
                extra_compile_args=omp_args,
@@ -130,8 +118,7 @@ def configuration(parent_package='',top_path=None):
     config.add_extension("VolumeIntegrator", 
                ["yt/utilities/lib/VolumeIntegrator.pyx",
                 "yt/utilities/lib/FixedInterpolator.c",
-                "yt/utilities/lib/kdtree.c"] +
-                 glob.glob("yt/utilities/lib/healpix_*.c"), 
+                "yt/utilities/lib/kdtree.c"],
                include_dirs=["yt/utilities/lib/"],
                libraries=["m"], 
                depends = ["yt/utilities/lib/VolumeIntegrator.pyx",
@@ -139,20 +126,19 @@ def configuration(parent_package='',top_path=None):
                           "yt/utilities/lib/healpix_interface.pxd",
                           "yt/utilities/lib/endian_swap.h",
                           "yt/utilities/lib/FixedInterpolator.h",
-                          "yt/utilities/lib/healpix_vectors.h",
-                          "yt/utilities/lib/kdtree.h",
-                          "yt/utilities/lib/healpix_ang2pix_nest.c",
-                          "yt/utilities/lib/healpix_mk_pix2xy.c",
-                          "yt/utilities/lib/healpix_mk_xy2pix.c",
-                          "yt/utilities/lib/healpix_pix2ang_nest.c",
-                          "yt/utilities/lib/healpix_pix2vec_nest.c",
-                          "yt/utilities/lib/healpix_vec2pix_nest.c"]
+                          "yt/utilities/lib/kdtree.h"],
+          )
+    config.add_extension("mesh_utilities",
+              ["yt/utilities/lib/mesh_utilities.pyx"],
+               include_dirs=["yt/utilities/lib/"],
+               libraries=["m"], 
+               depends = ["yt/utilities/lib/fp_utils.pxd",
+                          ],
           )
     config.add_extension("grid_traversal", 
                ["yt/utilities/lib/grid_traversal.pyx",
                 "yt/utilities/lib/FixedInterpolator.c",
-                "yt/utilities/lib/kdtree.c"] +
-                 glob.glob("yt/utilities/lib/healpix_*.c"), 
+                "yt/utilities/lib/kdtree.c"],
                include_dirs=["yt/utilities/lib/"],
                libraries=["m"], 
                extra_compile_args=omp_args,
