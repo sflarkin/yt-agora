@@ -1,42 +1,34 @@
 """
 The data-file handling functions
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2007-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from collections import defaultdict
 
 import yt.utilities.lib as au
+from yt.funcs import mylog
 import exceptions
 import cPickle
 import os
 import h5py
+import numpy as np
 
 _axis_ids = {0:2,1:1,2:0}
 
 io_registry = {}
 
 class BaseIOHandler(object):
-
+    _vector_fields = ()
     _data_style = None
     _particle_reader = False
 
@@ -46,8 +38,11 @@ class BaseIOHandler(object):
             if hasattr(cls, "_data_style"):
                 io_registry[cls._data_style] = cls
 
-    def __init__(self):
+    def __init__(self, pf):
         self.queue = defaultdict(dict)
+        self.pf = pf
+        self._last_selector_id = None
+        self._last_selector_counts = None
 
     # We need a function for reading a list of sets
     # and a function for *popping* from a queue all the appropriate sets
@@ -117,6 +112,70 @@ class BaseIOHandler(object):
     @property
     def _read_exception(self):
         return None
+
+    def _read_chunk_data(self, chunk, fields):
+        return None
+
+    def _read_particle_selection(self, chunks, selector, fields):
+        rv = {}
+        ind = {}
+        # We first need a set of masks for each particle type
+        ptf = defaultdict(list)        # ON-DISK TO READ
+        psize = defaultdict(lambda: 0) # COUNT PTYPES ON DISK
+        fsize = defaultdict(lambda: 0) # COUNT RV
+        field_maps = defaultdict(list) # ptypes -> fields
+        chunks = list(chunks)
+        unions = self.pf.particle_unions
+        # What we need is a mapping from particle types to return types
+        for field in fields:
+            ftype, fname = field
+            fsize[field] = 0
+            # We should add a check for p.fparticle_unions or something here
+            if ftype in unions:
+                for pt in unions[ftype]:
+                    ptf[pt].append(fname)
+                    field_maps[pt, fname].append(field)
+            else:
+                ptf[ftype].append(fname)
+                field_maps[field].append(field)
+        # We can't hash chunks, but otherwise this is a neat idea.
+        if 0 and hash(selector) == self._last_selector_id and \
+           all(ptype in self._last_selector_counts for ptype in ptf):
+            psize.update(self._last_selector_counts)
+        else:
+            # Now we have our full listing.
+            # Here, ptype_map means which particles contribute to a given type.
+            # And ptf is the actual fields from disk to read.
+            for ptype, (x, y, z) in self._read_particle_coords(chunks, ptf):
+                psize[ptype] += selector.count_points(x, y, z)
+            self._last_selector_counts = dict(**psize)
+            self._last_selector_id = hash(selector)
+        # Now we allocate
+        # ptf, remember, is our mapping of what we want to read
+        #for ptype in ptf:
+        for field in fields:
+            if field[0] in unions:
+                for pt in unions[field[0]]:
+                    fsize[field] += psize[pt]
+            else:
+                fsize[field] += psize[field[0]]
+        for field in fields:
+            if field[1] in self._vector_fields:
+                shape = (fsize[field], 3)
+            else:
+                shape = (fsize[field], )
+            rv[field] = np.empty(shape, dtype="float64")
+            ind[field] = 0
+        # Now we read.
+        for field_r, vals in self._read_particle_fields(chunks, ptf, selector):
+            # Note that we now need to check the mappings
+            for field_f in field_maps[field_r]:
+                my_ind = ind[field_f]
+                #mylog.debug("Filling %s from %s to %s with %s",
+                #    field_f, my_ind, my_ind+vals.shape[0], field_r)
+                rv[field_f][my_ind:my_ind + vals.shape[0],...] = vals
+                ind[field_f] += vals.shape[0]
+        return rv
 
 class IOHandlerExtracted(BaseIOHandler):
 
