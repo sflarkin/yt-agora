@@ -152,7 +152,8 @@ class FixedResolutionBuffer(object):
         info['units'] = finfo.get_units()
         info['xlim'] = self.bounds[:2]
         info['ylim'] = self.bounds[2:]
-        info['length_to_cm'] = self.data_source.pf['cm']
+        info['length_unit'] = self.data_source.pf.length_unit
+        info['length_to_cm'] = info['length_unit'].in_cgs().to_ndarray()
         info['projected_units'] = finfo.get_projected_units()
         info['center'] = self.data_source.center
         
@@ -445,9 +446,9 @@ class OffAxisProjectionFixedResolutionBuffer(FixedResolutionBuffer):
         mylog.info("Making a fixed resolutuion buffer of (%s) %d by %d" % \
             (item, self.buff_size[0], self.buff_size[1]))
         ds = self.data_source
-        width = (self.bounds[1] - self.bounds[0],
-                 self.bounds[3] - self.bounds[2],
-                 self.bounds[5] - self.bounds[4])
+        width = YTArray((self.bounds[1] - self.bounds[0],
+                         self.bounds[3] - self.bounds[2],
+                         self.bounds[5] - self.bounds[4]))
         buff = off_axis_projection(ds.pf, ds.center, ds.normal_vector,
                                    width, ds.resolution, item,
                                    weight=ds.weight_field, volume=ds.volume,

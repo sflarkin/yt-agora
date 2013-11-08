@@ -35,6 +35,7 @@ from yt.utilities.linear_interpolators import TrilinearFieldInterpolator
 from yt.utilities.minimal_representation import \
     MinimalSliceData
 from yt.utilities.math_utils import get_rotation_matrix
+from yt.data_objects.yt_array import YTQuantity
 
 class YTOrthoRayBase(YTSelectionContainer1D):
     """
@@ -123,8 +124,10 @@ class YTRayBase(YTSelectionContainer1D):
     _container_fields = ("t", "dts")
     def __init__(self, start_point, end_point, pf=None, field_parameters=None):
         super(YTRayBase, self).__init__(pf, field_parameters)
-        self.start_point = np.array(start_point, dtype='float64')
-        self.end_point = np.array(end_point, dtype='float64')
+        self.start_point = \
+          YTArray(np.array(start_point, dtype='float64'), 'code_length')
+        self.end_point = \
+          YTArray(np.array(end_point, dtype='float64'), 'code_length')
         self.vec = self.end_point - self.start_point
         #self.vec /= np.sqrt(np.dot(self.vec, self.vec))
         self._set_center(self.start_point)
@@ -212,8 +215,7 @@ class YTSliceBase(YTSelectionContainer2D):
     def hub_upload(self):
         self._mrep.upload()
 
-    def to_pw(self, fields=None, center='c', width=None, axes_unit=None, 
-               origin='center-window'):
+    def to_pw(self, fields=None, center='c', width=None, origin='center-window'):
         r"""Create a :class:`~yt.visualization.plot_window.PWViewerMPL` from this
         object.
 
@@ -221,7 +223,7 @@ class YTSliceBase(YTSelectionContainer2D):
         object, which can then be moved around, zoomed, and on and on.  All
         behavior of the plot window is relegated to that routine.
         """
-        pw = self._get_pw(fields, center, width, origin, axes_unit, 'Slice')
+        pw = self._get_pw(fields, center, width, origin, 'Slice')
         return pw
 
 class YTCuttingPlaneBase(YTSelectionContainer2D):
@@ -339,12 +341,12 @@ class YTCuttingPlaneBase(YTSelectionContainer2D):
         """
         if iterable(width):
             w, u = width
-            width = w/self.pf[u]
+            width = YTArray(w, input_units = u, registry = self.pf.unit_registry)
         if height is None:
             height = width
         elif iterable(height):
             h, u = height
-            height = h/self.pf[u]
+            height = YTArray(w, input_units = u, registry = self.pf.unit_registry)
         if not iterable(resolution):
             resolution = (resolution, resolution)
         from yt.visualization.fixed_resolution import ObliqueFixedResolutionBuffer
@@ -405,18 +407,15 @@ class YTCuttingPlaneBase(YTSelectionContainer2D):
                        if k not in self._key_fields]
         from yt.visualization.plot_window import \
             GetObliqueWindowParameters, PWViewerMPL
-        from yt.visualization.fixed_resolution import \
-            ObliqueFixedResolutionBuffer
-        (bounds, center_rot, units) = \
-          GetObliqueWindowParameters(normal, center, width, self.pf)
-        if axes_unit is None and units != ('1', '1'):
-            axes_units = units
+        from yt.visualization.fixed_resolution import ObliqueFixedResolutionBuffer
+        (bounds, center_rot) = GetObliqueWindowParameters(normal, center, width, self.pf)
         pw = PWViewerMPL(
-            self, bounds, fields=self.fields, origin='center-window',
+            self, bounds, fields=self.fields, origin='center-window', 
             periodic=False, oblique=True,
-            frb_generator=ObliqueFixedResolutionBuffer,
+            frb_generator=ObliqueFixedResolutionBuffer, 
             plot_type='OffAxisSlice')
-        pw.set_axes_unit(axes_unit)
+        if axes_unit is not None:
+            pw.set_axes_unit(axes_unit)
         return pw
 
     def to_frb(self, width, resolution, height=None):
@@ -458,13 +457,13 @@ class YTCuttingPlaneBase(YTSelectionContainer2D):
         >>> write_image(np.log10(frb["Density"]), 'density_1pc.png')
         """
         if iterable(width):
-            w, u = width
-            width = w/self.pf[u]
+            assert_valid_width_tuple(width)
+            width = YTQuantity(width[0], width[1])
         if height is None:
             height = width
         elif iterable(height):
-            h, u = height
-            height = h/self.pf[u]
+            assert_valid_width_tuple(height)
+            height = YTQuantity(height[0], height[1])
         if not iterable(resolution):
             resolution = (resolution, resolution)
         from yt.visualization.fixed_resolution import ObliqueFixedResolutionBuffer
@@ -485,8 +484,8 @@ class YTDiskBase(YTSelectionContainer3D):
         YTSelectionContainer3D.__init__(self, center, fields, pf, **kwargs)
         self._norm_vec = np.array(normal)/np.sqrt(np.dot(normal,normal))
         self.set_field_parameter("normal", self._norm_vec)
-        self._height = fix_length(height, self.pf)
-        self._radius = fix_length(radius, self.pf)
+        self._height = fix_length(height)
+        self._radius = fix_length(radius)
         self._d = -1.0 * np.dot(self._norm_vec, self.center)
 
 
@@ -513,8 +512,14 @@ class YTRegionBase(YTSelectionContainer3D):
     def __init__(self, center, left_edge, right_edge, fields = None,
                  pf = None, **kwargs):
         YTSelectionContainer3D.__init__(self, center, fields, pf, **kwargs)
-        self.left_edge = left_edge
-        self.right_edge = right_edge
+        if not isinstance(left_edge, YTArray):
+            self.left_edge = YTArray(left_edge, 'code_length')
+        else:
+            self.left_edge = left_edge
+        if not isinstance(right_edge, YTArray):
+            self.right_edge = YTArray(right_edge, 'code_length')
+        else:
+            self.right_edge = right_edge
 
 class YTDataCollectionBase(YTSelectionContainer3D):
     """
@@ -551,7 +556,7 @@ class YTSphereBase(YTSelectionContainer3D):
     def __init__(self, center, radius, pf = None, field_parameters = None):
         super(YTSphereBase, self).__init__(center, pf, field_parameters)
         # Unpack the radius, if necessary
-        radius = fix_length(radius, self.pf)
+        radius = fix_length(radius)
         if radius < self.hierarchy.get_smallest_dx():
             raise YTSphereTooSmall(pf, radius, self.hierarchy.get_smallest_dx())
         self.set_field_parameter('radius',radius)
@@ -591,17 +596,16 @@ class YTEllipsoidBase(YTSelectionContainer3D):
     _con_args = ('center', '_A', '_B', '_C', '_e0', '_tilt')
     def __init__(self, center, A, B, C, e0, tilt, fields=None,
                  pf=None, field_parameters = None):
-        YTSelectionContainer3D.__init__(self, np.array(center), pf,
-                                        field_parameters)
+        YTSelectionContainer3D.__init__(self, center, pf, field_parameters)
         # make sure the magnitudes of semi-major axes are in order
         if A<B or B<C:
             raise YTEllipsoidOrdering(pf, A, B, C)
         # make sure the smallest side is not smaller than dx
-        if C < self.hierarchy.get_smallest_dx():
-            raise YTSphereTooSmall(pf, C, self.hierarchy.get_smallest_dx())
-        self._A = A
-        self._B = B
-        self._C = C
+        self._A = YTArray(A, 'code_length')
+        self._B = YTArray(B, 'code_length')
+        self._C = YTArray(C, 'code_length')
+        if self._C < self.hierarchy.get_smallest_dx():
+            raise YTSphereTooSmall(pf, self._C, self.hierarchy.get_smallest_dx())
         self._e0 = e0 = e0 / (e0**2.0).sum()**0.5
         self._tilt = tilt
         

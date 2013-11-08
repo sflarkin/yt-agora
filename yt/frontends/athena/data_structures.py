@@ -28,7 +28,7 @@ from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
 
 from .fields import AthenaFieldInfo, KnownAthenaFields
-from yt.data_objects.field_info_container import \
+from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc
 
 def _get_convert(fname):
@@ -113,7 +113,7 @@ class AthenaHierarchy(GridGeometryHandler):
 
         self._fhandle.close()
 
-    def _detect_fields(self):
+    def _detect_output_fields(self):
         field_map = {}
         f = open(self.hierarchy_filename,'rb')
         line = f.readline()
@@ -425,7 +425,10 @@ class AthenaStaticOutput(StaticOutput):
             self.periodicity = ensure_tuple(self.specified_parameters['periodicity'])
         else:
             self.periodicity = (True,)*self.dimensionality
-
+        if 'gamma' in self.specified_parameters:
+            self.gamma = float(self.specified_parameters['gamma'])
+        else:
+            self.gamma = 5./3.
         dname = self.parameter_filename
         gridlistread = glob.glob('id*/%s-id*%s' % (dname[4:-9],dname[-9:] ))
         if 'id0' in dname :

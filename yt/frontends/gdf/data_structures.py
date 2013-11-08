@@ -34,7 +34,6 @@ from .fields import GDFFieldInfo, KnownGDFFields
 from yt.data_objects.field_info_container import \
     NullFunc
 
-
 def _get_convert(fname):
     def _conv(data):
         return 1.0  # data.convert(fname) FIXME
@@ -92,10 +91,15 @@ class GDFHierarchy(GridGeometryHandler):
     def _initialize_data_storage(self):
         pass
 
+<<<<<<< local
+    def _detect_output_fields(self):
+        self.field_list = self._fhandle['field_types'].keys()
+=======
     def _detect_fields(self):
         h5f = h5py.File(self.hierarchy_filename, 'r')
         self.field_list = h5f['field_types'].keys()
         h5f.close()
+>>>>>>> other
 
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
@@ -224,10 +228,16 @@ class GDFStaticOutput(StaticOutput):
                         just_one(current_field.attrs['field_units'])
             else:
                 current_fields_unit = ""
+<<<<<<< local
+            self._fieldinfo_known.add_field(field_name, function=NullFunc, take_log=False,
+                   units=current_fields_unit,
+                   convert_function=_get_convert(field_name))
+=======
             self._fieldinfo_known.add_field(
                 field_name, function=NullFunc, take_log=False,
                 units=current_fields_unit, projected_units="",
                 convert_function=_get_convert(field_name))
+>>>>>>> other
 
         h5f.close()
 
@@ -265,9 +275,15 @@ class GDFStaticOutput(StaticOutput):
         else:
             self.current_redshift = self.omega_lambda = self.omega_matter = \
                 self.hubble_constant = self.cosmological_simulation = 0.0
+<<<<<<< local
+        self.gamma = 5./3.
+        self.parameters['Time'] = 1.0 # Hardcode time conversion for now.
+        self.parameters["HydroMethod"] = 0 # Hardcode for now until field staggering is supported.
+=======
         self.parameters['Time'] = 1.0  # Hardcode time conversion for now.
         # Hardcode for now until field staggering is supported.
         self.parameters["HydroMethod"] = 0
+>>>>>>> other
         self._handle.close()
         del self._handle
 

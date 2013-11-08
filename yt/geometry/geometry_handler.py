@@ -28,7 +28,7 @@ from yt.funcs import *
 from yt.config import ytcfg
 from yt.data_objects.data_containers import \
     data_object_registry
-from yt.data_objects.field_info_container import \
+from yt.fields.field_info_container import \
     NullFunc
 from yt.fields.particle_fields import \
     particle_deposition_functions, \
@@ -49,6 +49,7 @@ class GeometryHandler(ParallelAnalysisInterface):
     _unsupported_objects = ()
 
     def __init__(self, pf, data_style):
+        self.filtered_particle_types = []
         ParallelAnalysisInterface.__init__(self)
         self.parameter_file = weakref.proxy(pf)
         self.pf = self.parameter_file
@@ -68,44 +69,14 @@ class GeometryHandler(ParallelAnalysisInterface):
         mylog.debug("Initializing data grid data IO")
         self._setup_data_io()
 
+        # Note that this falls under the "geometry" object since it's
+        # potentially quite expensive, and should be done with the indexing.
         mylog.debug("Detecting fields.")
-        self._detect_fields()
-
-        mylog.debug("Detecting fields in backup.")
-        self._detect_fields_backup()
-
-        mylog.debug("Adding unknown detected fields")
-        self._setup_unknown_fields()
-
-        mylog.debug("Setting up derived fields")
-        self._setup_derived_fields()
-
-        mylog.debug("Setting up particle fields")
-        self._setup_particle_types()
-
-        mylog.debug("Checking derived fields again")
-        self._derived_fields_add(self._check_later)
+        self._detect_output_fields()
 
     def __del__(self):
         if self._data_file is not None:
             self._data_file.close()
-
-    def _detect_fields_backup(self):
-        # grab fields from backup file as well, if present
-        return
-        try:
-            backup_filename = self.parameter_file.backup_filename
-            f = h5py.File(backup_filename, 'r')
-            g = f["data"]
-            grid = self.grids[0] # simply check one of the grids
-            grid_group = g["grid_%010i" % (grid.id - grid._id_offset)]
-            for field_name in grid_group:
-                if field_name != 'particles':
-                    self.field_list.append(field_name)
-        except KeyError:
-            return
-        except IOError:
-            return
 
     def _initialize_state_variables(self):
         self._parallel_locking = False
@@ -113,7 +84,6 @@ class GeometryHandler(ParallelAnalysisInterface):
         self._data_mode = None
         self._max_locations = {}
         self.num_grids = None
-        self._check_later = []
 
     def _setup_classes(self, dd):
         # Called by subclass
@@ -153,7 +123,7 @@ class GeometryHandler(ParallelAnalysisInterface):
                 df += self.pf._setup_particle_type(ptype)
             # Now we have a bunch of new fields to add!
             # This is where the dependencies get calculated.
-            self._derived_fields_add(df)
+            #self._derived_fields_add(df)
             return
         fi = self.pf.field_info
         def _get_conv(cf):
@@ -180,52 +150,9 @@ class GeometryHandler(ParallelAnalysisInterface):
             df += self.pf._setup_particle_type(ptype)
         self._derived_fields_add(df)
 
-    def _setup_unknown_fields(self, list_of_fields = None, field_info = None,
-                              skip_removal = False):
-        field_info = field_info or self.pf._fieldinfo_known
-        field_list = list_of_fields or self.field_list
-        dftype = self.parameter_file.default_fluid_type
-        mylog.debug("Checking %s", field_list)
-        for field in field_list:
-            # By allowing a backup, we don't mandate that it's found in our
-            # current field info.  This means we'll instead simply override
-            # it.
-            if not skip_removal:
-                ff = self.parameter_file.field_info.pop(field, None)
-            if field not in field_info:
-                # Now we check if it's a gas field or what ...
-                if isinstance(field, tuple) and field[0] in self.pf.particle_types:
-                    particle_type = True
-                else:
-                    particle_type = False
-                if isinstance(field, tuple) and not particle_type and \
-                   field[1] in field_info:
-                    mylog.debug("Adding known field %s to list of fields", field)
-                    self.pf.field_info[field] = field_info[field[1]]
-                    continue
-                rootloginfo("Adding unknown field %s to list of fields", field)
-                cf = None
-                if self.parameter_file.has_key(field):
-                    def external_wrapper(f):
-                        def _convert_function(data):
-                            return data.convert(f)
-                        return _convert_function
-                    cf = external_wrapper(field)
-                # Note that we call add_field on the field_info directly.  This
-                # will allow the same field detection mechanism to work for 1D, 2D
-                # and 3D fields.
-                self.pf.field_info.add_field(
-                        field, NullFunc, particle_type = particle_type,
-                        convert_function=cf, take_log=False, units=r"Unknown")
-            else:
-                mylog.debug("Adding known field %s to list of fields", field)
-                self.parameter_file.field_info[field] = field_info[field]
-
-    def _setup_derived_fields(self):
+    def _setup_field_registry(self):
         self.derived_field_list = []
         self.filtered_particle_types = []
-        fc = self._derived_fields_to_check()
-        self._derived_fields_add(fc)
 
     def _setup_filtered_type(self, filter):
         if not filter.available(self.derived_field_list):
@@ -247,69 +174,6 @@ class GeometryHandler(ParallelAnalysisInterface):
             self.filtered_particle_types.append(filter.name)
             self._setup_particle_types([filter.name])
         return available
-
-    def _derived_fields_to_check(self):
-        fi = self.parameter_file.field_info
-        # First we construct our list of fields to check
-        fields_to_check = []
-        for field in fi:
-            finfo = fi[field]
-            # Explicitly defined
-            if isinstance(field, tuple):
-                fields_to_check.append(field)
-                continue
-            # This one is implicity defined for all particle or fluid types.
-            # So we check each.
-            if not finfo.particle_type:
-                fields_to_check.append(field)
-                continue
-            # We do a special case for 'all' later
-            new_fields = []
-            for pt in self.parameter_file.particle_types:
-                new_fi = copy.copy(finfo)
-                new_fi.name = (pt, new_fi.name)
-                fi[new_fi.name] = new_fi
-                new_fields.append(new_fi.name)
-            fields_to_check += new_fields
-        return fields_to_check
-
-    def _derived_fields_add(self, fields_to_check = None):
-        if fields_to_check is None:
-            fields_to_check = []
-        fi = self.parameter_file.field_info
-        self._check_later = []
-        for field in fields_to_check:
-            try:
-                fd = fi[field].get_dependencies(pf = self.parameter_file)
-            except Exception as e:
-                self._check_later.append(field)
-                if type(e) != YTFieldNotFound:
-                    mylog.debug("Raises %s during field %s detection.",
-                                str(type(e)), field)
-                continue
-            missing = False
-            # This next bit checks that we can't somehow generate everything.
-            # We also manually update the 'requested' attribute
-            requested = []
-            for f in fd.requested:
-                if (field[0], f) in self.field_list:
-                    requested.append( (field[0], f) )
-                elif f in self.field_list:
-                    requested.append( f )
-                elif isinstance(f, tuple) and f[1] in self.field_list:
-                    requested.append( f )
-                else:
-                    missing = True
-                    break
-            if not missing: self.derived_field_list.append(field)
-            fd.requested = set(requested)
-            self.parameter_file.field_dependencies[field] = fd
-            if not fi[field].particle_type and not isinstance(field, tuple):
-                # Manually hardcode to 'gas'
-                self.parameter_file.field_dependencies["gas", field] = fd
-        for field in self.field_list:
-            if field not in self.derived_field_list:
-                self.derived_field_list.append(field)
 
     # Now all the object related stuff
     def all_data(self, find_max=False):
@@ -496,9 +360,6 @@ class GeometryHandler(ParallelAnalysisInterface):
         for field in fields_to_read:
             ftype, fname = field
             finfo = self.pf._get_field_info(*field)
-            conv_factor = finfo._convert_function(self)
-            np.multiply(fields_to_return[field], conv_factor,
-                        fields_to_return[field])
         return fields_to_return, fields_to_generate
 
     def _read_fluid_fields(self, fields, dobj, chunk = None):
@@ -514,16 +375,10 @@ class GeometryHandler(ParallelAnalysisInterface):
         if len(fields_to_read) == 0:
             return {}, fields_to_generate
         fields_to_return = self.io._read_fluid_selection(
-            self._chunk_io(dobj, cache = False),
+            self._chunk_io(dobj),
             selector,
             fields_to_read,
             chunk_size)
-        for field in fields_to_read:
-            ftype, fname = field
-            finfo = self.pf._get_field_info(*field)
-            conv_factor = finfo._convert_function(self)
-            np.multiply(fields_to_return[field], conv_factor,
-                        fields_to_return[field])
         #mylog.debug("Don't know how to read %s", fields_to_generate)
         return fields_to_return, fields_to_generate
 
@@ -583,6 +438,7 @@ class YTDataChunk(object):
     @cached_property
     def fcoords(self):
         ci = np.empty((self.data_size, 3), dtype='float64')
+        ci = YTArray(ci, input_units = "code_length")
         if self.data_size == 0: return ci
         ind = 0
         for obj in self.objs:
@@ -607,6 +463,7 @@ class YTDataChunk(object):
     @cached_property
     def fwidth(self):
         ci = np.empty((self.data_size, 3), dtype='float64')
+        ci = YTArray(ci, input_units = "code_length")
         if self.data_size == 0: return ci
         ind = 0
         for obj in self.objs:

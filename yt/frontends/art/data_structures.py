@@ -32,7 +32,7 @@ from yt.data_objects.octree_subset import \
     OctreeSubset
 from yt.geometry.oct_container import \
     ARTOctreeContainer
-from yt.data_objects.field_info_container import \
+from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc
 from .fields import \
     ARTFieldInfo, add_art_field, KnownARTFields
@@ -60,7 +60,7 @@ from yt.utilities.lib import \
     get_box_grids_level
 from yt.utilities.io_handler import \
     io_registry
-from yt.data_objects.field_info_container import \
+from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc
 from yt.utilities.physical_constants import \
     mass_hydrogen_cgs, sec_per_Gyr
@@ -109,7 +109,7 @@ class ARTGeometryHandler(OctreeGeometryHandler):
         domain._read_amr_level(self.oct_handler)
         self.oct_handler.finalize()
 
-    def _detect_fields(self):
+    def _detect_output_fields(self):
         self.particle_field_list = particle_fields
         self.field_list = [("gas", f) for f in fluid_fields]
         self.field_list += set(particle_fields + particle_star_fields \
@@ -411,6 +411,7 @@ class ARTStaticOutput(StaticOutput):
             self.max_level = self.force_max_level
         self.hubble_time = 1.0/(self.hubble_constant*100/3.08568025e19)
         self.current_time = b2t(self.parameters['t']) * sec_per_Gyr
+        self.gamma = self.parameters["gamma"]
         mylog.info("Max level is %02i", self.max_level)
 
     @classmethod
