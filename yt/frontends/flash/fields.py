@@ -25,7 +25,7 @@ from yt.data_objects.field_info_container import \
     ValidateProperty, \
     ValidateSpatial, \
     ValidateGridType
-import yt.data_objects.universal_fields
+import yt.fields.universal_fields
 from yt.utilities.physical_constants import \
     kboltz, mh, Na
 KnownFLASHFields = FieldInfoContainer()
@@ -354,6 +354,7 @@ add_field('edens', function=_nele, take_log=True, units=r"\rm{cm}^{-3}")
 def _nion(field, data):
     return data['dens'] * data['sumy'] * Na
 add_field('nion', function=_nion, take_log=True, units=r"\rm{cm}^{-3}")
+
 
 def _abar(field, data):
     try:
