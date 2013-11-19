@@ -18,11 +18,14 @@ import stat
 import numpy as np
 import weakref
 
+from yt.config import ytcfg
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
     AMRGridPatch
-from yt.data_objects.hierarchy import \
-    AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+    GridGeometryHandler
+from yt.geometry.geometry_handler import \
+    YTDataChunk
 from yt.data_objects.static_output import \
     StaticOutput
 from yt.utilities.definitions import \
@@ -47,7 +50,7 @@ class FLASHGrid(AMRGridPatch):
     def __repr__(self):
         return "FLASHGrid_%04i (%s)" % (self.id, self.ActiveDimensions)
 
-class FLASHHierarchy(AMRHierarchy):
+class FLASHHierarchy(GridGeometryHandler):
 
     grid = FLASHGrid
     
@@ -60,9 +63,8 @@ class FLASHHierarchy(AMRHierarchy):
         self.directory = os.path.dirname(self.hierarchy_filename)
         self._handle = pf._handle
         self._particle_handle = pf._particle_handle
-        
         self.float_type = np.float64
-        AMRHierarchy.__init__(self,pf,data_style)
+        GridGeometryHandler.__init__(self,pf,data_style)
 
     def _initialize_data_storage(self):
         pass
@@ -76,7 +78,7 @@ class FLASHHierarchy(AMRHierarchy):
     
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
     def _count_grids(self):
@@ -174,7 +176,7 @@ class FLASHHierarchy(AMRHierarchy):
         self.max_level = self.grid_levels.max()
 
     def _setup_derived_fields(self):
-        AMRHierarchy._setup_derived_fields(self)
+        super(FLASHHierarchy, self)._setup_derived_fields()
         [self.parameter_file.conversion_factors[field] 
          for field in self.field_list]
         for field in self.field_list:
@@ -193,9 +195,6 @@ class FLASHHierarchy(AMRHierarchy):
                 # Translating an already-converted field
                 self.parameter_file.conversion_factors[field] = 1.0 
                 
-    def _setup_data_io(self):
-        self.io = io_registry[self.data_style](self.parameter_file)
-
 class FLASHStaticOutput(StaticOutput):
     _hierarchy_class = FLASHHierarchy
     _fieldinfo_fallback = FLASHFieldInfo
@@ -402,6 +401,7 @@ class FLASHStaticOutput(StaticOutput):
         
         self.dimensionality = dimensionality
 
+        self.geometry = self.parameters["geometry"]
         # Determine base grid parameters
         if 'lrefine_min' in self.parameters.keys() : # PARAMESH
             nblockx = self.parameters["nblockx"]
@@ -427,6 +427,12 @@ class FLASHStaticOutput(StaticOutput):
                     mylog.warning('Identical domain left edge and right edges '
                                   'along dummy dimension (%i), attempting to read anyway' % d)
                     self.domain_right_edge[d] = self.domain_left_edge[d]+1.0
+        if self.dimensionality < 3 and self.geometry == "cylindrical":
+            mylog.warning("Extending theta dimension to 2PI + left edge.")
+            self.domain_right_edge[2] = self.domain_left_edge[2] + 2*np.pi
+        elif self.dimensionality < 3 and self.geometry == "polar":
+            mylog.warning("Extending theta dimension to 2PI + left edge.")
+            self.domain_right_edge[1] = self.domain_left_edge[1] + 2*np.pi
         self.domain_dimensions = \
             np.array([nblockx*nxb,nblocky*nyb,nblockz*nzb])
 

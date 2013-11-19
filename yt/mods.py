@@ -54,7 +54,7 @@ from yt.data_objects.api import \
     ValidateParameter, ValidateDataField, ValidateProperty, \
     ValidateSpatial, ValidateGridType, \
     TimeSeriesData, AnalysisTask, analysis_task, \
-    ImageArray
+    ImageArray, particle_filter
 
 from yt.data_objects.derived_quantities import \
     add_quantity, quantity_info
@@ -64,20 +64,40 @@ from yt.frontends.enzo.api import \
     EnzoSimulation, EnzoFieldInfo, \
     add_enzo_field, add_enzo_1d_field, add_enzo_2d_field
 
-from yt.frontends.nyx.api import \
-    NyxStaticOutput, NyxFieldInfo, add_nyx_field
+# Boxlib stuff
+from yt.frontends.boxlib.api import \
+    BoxlibStaticOutput, NyxStaticOutput
 
-from yt.frontends.orion.api import \
+# Orion stuff
+from yt.frontends.boxlib.api import \
     OrionStaticOutput, OrionFieldInfo, add_orion_field
+
+# Maestro stuff
+from yt.frontends.boxlib.api import \
+    MaestroStaticOutput
+
+# Castro stuff
+from yt.frontends.boxlib.api import \
+    CastroStaticOutput
 
 from yt.frontends.flash.api import \
     FLASHStaticOutput, FLASHFieldInfo, add_flash_field
+
+from yt.frontends.artio.api import \
+    ARTIOStaticOutput, ARTIOFieldInfo, add_artio_field
+
+from yt.frontends.ramses.api import \
+    RAMSESStaticOutput, RAMSESFieldInfo, add_ramses_field
 
 from yt.frontends.chombo.api import \
     ChomboStaticOutput, ChomboFieldInfo, add_chombo_field
 
 from yt.frontends.gdf.api import \
     GDFStaticOutput, GDFFieldInfo, add_gdf_field
+
+from yt.frontends.moab.api import \
+    MoabHex8StaticOutput, MoabFieldInfo, add_moab_field, \
+    PyneMoabHex8StaticOutput
 
 from yt.frontends.athena.api import \
     AthenaStaticOutput, AthenaFieldInfo, add_athena_field
@@ -87,7 +107,14 @@ from yt.frontends.pluto.api import \
 
 from yt.frontends.stream.api import \
     StreamStaticOutput, StreamFieldInfo, add_stream_field, \
-    StreamHandler, load_uniform_grid, load_amr_grids
+    StreamHandler, load_uniform_grid, load_amr_grids, \
+    load_particles, load_hexahedral_mesh, load_octree
+
+from yt.frontends.sph.api import \
+    OWLSStaticOutput, OWLSFieldInfo, add_owls_field, \
+    GadgetStaticOutput, GadgetHDF5StaticOutput, \
+    GadgetFieldInfo, add_gadget_field, \
+    TipsyStaticOutput, TipsyFieldInfo, add_tipsy_field
 
 from yt.analysis_modules.list_modules import \
     get_available_modules, amods
@@ -104,9 +131,10 @@ from yt.utilities.definitions import \
 from yt.visualization.api import \
     PlotCollection, PlotCollectionInteractive, \
     get_multi_plot, FixedResolutionBuffer, ObliqueFixedResolutionBuffer, \
-    callback_registry, write_bitmap, write_image, annotate_image, \
+    callback_registry, write_bitmap, write_image, \
     apply_colormap, scale_image, write_projection, write_fits, \
-    SlicePlot, OffAxisSlicePlot, ProjectionPlot, OffAxisProjectionPlot, \
+    SlicePlot, AxisAlignedSlicePlot, OffAxisSlicePlot, \
+    ProjectionPlot, OffAxisProjectionPlot, \
     show_colormaps
 
 from yt.visualization.volume_rendering.api import \

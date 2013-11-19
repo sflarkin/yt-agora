@@ -7,7 +7,7 @@ http://www.chluba.de/SZpack/
 For details on the computations involved please refer to the following references:
 
 Chluba, Nagai, Sazonov, Nelson, MNRAS, 2012, arXiv:1205.5778
-Chluba, Switzer, Nagai, Nelson, MNRAS, 2012, arXiv:1211.3206 
+Chluba, Switzer, Nagai, Nelson, MNRAS, 2012, arXiv:1211.3206
 """
 
 #-----------------------------------------------------------------------------
@@ -31,7 +31,7 @@ from yt.visualization.plot_window import StandardCenter
 import numpy as np
 
 I0 = 2*(kboltz*Tcmb)**3/((hcgs*clight)**2)*1.0e17
-        
+
 try:
     import SZpack
 except ImportError:
@@ -79,7 +79,7 @@ class SZProjection(object):
     >>> szprj = SZProjection(pf, freqs, high_order=True)
     """
     def __init__(self, pf, freqs, mue=1.143, high_order=False):
-            
+
         self.pf = pf
         self.num_freqs = len(freqs)
         self.high_order = high_order
@@ -100,7 +100,7 @@ class SZProjection(object):
         for f, field in zip(self.freqs, self.freq_fields):
             self.units[field] = r"$\mathrm{MJy\ sr^{-1}}$"
             self.display_names[field] = r"$\mathrm{\Delta{I}_{%d\ GHz}}$" % (int(f))
-            
+
     def on_axis(self, axis, center="c", width=(1, "unitary"), nx=800, source=None):
         r""" Make an on-axis projection of the SZ signal.
 
@@ -132,12 +132,16 @@ class SZProjection(object):
 
         def _beta_par(field, data):
             axis = data.get_field_parameter("axis")
+            # Load these, even though we will only use one
+            for ax in 'xyz':
+                data['%s-velocity' % ax]
             vpar = data["Density"]*data["%s-velocity" % (vlist[axis])]
             return vpar/clight
-        add_field("BetaPar", function=_beta_par)    
+        add_field("BetaPar", function=_beta_par)
+        self.pf.h._derived_fields_add(["BetaPar"])
 
-        proj = self.pf.h.proj(axis, "Density", center=ctr, source=source)
-        proj.set_field_parameter("axis", axis)
+        proj = self.pf.h.proj("Density", axis, center=ctr, data_source=source)
+        proj.data_source.set_field_parameter("axis", axis)
         frb = proj.to_frb(width, nx)
         dens = frb["Density"]
         Te = frb["TeSZ"]/dens
@@ -145,7 +149,7 @@ class SZProjection(object):
         omega1 = frb["TSquared"]/dens/(Te*Te) - 1.
         bperp2 = np.zeros((nx,nx))
         sigma1 = np.zeros((nx,nx))
-        kappa1 = np.zeros((nx,nx))                                    
+        kappa1 = np.zeros((nx,nx))
         if self.high_order:
             bperp2 = frb["BetaPerpSquared"]/dens
             sigma1 = frb["TBetaPar"]/dens/Te - bpar
@@ -157,16 +161,16 @@ class SZProjection(object):
         self.dx = (frb.bounds[1]-frb.bounds[0])/nx
         self.dy = (frb.bounds[3]-frb.bounds[2])/ny
         self.nx = nx
-        
+
         self._compute_intensity(tau, Te, bpar, omega1, sigma1, kappa1, bperp2)
-                                                                                                                
+
     def off_axis(self, L, center="c", width=(1, "unitary"), nx=800, source=None):
         r""" Make an off-axis projection of the SZ signal.
-        
+
         Parameters
         ----------
         L : array_like
-            The normal vector of the projection. 
+            The normal vector of the projection.
         center : array_like or string, optional
             The center of the projection.
         width : float or tuple
@@ -176,7 +180,7 @@ class SZProjection(object):
         source : yt.data_objects.api.AMRData, optional
             If specified, this will be the data source used for selecting regions to project.
             Currently unsupported in yt 2.x.
-                    
+
         Examples
         --------
         >>> L = np.array([0.5, 1.0, 0.75])
@@ -196,13 +200,14 @@ class SZProjection(object):
         if source is not None:
             mylog.error("Source argument is not currently supported for off-axis S-Z projections.")
             raise NotImplementedError
-                
+
         def _beta_par(field, data):
             vpar = data["Density"]*(data["x-velocity"]*L[0]+
                                     data["y-velocity"]*L[1]+
                                     data["z-velocity"]*L[2])
             return vpar/clight
         add_field("BetaPar", function=_beta_par)
+        self.pf.h._derived_fields_add(["BetaPar"])
 
         dens    = off_axis_projection(self.pf, ctr, L, w, nx, "Density")
         Te      = off_axis_projection(self.pf, ctr, L, w, nx, "TeSZ")/dens
@@ -233,18 +238,18 @@ class SZProjection(object):
         # Bad hack, but we get NaNs if we don't do something like this
         small_beta = np.abs(bpar) < 1.0e-20
         bpar[small_beta] = 1.0e-20
-                                                                   
+
         comm = communication_system.communicators[-1]
 
         nx, ny = self.nx,self.nx
         signal = np.zeros((self.num_freqs,nx,ny))
         xo = np.zeros((self.num_freqs))
-        
+
         k = int(0)
 
         start_i = comm.rank*nx/comm.size
         end_i = (comm.rank+1)*nx/comm.size
-                        
+
         pbar = get_pbar("Computing SZ signal.", nx*nx)
 
         for i in xrange(start_i, end_i):
@@ -258,9 +263,9 @@ class SZProjection(object):
                 k += 1
 
         signal = comm.mpi_allreduce(signal)
-        
+
         pbar.finish()
-                
+
         for i, field in enumerate(self.freq_fields):
             self.data[field] = ImageArray(I0*self.xinit[i]**3*signal[i,:,:])
         self.data["Tau"] = ImageArray(tau)
@@ -270,15 +275,15 @@ class SZProjection(object):
     def write_fits(self, filename, clobber=True):
         r""" Export images to a FITS file. Writes the SZ distortion in all
         specified frequencies as well as the mass-weighted temperature and the
-        optical depth. Distance units are in kpc.  
-        
+        optical depth. Distance units are in kpc.
+
         Parameters
         ----------
         filename : string
             The name of the FITS file to be written. 
         clobber : boolean, optional
             If the file already exists, do we overwrite?
-                    
+
         Examples
         --------
         >>> szprj.write_fits("SZbullet.fits", clobber=False)
@@ -298,13 +303,13 @@ class SZProjection(object):
                   log_fields=None):
         r""" Export images to PNG files. Writes the SZ distortion in all
         specified frequencies as well as the mass-weighted temperature and the
-        optical depth. Distance units are in kpc. 
-        
+        optical depth. Distance units are in kpc.
+
         Parameters
         ----------
         filename_prefix : string
             The prefix of the image filenames.
-                
+
         Examples
         --------
         >>> szprj.write_png("SZsloshing")
@@ -369,22 +374,22 @@ class SZProjection(object):
     @parallel_root_only
     def write_hdf5(self, filename):
         r"""Export the set of S-Z fields to a set of HDF5 datasets.
-        
+
         Parameters
         ----------
         filename : string
             This file will be opened in "write" mode.
-        
+
         Examples
         --------
-        >>> szprj.write_hdf5("SZsloshing.h5")                        
+        >>> szprj.write_hdf5("SZsloshing.h5")
         """
         import h5py
         f = h5py.File(filename, "w")
         for field, data in self.items():
             f.create_dataset(field,data=data)
         f.close()
-   
+
     def keys(self):
         return self.data.keys()
 
@@ -393,7 +398,7 @@ class SZProjection(object):
 
     def values(self):
         return self.data.values()
-    
+
     def has_key(self, key):
         return key in self.data.keys()
 

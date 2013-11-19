@@ -253,26 +253,34 @@ def temp_cwd(cwd):
     yield
     os.chdir(oldcwd)
 
-def can_run_pf(pf_fn):
+def can_run_pf(pf_fn, file_check = False):
     if isinstance(pf_fn, StaticOutput):
         return AnswerTestingTest.result_storage is not None
     path = ytcfg.get("yt", "test_data_dir")
     if not os.path.isdir(path):
         return False
     with temp_cwd(path):
+        if file_check:
+            return os.path.isfile(pf_fn) and \
+                AnswerTestingTest.result_storage is not None
         try:
             load(pf_fn)
         except YTOutputNotIdentified:
             return False
     return AnswerTestingTest.result_storage is not None
 
-def data_dir_load(pf_fn):
+def data_dir_load(pf_fn, cls = None, args = None, kwargs = None):
     path = ytcfg.get("yt", "test_data_dir")
     if isinstance(pf_fn, StaticOutput): return pf_fn
     if not os.path.isdir(path):
         return False
     with temp_cwd(path):
-        pf = load(pf_fn)
+        if cls is None:
+            pf = load(pf_fn)
+        else:
+            args = args or ()
+            kwargs = kwargs or {}
+            pf = cls(pf_fn, *args, **kwargs)
         pf.h
         return pf
 
@@ -313,15 +321,6 @@ class AnswerTestingTest(object):
 
     def compare(self, new_result, old_result):
         raise RuntimeError
-
-    def create_obj(self, pf, obj_type):
-        # obj_type should be tuple of
-        #  ( obj_name, ( args ) )
-        if obj_type is None:
-            return pf.h.all_data()
-        cls = getattr(pf.h, obj_type[0])
-        obj = cls(*obj_type[1])
-        return obj
 
     def create_plot(self, pf, plot_type, plot_field, plot_axis, plot_kwargs = None):
         # plot_type should be a string
@@ -371,21 +370,21 @@ class FieldValuesTest(AnswerTestingTest):
     _attrs = ("field", )
 
     def __init__(self, pf_fn, field, obj_type = None,
-                 decimals = None):
+                 decimals = 10):
         super(FieldValuesTest, self).__init__(pf_fn)
         self.obj_type = obj_type
         self.field = field
         self.decimals = decimals
 
     def run(self):
-        obj = self.create_obj(self.pf, self.obj_type)
+        obj = create_obj(self.pf, self.obj_type)
         avg = obj.quantities["WeightedAverageQuantity"](self.field,
                              weight="Ones")
         (mi, ma), = obj.quantities["Extrema"](self.field)
         return np.array([avg, mi, ma])
 
     def compare(self, new_result, old_result):
-        err_msg = "Field values for %s not equal." % self.field
+        err_msg = "Field values for %s not equal." % (self.field,)
         if self.decimals is None:
             assert_equal(new_result, old_result,
                          err_msg=err_msg, verbose=True)
@@ -405,7 +404,7 @@ class AllFieldValuesTest(AnswerTestingTest):
         self.decimals = decimals
 
     def run(self):
-        obj = self.create_obj(self.pf, self.obj_type)
+        obj = create_obj(self.pf, self.obj_type)
         return obj[self.field]
 
     def compare(self, new_result, old_result):
@@ -432,11 +431,11 @@ class ProjectionValuesTest(AnswerTestingTest):
 
     def run(self):
         if self.obj_type is not None:
-            obj = self.create_obj(self.pf, self.obj_type)
+            obj = create_obj(self.pf, self.obj_type)
         else:
             obj = None
         if self.pf.domain_dimensions[self.axis] == 1: return None
-        proj = self.pf.h.proj(self.axis, self.field,
+        proj = self.pf.h.proj(self.field, self.axis,
                               weight_field=self.weight_field,
                               data_source = obj)
         return proj.field_data
@@ -473,18 +472,19 @@ class PixelizedProjectionValuesTest(AnswerTestingTest):
 
     def run(self):
         if self.obj_type is not None:
-            obj = self.create_obj(self.pf, self.obj_type)
+            obj = create_obj(self.pf, self.obj_type)
         else:
             obj = None
-        proj = self.pf.h.proj(self.axis, self.field,
+        proj = self.pf.h.proj(self.field, self.axis, 
                               weight_field=self.weight_field,
                               data_source = obj)
         frb = proj.to_frb((1.0, 'unitary'), 256)
         frb[self.field]
         frb[self.weight_field]
         d = frb.data
-        d.update( dict( (("%s_sum" % f, proj[f].sum(dtype="float64"))
-                         for f in proj.field_data.keys()) ) )
+        for f in proj.field_data:
+            # Sometimes f will be a tuple.
+            d["%s_sum" % (f,)] = proj.field_data[f].sum(dtype="float64")
         return d
 
     def compare(self, new_result, old_result):
@@ -615,7 +615,7 @@ class PlotWindowAttributeTest(AnswerTestingTest):
 
     def compare(self, new_result, old_result):
         compare_image_lists(new_result, old_result, self.decimals)
-        
+
 class GenericArrayTest(AnswerTestingTest):
     _type_name = "GenericArray"
     _attrs = ('array_func_name','args','kwargs')
@@ -679,14 +679,15 @@ class GenericImageTest(AnswerTestingTest):
     def compare(self, new_result, old_result):
         compare_image_lists(new_result, old_result, self.decimals)
         
-def requires_pf(pf_fn, big_data = False):
+
+def requires_pf(pf_fn, big_data = False, file_check = False):
     def ffalse(func):
         return lambda: None
     def ftrue(func):
         return func
     if run_big_data == False and big_data == True:
         return ffalse
-    elif not can_run_pf(pf_fn):
+    elif not can_run_pf(pf_fn, file_check):
         return ffalse
     else:
         return ftrue
@@ -720,6 +721,15 @@ def big_patch_amr(pf_fn, fields):
                     yield PixelizedProjectionValuesTest(
                         pf_fn, axis, field, weight_field,
                         ds)
+
+def create_obj(pf, obj_type):
+    # obj_type should be tuple of
+    #  ( obj_name, ( args ) )
+    if obj_type is None:
+        return pf.h.all_data()
+    cls = getattr(pf.h, obj_type[0])
+    obj = cls(*obj_type[1])
+    return obj
 
 class AssertWrapper(object):
     """

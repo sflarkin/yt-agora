@@ -16,7 +16,7 @@
 
 DEST_SUFFIX="yt-`uname -m`"
 DEST_DIR="`pwd`/${DEST_SUFFIX/ /}"   # Installation location
-BRANCH="yt" # This is the branch to which we will forcibly update.
+BRANCH="yt-3.0" # This is the branch to which we will forcibly update.
 
 if [ ${REINST_YT} ] && [ ${REINST_YT} -eq 1 ] && [ -n ${YT_DEST} ]
 then
@@ -809,9 +809,9 @@ then
         ( ${HG_EXEC} --debug clone https://bitbucket.org/yt_analysis/yt/ ./yt-hg 2>&1 ) 1>> ${LOG_FILE}
         # Now we update to the branch we're interested in.
         ( ${HG_EXEC} -R ${YT_DIR} up -C ${BRANCH} 2>&1 ) 1>> ${LOG_FILE}
-    elif [ -e yt-hg ]
+    elif [ -e yt-3.0-hg ] 
     then
-        YT_DIR="$PWD/yt-hg/"
+        YT_DIR="$PWD/yt-3.0-hg/"
     fi
     echo Setting YT_DIR=${YT_DIR}
 fi
@@ -948,9 +948,7 @@ cd $YT_DIR
 ( ${HG_EXEC} pull 2>1 && ${HG_EXEC} up -C 2>1 ${BRANCH} 2>&1 ) 1>> ${LOG_FILE}
 
 echo "Installing yt"
-echo $HDF5_DIR > hdf5.cfg
 [ $INST_PNG -eq 1 ] && echo $PNG_DIR > png.cfg
-[ $INST_FTYPE -eq 1 ] && echo $FTYPE_DIR > freetype.cfg
 ( export PATH=$DEST_DIR/bin:$PATH ; ${DEST_DIR}/bin/python2.7 setup.py develop 2>&1 ) 1>> ${LOG_FILE} || do_exit
 touch done
 cd $MY_PWD
