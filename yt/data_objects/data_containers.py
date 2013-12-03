@@ -26,6 +26,7 @@ from contextlib import contextmanager
 from yt.funcs import *
 
 from yt.data_objects.particle_io import particle_handler_registry
+from yt.data_objects.yt_array import YTArray
 from yt.utilities.lib import \
     march_cubes_grid, march_cubes_grid_flux
 from yt.utilities.definitions import  x_dict, y_dict
@@ -34,8 +35,10 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
 from yt.utilities.parameter_file_storage import \
     ParameterFileStore
 from .derived_quantities import DerivedQuantityCollection
-from .field_info_container import \
-    NeedsGridType, ValidateSpatial
+from yt.fields.field_exceptions import \
+    NeedsGridType
+from yt.fields.derived_field import \
+    ValidateSpatial
 import yt.geometry.selection_routines
 
 def force_array(item, shape):
@@ -49,7 +52,7 @@ def force_array(item, shape):
             return np.zeros(shape, dtype='bool')
 
 def restore_field_information_state(func):
-    """ 
+    """
     A decorator that takes a function with the API of (self, grid, field)
     and ensures that after the function is called, the field_parameters will
     be returned to normal.
@@ -63,14 +66,14 @@ def restore_field_information_state(func):
     return save_state
 
 class YTFieldData(dict):
-    """ 
+    """
     A Container object for field data, instead of just having it be a dict.
     """
     pass
-        
+
 
 class YTDataContainer(object):
-    """ 
+    """
     Generic YTDataContainer container.  By itself, will attempt to
     generate field, read fields (method defined by derived classes)
     and deal with passing back and forth field parameters.
@@ -89,7 +92,7 @@ class YTDataContainer(object):
                 data_object_registry[cls._type_name] = cls
 
     def __init__(self, pf, field_parameters):
-        """ 
+        """
         Typically this is never called directly, but only due to inheritance.
         It associates a :class:`~yt.data_objects.api.StaticOutput` with the class,
         sets its initial set of fields, and the remainder of the arguments
@@ -111,25 +114,36 @@ class YTDataContainer(object):
 
     def _set_default_field_parameters(self):
         self.field_parameters = {}
-        self.set_field_parameter("center",np.zeros(3,dtype='float64'))
-        self.set_field_parameter("bulk_velocity",np.zeros(3,dtype='float64'))
-        self.set_field_parameter("normal",np.array([0,0,1],dtype='float64'))
+        self.set_field_parameter(
+            "center",YTArray(np.zeros(3,dtype='float64'),'cm'))
+        self.set_field_parameter(
+            "bulk_velocity",YTArray(np.zeros(3,dtype='float64'),'cm/s'))
+        self.set_field_parameter(
+            "normal",np.array([0,0,1],dtype='float64'))
+
+    def apply_units(self, arr, units):
+        return YTArray(arr, input_units = units,
+                       unit_registry = self.pf.unit_registry)
 
     def _set_center(self, center):
         if center is None:
-            pass
+            self.center = None
+            self.set_field_parameter('center', self.center)
+            return
         elif isinstance(center, (types.ListType, types.TupleType, np.ndarray)):
-            center = np.array(center)
+            center = YTArray(center, 'code_length',
+                             registry = self.pf.unit_registry)
         elif center in ("c", "center"):
             center = self.pf.domain_center
         elif center == ("max"): # is this dangerous for race conditions?
-            center = self.pf.h.find_max("Density")[1]
+            center = self.pf.h.find_max("density")[1]
         elif center.startswith("max_"):
             center = self.pf.h.find_max(center[4:])[1]
         else:
             center = np.array(center, dtype='float64')
-        self.center = center
-        self.set_field_parameter('center', center)
+        self.center = YTArray(center, 'code_length',
+                             registry = self.pf.unit_registry)
+        self.set_field_parameter('center', self.center)
 
     def get_field_parameter(self, name, default=None):
         """
@@ -176,21 +190,33 @@ class YTDataContainer(object):
     def keys(self):
         return self.field_data.keys()
 
+    def _reshape_vals(self, arr):
+        return arr
+
     def __getitem__(self, key):
         """
         Returns a single field.  Will add if necessary.
         """
-        f = self._determine_fields(key)[0]
+        f = self._determine_fields([key])[0]
         if f not in self.field_data and key not in self.field_data:
             if f in self._container_fields:
-                self.field_data[f] = self._generate_container_field(f)
+                self.field_data[f] = \
+                    YTArray(self._generate_container_field(f))
                 return self.field_data[f]
             else:
                 self.get_data(f)
+        # fi.units is the unit expression string. We depend on the registry
+        # hanging off the dataset to define this unit object.
         # Note that this is less succinct so that we can account for the case
         # when there are, for example, no elements in the object.
         rv = self.field_data.get(f, None)
-        if rv is None: rv = self.field_data[key]
+        if rv is None:
+            if isinstance(f, types.TupleType):
+                fi = self.pf._get_field_info(*f)
+            elif isinstance(f, types.StringType):
+                fi = self.pf._get_field_info("unknown", f)
+            rv = YTArray(self.field_data[key], fi.units,
+                         self.pf.unit_registry)
         return rv
 
     def __setitem__(self, key, val):
@@ -203,7 +229,7 @@ class YTDataContainer(object):
         """
         Deletes a field
         """
-        if key  not in self.field_data:
+        if key not in self.field_data:
             key = self._determine_fields(key)[0]
         del self.field_data[key]
 
@@ -399,7 +425,7 @@ class YTDataContainer(object):
                 else:
                     ftype = self._current_fluid_type
                     if (ftype, fname) not in self.pf.field_info:
-                        ftype = "gas"
+                        ftype = self.pf._last_freq[0]
             if finfo.particle_type and ftype not in self.pf.particle_types:
                 raise YTFieldTypeNotFound(ftype)
             elif not finfo.particle_type and ftype not in self.pf.fluid_types:
@@ -473,7 +499,7 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
             deps = [d for d in requested if d not in fields_to_get]
             fields_to_get += deps
         return fields_to_get
-    
+
     def get_data(self, fields=None):
         if self._current_chunk is None:
             self.hierarchy._identify_base_chunk(self)
@@ -515,11 +541,14 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
         elif self._locked == True:
             raise GenerationInProgress(fields)
         # At this point, we want to figure out *all* our dependencies.
-        fields_to_get = self._identify_dependencies(fields_to_get)
+        fields_to_get = self._identify_dependencies(fields_to_get,
+            self._spatial)
         # We now split up into readers for the types of fields
         fluids, particles = [], []
+        finfos = {}
         for ftype, fname in fields_to_get:
             finfo = self.pf._get_field_info(ftype, fname)
+            finfos[ftype, fname] = finfo
             if finfo.particle_type:
                 particles.append((ftype, fname))
             elif (ftype, fname) not in fluids:
@@ -529,11 +558,16 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
         # need to be generated.
         read_fluids, gen_fluids = self.hierarchy._read_fluid_fields(
                                         fluids, self, self._current_chunk)
-        self.field_data.update(read_fluids)
+        for f, v in read_fluids.items():
+            self.field_data[f] = YTArray(v, input_units = finfos[f].units,
+                                         registry = self.pf.unit_registry)
 
         read_particles, gen_particles = self.hierarchy._read_particle_fields(
                                         particles, self, self._current_chunk)
-        self.field_data.update(read_particles)
+        for f, v in read_particles.items():
+            self.field_data[f] = YTArray(v, input_units = finfos[f].units,
+                                         registry = self.pf.unit_registry)
+
         fields_to_generate += gen_fluids + gen_particles
         self._generate_fields(fields_to_generate)
 
@@ -550,8 +584,15 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
                 field = fields_to_generate[index % len(fields_to_generate)]
                 index += 1
                 if field in self.field_data: continue
+                fi = self.pf._get_field_info(*field)
                 try:
-                    self.field_data[field] = self._generate_field(field)
+                    fd = self._generate_field(field)
+                    if type(fd) == np.ndarray:
+                        fd = YTArray(fd, fi.units, self.pf.unit_registry)
+                    if fd is None:
+                        raise RuntimeError
+                    self.field_data[field] = fd
+                    fd.convert_to_units(fi.units)
                 except GenerationInProgress as gip:
                     for f in gip.fields:
                         if f not in fields_to_generate:
@@ -640,24 +681,21 @@ class YTSelectionContainer2D(YTSelectionContainer):
         super(YTSelectionContainer2D, self).__init__(
             pf, field_parameters)
         self.set_field_parameter("axis", axis)
-        
+
     def _convert_field_name(self, field):
         return field
 
-    def _get_pw(self, fields, center, width, origin, axes_unit, plot_type):
+    def _get_pw(self, fields, center, width, origin, plot_type):
         axis = self.axis
         self.fields = [k for k in self.field_data.keys()
                        if k not in self._key_fields]
         from yt.visualization.plot_window import \
             GetWindowParameters, PWViewerMPL
         from yt.visualization.fixed_resolution import FixedResolutionBuffer
-        (bounds, center, units) = GetWindowParameters(axis, center, width, self.pf)
-        if axes_unit is None and units != ('1', '1'):
-            axes_unit = units
+        (bounds, center) = GetWindowParameters(axis, center, width, self.pf)
         pw = PWViewerMPL(self, bounds, fields=list(self.fields), origin=origin,
-                         frb_generator=FixedResolutionBuffer,
+                         frb_generator=FixedResolutionBuffer, 
                          plot_type=plot_type)
-        pw.set_axes_unit(axes_unit)
         return pw
 
 
@@ -703,13 +741,13 @@ class YTSelectionContainer2D(YTSelectionContainer):
         >>> frb = proj.to_frb( (100.0, 'kpc'), 1024)
         >>> write_image(np.log10(frb["Density"]), 'density_100kpc.png')
         """
-        
+
         if (self.pf.geometry == "cylindrical" and self.axis == 1) or \
             (self.pf.geometry == "polar" and self.axis == 2):
             from yt.visualization.fixed_resolution import CylindricalFixedResolutionBuffer
             frb = CylindricalFixedResolutionBuffer(self, width, resolution)
             return frb
-        
+
         if center is None:
             center = self.get_field_parameter("center")
             if center is None:
@@ -717,12 +755,12 @@ class YTSelectionContainer2D(YTSelectionContainer):
                         + self.pf.domain_left_edge)/2.0
         if iterable(width):
             w, u = width
-            width = w/self.pf[u]
+            width = YTArray(w, input_units = u, registry = self.pf.unit_registry)
         if height is None:
             height = width
         elif iterable(height):
             h, u = height
-            height = h/self.pf[u]
+            height = YTArray(w, input_units = u, registry = self.pf.unit_registry)
         if not iterable(resolution):
             resolution = (resolution, resolution)
         from yt.visualization.fixed_resolution import FixedResolutionBuffer
@@ -754,9 +792,9 @@ class YTSelectionContainer3D(YTSelectionContainer):
     def cut_region(self, field_cuts):
         """
         Return an InLineExtractedRegion, where the grid cells are cut on the
-        fly with a set of field_cuts.  It is very useful for applying 
+        fly with a set of field_cuts.  It is very useful for applying
         conditions to the fields in your data object.
-        
+
         Examples
         --------
         To find the total mass of gas above 10^6 K in your volume:
@@ -790,7 +828,7 @@ class YTSelectionContainer3D(YTSelectionContainer):
         useful for calculating, for instance, total isocontour area, or
         visualizing in an external program (such as `MeshLab
         <http://meshlab.sf.net>`_.)
-        
+
         Parameters
         ----------
         field : string
@@ -904,7 +942,7 @@ class YTSelectionContainer3D(YTSelectionContainer):
 
         Additionally, the returned flux is defined as flux *into* the surface,
         not flux *out of* the surface.
-        
+
         Parameters
         ----------
         field : string
@@ -943,7 +981,7 @@ class YTSelectionContainer3D(YTSelectionContainer):
         >>> rho = dd.quantities["WeightedAverageQuantity"](
         ...     "Density", weight="CellMassMsun")
         >>> flux = dd.calculate_isocontour_flux("Density", rho,
-        ...     "x-velocity", "y-velocity", "z-velocity", "Metal_Density")
+        ...     "velocity_x", "velocity_y", "velocity_z", "Metal_Density")
         """
         flux = 0.0
         for g in self._get_grid_objs():
@@ -960,7 +998,7 @@ class YTSelectionContainer3D(YTSelectionContainer):
             ff = np.ones(vals.shape, dtype="float64")
         else:
             ff = grid.get_vertex_centered_data(fluxing_field)
-        xv, yv, zv = [grid.get_vertex_centered_data(f) for f in 
+        xv, yv, zv = [grid.get_vertex_centered_data(f) for f in
                      [field_x, field_y, field_z]]
         return march_cubes_grid_flux(value, vals, xv, yv, zv,
                     ff, mask, grid.LeftEdge, grid.dds)
@@ -1277,7 +1315,7 @@ class YTBooleanRegionBase(YTSelectionContainer3D):
         self._get_all_regions()
         self._make_overlaps()
         self._get_list_of_grids()
-    
+
     def _get_all_regions(self):
         # Before anything, we simply find out which regions are involved in all
         # of this process, uniquely.
@@ -1287,7 +1325,7 @@ class YTBooleanRegionBase(YTSelectionContainer3D):
             # So cut_masks don't get messed up.
             item._boolean_touched = True
         self._all_regions = np.unique(self._all_regions)
-    
+
     def _make_overlaps(self):
         # Using the processed cut_masks, we'll figure out what grids
         # are left in the hybrid region.
@@ -1321,7 +1359,7 @@ class YTBooleanRegionBase(YTSelectionContainer3D):
                     continue
             pbar.update(i)
         pbar.finish()
-    
+
     def __repr__(self):
         # We'll do this the slow way to be clear what's going on
         s = "%s (%s): " % (self.__class__.__name__, self.pf)
@@ -1334,7 +1372,7 @@ class YTBooleanRegionBase(YTSelectionContainer3D):
             if i < (len(self.regions) - 1): s += ", "
         s += "]"
         return s
-    
+
     def _is_fully_enclosed(self, grid):
         return (grid in self._all_overlap)
 
@@ -1345,8 +1383,8 @@ class YTBooleanRegionBase(YTSelectionContainer3D):
     def _get_cut_mask(self, grid, field=None):
         if self._is_fully_enclosed(grid):
             return True # We do not want child masking here
-        if not isinstance(grid, (FakeGridForParticles, GridChildMaskWrapper)) \
-                and grid.id in self._cut_masks:
+        if not isinstance(grid, (FakeGridForParticles,)) \
+             and grid.id in self._cut_masks:
             return self._cut_masks[grid.id]
         # If we get this far, we have to generate the cut_mask.
         return self._get_level_mask(self.regions, grid)

@@ -22,6 +22,8 @@ from numpy.testing import assert_array_equal, assert_almost_equal, \
     assert_approx_equal, assert_array_almost_equal, assert_equal, \
     assert_array_less, assert_string_equal, assert_array_almost_equal_nulp,\
     assert_allclose, assert_raises
+from yt.data_objects.yt_array import uconcatenate
+import yt.fields.api as field_api
 
 def assert_rel_equal(a1, a2, decimals, err_msg='', verbose=True):
     # We have nan checks in here because occasionally we have fields that get
@@ -137,8 +139,11 @@ def amrspace(extent, levels=7, cells=8):
 
     return left, right, level
 
-def fake_random_pf(ndims, peak_value = 1.0, fields = ("Density",),
-                   negative = False, nprocs = 1):
+def fake_random_pf(
+        ndims, peak_value = 1.0,
+        fields = ("density", "velocity_x", "velocity_y", "velocity_z"),
+        units = ('g/cm**3', 'cm/s', 'cm/s', 'cm/s'),
+        negative = False, nprocs = 1):
     from yt.data_objects.api import data_object_registry
     from yt.frontends.stream.api import load_uniform_grid
     if not iterable(ndims):
@@ -154,9 +159,14 @@ def fake_random_pf(ndims, peak_value = 1.0, fields = ("Density",),
             offsets.append(0.5)
         else:
             offsets.append(0.0)
-    data = dict((field, (np.random.random(ndims) - offset) * peak_value)
-                 for field,offset in zip(fields,offsets))
-    ug = load_uniform_grid(data, ndims, 1.0, nprocs = nprocs)
+    data = {}
+    for field, offset, u in zip(fields, offsets, units):
+        v = (np.random.random(ndims) - offset) * peak_value
+        if field[0] == "all":
+            data['number_of_particles'] = v.size
+            v = v.ravel()
+        data[field] = (v, u)
+    ug = load_uniform_grid(data, ndims, 1.0, nprocs=nprocs)
     return ug
 
 def expand_keywords(keywords, full=False):

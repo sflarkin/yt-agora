@@ -20,7 +20,7 @@ import numpy as np
 from yt.funcs import *
 
 from yt.config import ytcfg
-from yt.data_objects.field_info_container import \
+from yt.fields.field_info_container import \
     FieldDetector
 from yt.utilities.data_point_utilities import FindBindingEnergy
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
@@ -201,9 +201,9 @@ def _BulkVelocity(data):
     """
     This function returns the mass-weighted average velocity in the object.
     """
-    xv = (data["x-velocity"] * data["CellMassMsun"]).sum(dtype=np.float64)
-    yv = (data["y-velocity"] * data["CellMassMsun"]).sum(dtype=np.float64)
-    zv = (data["z-velocity"] * data["CellMassMsun"]).sum(dtype=np.float64)
+    xv = (data["velocity_x"] * data["CellMassMsun"]).sum(dtype=np.float64)
+    yv = (data["velocity_y"] * data["CellMassMsun"]).sum(dtype=np.float64)
+    zv = (data["velocity_z"] * data["CellMassMsun"]).sum(dtype=np.float64)
     w = data["CellMassMsun"].sum(dtype=np.float64)
     return xv, yv, zv, w
 def _combBulkVelocity(data, xv, yv, zv, w):
@@ -356,9 +356,9 @@ def _IsBound(data, truncate = True, include_thermal_energy = False,
     if data["CellMass"].size == 1: return [0.0]
 
     kinetic = 0.5 * (data["CellMass"] * 
-                     ((data["x-velocity"] - bv_x)**2 + 
-                      (data["y-velocity"] - bv_y)**2 +
-                      (data["z-velocity"] - bv_z)**2)).sum(dtype=np.float64)
+                     ((data["velocity_x"] - bv_x)**2 + 
+                      (data["velocity_y"] - bv_y)**2 +
+                      (data["velocity_z"] - bv_z)**2)).sum(dtype=np.float64)
 
     if (include_particles):
         mass_to_use = data["TotalMass"]

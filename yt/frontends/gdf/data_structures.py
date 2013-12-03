@@ -34,7 +34,6 @@ from .fields import GDFFieldInfo, KnownGDFFields
 from yt.data_objects.field_info_container import \
     NullFunc
 
-
 def _get_convert(fname):
     def _conv(data):
         return 1.0  # data.convert(fname) FIXME
@@ -226,8 +225,7 @@ class GDFStaticOutput(StaticOutput):
                 current_fields_unit = ""
             self._fieldinfo_known.add_field(
                 field_name, function=NullFunc, take_log=False,
-                units=current_fields_unit, projected_units="",
-                convert_function=_get_convert(field_name))
+                units=current_fields_unit, projected_units="")
 
         h5f.close()
 
