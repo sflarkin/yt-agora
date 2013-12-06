@@ -6,12 +6,22 @@ hdf5.cfg
 png.cfg
 rockstar.cfg
 yt_updater.log
+yt/frontends/artio/_artio_caller.c
 yt/analysis_modules/halo_finding/rockstar/rockstar_interface.c
 yt/frontends/ramses/_ramses_reader.cpp
+yt/frontends/sph/smoothing_kernel.c
+yt/geometry/fake_octree.c
+yt/geometry/oct_container.c
+yt/geometry/oct_visitors.c
+yt/geometry/particle_deposit.c
+yt/geometry/particle_oct_container.c
+yt/geometry/particle_smooth.c
+yt/geometry/selection_routines.c
 yt/utilities/amr_utils.c
 yt/utilities/kdtree/forthonf2c.h
 yt/utilities/libconfig_wrapper.c
 yt/utilities/spatial/ckdtree.c
+yt/utilities/lib/alt_ray_tracers.c
 yt/utilities/lib/amr_kdtools.c
 yt/utilities/lib/CICDeposit.c
 yt/utilities/lib/ContourFinding.c
@@ -22,6 +32,7 @@ yt/utilities/lib/freetype_writer.c
 yt/utilities/lib/geometry_utils.c
 yt/utilities/lib/Interpolators.c
 yt/utilities/lib/kdtree.c
+yt/utilities/lib/mesh_utilities.c
 yt/utilities/lib/misc_utilities.c
 yt/utilities/lib/Octree.c
 yt/utilities/lib/png_writer.c
@@ -38,4 +49,5 @@ syntax: glob
 *.pyc
 .*.swp
 *.so
+.idea/*
 tests/results/*

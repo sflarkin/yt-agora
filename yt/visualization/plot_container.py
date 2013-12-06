@@ -125,7 +125,7 @@ class ImagePlotContainer(object):
             fields = self.plots.keys()
         else:
             fields = [field]
-        for field in fields:
+        for field in self._field_check(fields):
             if log:
                 self._field_transform[field] = log_transform
             else:
@@ -155,7 +155,8 @@ class ImagePlotContainer(object):
 
     @invalidate_plot
     def set_transform(self, field, name):
-        if name not in field_transforms:
+        field = self._field_check(field)
+        if name not in field_transforms: 
             raise KeyError(name)
         self._field_transform[field] = field_transforms[name]
         return self
@@ -174,7 +175,7 @@ class ImagePlotContainer(object):
 
         """
 
-        if field is 'all':
+        if field == 'all':
             fields = self.plots.keys()
         else:
             fields = [field]
@@ -319,6 +320,7 @@ class ImagePlotContainer(object):
             FontProperties(**font_dict)
         return self
 
+    @invalidate_plot
     def set_cmap(self, field, cmap):
         """set the colormap for one of the fields
 
@@ -336,7 +338,7 @@ class ImagePlotContainer(object):
         else:
             fields = [field]
 
-        for field in fields:
+        for field in self._field_check(fields):
             self._colorbar_valid = False
             self._colormaps[field] = cmap
             if isinstance(cmap, types.StringTypes):
@@ -401,12 +403,16 @@ class ImagePlotContainer(object):
         if 'Cutting' in self.data_source.__class__.__name__:
             type = 'OffAxisSlice'
         for k, v in self.plots.iteritems():
+            if isinstance(k, types.TupleType):
+                k = k[1]
             if axis:
                 n = "%s_%s_%s_%s" % (name, type, axis, k.replace(' ', '_'))
             else:
                 # for cutting planes
                 n = "%s_%s_%s" % (name, type, k.replace(' ', '_'))
             if weight:
+                if isinstance(weight, tuple):
+                    weight = weight[1]
                 n += "_%s" % (weight)
             names.append(v.save(n, mpl_kwargs))
         return names
@@ -474,3 +480,11 @@ class ImagePlotContainer(object):
             img = base64.b64encode(self.plots[field]._repr_png_())
             ret += '<img src="data:image/png;base64,%s"><br>' % img
         return ret
+
+    def _field_check(self, field):
+        field = self.data_source._determine_fields(field)
+        if isinstance(field, (list, tuple)):
+            return field
+        else:
+            return field[0]
+

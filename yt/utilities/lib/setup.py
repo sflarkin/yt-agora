@@ -10,12 +10,6 @@ def check_for_png():
     return check_for_dependencies("PNG_DIR", "png.cfg", "png.h", "png")
 
 
-def check_for_freetype():
-    return check_for_dependencies(
-        "FTYPE_DIR", "freetype.cfg", "ft2build.h", "freetype"
-    )
-
-
 def check_for_openmp():
     # Create a temporary directory
     tmpdir = tempfile.mkdtemp()
@@ -56,7 +50,6 @@ def configuration(parent_package='',top_path=None):
     from numpy.distutils.misc_util import Configuration
     config = Configuration('lib',parent_package,top_path)
     png_inc, png_lib = check_for_png()
-    freetype_inc, freetype_lib = check_for_freetype()
     if check_for_openmp() == True:
         omp_args = ['-fopenmp']
     else:
@@ -72,7 +65,9 @@ def configuration(parent_package='',top_path=None):
                 ["yt/utilities/lib/ContourFinding.pyx",
                  "yt/utilities/lib/union_find.c"],
                 include_dirs=["yt/utilities/lib/"],
-                libraries=["m"], depends=["yt/utilities/lib/fp_utils.pxd"])
+                libraries=["m"],
+                depends=["yt/utilities/lib/fp_utils.pxd",
+                         "yt/utilities/lib/amr_kdtools.pxd"])
     config.add_extension("DepthFirstOctree", 
                 ["yt/utilities/lib/DepthFirstOctree.pyx"],
                 libraries=["m"], depends=["yt/utilities/lib/fp_utils.pxd"])
@@ -80,12 +75,6 @@ def configuration(parent_package='',top_path=None):
                 ["yt/utilities/lib/fortran_reader.pyx"],
                 include_dirs=["yt/utilities/lib/"],
                 libraries=["m"], depends=["yt/utilities/lib/fp_utils.pxd"])
-    config.add_extension("freetype_writer", 
-                ["yt/utilities/lib/freetype_writer.pyx"],
-                include_dirs = [freetype_inc,os.path.join(freetype_inc, "freetype2"),
-                                "yt/utilities/lib"],
-                library_dirs = [freetype_lib], libraries=["freetype"],
-                depends=["yt/utilities/lib/freetype_includes.h"])
     config.add_extension("geometry_utils", 
                 ["yt/utilities/lib/geometry_utils.pyx"],
                extra_compile_args=omp_args,
@@ -94,6 +83,9 @@ def configuration(parent_package='',top_path=None):
     config.add_extension("Interpolators", 
                 ["yt/utilities/lib/Interpolators.pyx"],
                 libraries=["m"], depends=["yt/utilities/lib/fp_utils.pxd"])
+    config.add_extension("alt_ray_tracers", 
+                ["yt/utilities/lib/alt_ray_tracers.pyx"],
+                libraries=["m"], depends=[])
     config.add_extension("marching_cubes", 
                 ["yt/utilities/lib/marching_cubes.pyx",
                  "yt/utilities/lib/FixedInterpolator.c"],
@@ -137,6 +129,13 @@ def configuration(parent_package='',top_path=None):
                           "yt/utilities/lib/endian_swap.h",
                           "yt/utilities/lib/FixedInterpolator.h",
                           "yt/utilities/lib/kdtree.h"],
+          )
+    config.add_extension("mesh_utilities",
+              ["yt/utilities/lib/mesh_utilities.pyx"],
+               include_dirs=["yt/utilities/lib/"],
+               libraries=["m"], 
+               depends = ["yt/utilities/lib/fp_utils.pxd",
+                          ],
           )
     config.add_extension("grid_traversal", 
                ["yt/utilities/lib/grid_traversal.pyx",

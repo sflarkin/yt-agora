@@ -22,7 +22,10 @@ import time
 import numpy as np
 from yt.funcs import *
 import yt.utilities.lib as amr_utils
-from yt.data_objects.universal_fields import add_field
+from yt.utilities.physical_constants import \
+    kpc_per_cm, \
+    sec_per_year
+from yt.fields.universal_fields import add_field
 from yt.mods import *
 
 def export_to_sunrise(pf, fn, star_particle_type, fc, fwidth, ncells_wide=None,
@@ -511,7 +514,7 @@ def prepare_star_particles(pf,star_type,pos=None,vel=None, age=None,
                         for ax in 'xyz']).transpose()
         # Velocity is cm/s, we want it to be kpc/yr
         #vel *= (pf["kpc"]/pf["cm"]) / (365*24*3600.)
-        vel *= 1.02268944e-14 
+        vel *= kpc_per_cm * sec_per_year
     if initial_mass is None:
         #in solar masses
         initial_mass = dd["particle_mass_initial"][idx]*pf['Msun']

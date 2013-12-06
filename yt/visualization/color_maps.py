@@ -140,7 +140,7 @@ def show_colormaps(subset = "all", filename=None):
     Displays the colormaps available to yt.  Note, most functions can use
     both the matplotlib and the native yt colormaps; however, there are 
     some special functions existing within image_writer.py (e.g. write_image()
-    write_fits(), write_bitmap(), etc.), which cannot access the matplotlib
+    write_bitmap(), etc.), which cannot access the matplotlib
     colormaps.
 
     In addition to the colormaps listed, one can access the reverse of each 

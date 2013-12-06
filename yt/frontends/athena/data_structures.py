@@ -20,12 +20,14 @@ import glob #ST 9/12
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
            AMRGridPatch
-from yt.data_objects.hierarchy import \
-           AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+    GridGeometryHandler
 from yt.data_objects.static_output import \
            StaticOutput
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
+from yt.utilities.lib import \
+    get_box_grids_level
 
 from .fields import AthenaFieldInfo, KnownAthenaFields
 from yt.data_objects.field_info_container import \
@@ -95,7 +97,7 @@ def parse_line(line, grid):
         grid['read_field'] = field
         grid['read_type'] = 'vector'
 
-class AthenaHierarchy(AMRHierarchy):
+class AthenaHierarchy(GridGeometryHandler):
 
     grid = AthenaGrid
     _data_style='athena'
@@ -109,7 +111,7 @@ class AthenaHierarchy(AMRHierarchy):
         self.hierarchy_filename = self.parameter_file.filename
         #self.directory = os.path.dirname(self.hierarchy_filename)
         self._fhandle = file(self.hierarchy_filename,'rb')
-        AMRHierarchy.__init__(self, pf, data_style)
+        GridGeometryHandler.__init__(self, pf, data_style)
 
         self._fhandle.close()
 
@@ -161,7 +163,7 @@ class AthenaHierarchy(AMRHierarchy):
 
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
     def _count_grids(self):
@@ -305,12 +307,32 @@ class AthenaHierarchy(AMRHierarchy):
         for g in self.grids:
             g._prepare_grid()
             g._setup_dx()
+        self._reconstruct_parent_child()
 
+        """
         for g in self.grids:
             g.Children = self._get_grid_children(g)
             for g1 in g.Children:
                 g1.Parent.append(g)
+        """
         self.max_level = self.grid_levels.max()
+
+    def _reconstruct_parent_child(self):
+        mask = np.empty(len(self.grids), dtype='int32')
+        mylog.debug("First pass; identifying child grids")
+        for i, grid in enumerate(self.grids):
+            get_box_grids_level(self.grid_left_edge[i,:],
+                                self.grid_right_edge[i,:],
+                                self.grid_levels[i] + 1,
+                                self.grid_left_edge, self.grid_right_edge,
+                                self.grid_levels, mask)
+                #ids = np.where(mask.astype("bool")) # where is a tuple
+                #mask[ids] = True
+            grid.Children = [g for g in self.grids[mask.astype("bool")] if g.Level == grid.Level + 1]
+        mylog.debug("Second pass; identifying parents")
+        for i, grid in enumerate(self.grids): # Second pass
+            for child in grid.Children:
+                child.Parent.append(grid)
 
     def _get_grid_children(self, grid):
         mask = np.zeros(self.num_grids, dtype='bool')
