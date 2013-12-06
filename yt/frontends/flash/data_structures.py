@@ -18,11 +18,14 @@ import stat
 import numpy as np
 import weakref
 
+from yt.config import ytcfg
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
     AMRGridPatch
-from yt.data_objects.hierarchy import \
-    AMRHierarchy
+from yt.geometry.grid_geometry_handler import \
+    GridGeometryHandler
+from yt.geometry.geometry_handler import \
+    YTDataChunk
 from yt.data_objects.static_output import \
     StaticOutput
 from yt.utilities.definitions import \
@@ -47,9 +50,10 @@ class FLASHGrid(AMRGridPatch):
     def __repr__(self):
         return "FLASHGrid_%04i (%s)" % (self.id, self.ActiveDimensions)
 
-class FLASHHierarchy(AMRHierarchy):
+class FLASHHierarchy(GridGeometryHandler):
 
     grid = FLASHGrid
+    _preload_implemented = True
     
     def __init__(self,pf,data_style='flash_hdf5'):
         self.data_style = data_style
@@ -60,23 +64,22 @@ class FLASHHierarchy(AMRHierarchy):
         self.directory = os.path.dirname(self.hierarchy_filename)
         self._handle = pf._handle
         self._particle_handle = pf._particle_handle
-        
         self.float_type = np.float64
-        AMRHierarchy.__init__(self,pf,data_style)
+        GridGeometryHandler.__init__(self,pf,data_style)
 
     def _initialize_data_storage(self):
         pass
 
     def _detect_fields(self):
         ncomp = self._handle["/unknown names"].shape[0]
-        self.field_list = [s for s in self._handle["/unknown names"][:].flat]
+        self.field_list = [("gas", s) for s in self._handle["/unknown names"][:].flat]
         if ("/particle names" in self._particle_handle) :
-            self.field_list += ["particle_" + s[0].strip() for s
+            self.field_list += [("io", "particle_" + s[0].strip()) for s
                                 in self._particle_handle["/particle names"][:]]
     
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        AMRHierarchy._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
     def _count_grids(self):
@@ -172,29 +175,6 @@ class FLASHHierarchy(AMRHierarchy):
             for g in self.grids:
                 g.dds[1] = DD
         self.max_level = self.grid_levels.max()
-
-    def _setup_derived_fields(self):
-        AMRHierarchy._setup_derived_fields(self)
-        [self.parameter_file.conversion_factors[field] 
-         for field in self.field_list]
-        for field in self.field_list:
-            if field not in self.derived_field_list:
-                self.derived_field_list.append(field)
-            if (field not in KnownFLASHFields and
-                field.startswith("particle")) :
-                self.parameter_file.field_info.add_field(
-                        field, function=NullFunc, take_log=False,
-                        validators = [ValidateDataField(field)],
-                        particle_type=True)
-
-        for field in self.derived_field_list:
-            f = self.parameter_file.field_info[field]
-            if f._function.func_name == "_TranslationFunc":
-                # Translating an already-converted field
-                self.parameter_file.conversion_factors[field] = 1.0 
-                
-    def _setup_data_io(self):
-        self.io = io_registry[self.data_style](self.parameter_file)
 
 class FLASHStaticOutput(StaticOutput):
     _hierarchy_class = FLASHHierarchy
@@ -402,6 +382,7 @@ class FLASHStaticOutput(StaticOutput):
         
         self.dimensionality = dimensionality
 
+        self.geometry = self.parameters["geometry"]
         # Determine base grid parameters
         if 'lrefine_min' in self.parameters.keys() : # PARAMESH
             nblockx = self.parameters["nblockx"]
@@ -427,6 +408,12 @@ class FLASHStaticOutput(StaticOutput):
                     mylog.warning('Identical domain left edge and right edges '
                                   'along dummy dimension (%i), attempting to read anyway' % d)
                     self.domain_right_edge[d] = self.domain_left_edge[d]+1.0
+        if self.dimensionality < 3 and self.geometry == "cylindrical":
+            mylog.warning("Extending theta dimension to 2PI + left edge.")
+            self.domain_right_edge[2] = self.domain_left_edge[2] + 2*np.pi
+        elif self.dimensionality < 3 and self.geometry == "polar":
+            mylog.warning("Extending theta dimension to 2PI + left edge.")
+            self.domain_right_edge[1] = self.domain_left_edge[1] + 2*np.pi
         self.domain_dimensions = \
             np.array([nblockx*nxb,nblocky*nyb,nblockz*nzb])
 

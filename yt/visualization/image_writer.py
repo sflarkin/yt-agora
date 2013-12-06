@@ -235,57 +235,6 @@ def apply_colormap(image, color_bounds = None, cmap_name = 'algae', func=lambda 
     to_plot = np.clip(to_plot, 0, 255)
     return to_plot
 
-def annotate_image(image, text, xpos, ypos, font_name = "Vera",
-                   font_size = 24, dpi = 100):
-    r"""Add text on to an existing uint8 bitmap array.
-
-    This function accepts an image array and then directly calls freetype to
-    add text on top of that array.  No array is returned.
-
-    Parameters
-    ----------
-    image : array_like
-        This is a (scaled) array of UINT8 values, shape (N,N,[3,4]) to
-        overplot text on.
-    text : string
-        Text to place
-    xpos : int
-        The starting point, in pixels, of the text along the x axis.
-    ypos : int
-        The starting point, in pixels, of the text along the y axis.  Note that
-        0 will be the top of the image, not the bottom.
-    font_name : string (optional)
-        The font to load.
-    font_size : int (optional)
-        Font size in points of the overlaid text.
-    dpi : int (optional)
-        Dots per inch for calculating the font size in pixels.
-        
-    Returns
-    -------
-    Nothing
-
-    Examples
-    --------
-
-    >>> sl = pf.h.slice(0, 0.5, "Density")
-    >>> frb1 = FixedResolutionBuffer(sl, (0.2, 0.3, 0.4, 0.5),
-                    (1024, 1024))
-    >>> bitmap = write_image(frb1["Density"], "saved.png")
-    >>> annotate_image(bitmap, "Hello!", 0, 100)
-    >>> write_bitmap(bitmap, "saved.png")
-    """
-    if len(image.shape) != 3 or image.dtype != np.uint8:
-        raise RuntimeError("This routine requires a UINT8 bitmapped image.")
-    font_path = os.path.join(imp.find_module("matplotlib")[1],
-                             "mpl-data/fonts/ttf/",
-                             "%s.ttf" % font_name)
-    if not os.path.isfile(font_path):
-        mylog.error("Could not locate %s", font_path)
-        raise IOError(font_path)
-    # The hard-coded 0 is the font face index.
-    au.simple_writing(font_path, 0, dpi, font_size, text, image, xpos, ypos)
-
 def map_to_colors(buff, cmap_name):
     if cmap_name not in cmd.color_map_luts:
         print "Your color map was not found in the extracted colormap file."
@@ -436,76 +385,6 @@ def write_projection(data, filename, colorbar=True, colorbar_label=None,
 
     canvas.print_figure(filename, dpi=dpi)
     return filename
-
-
-def write_fits(image, filename, clobber=True, coords=None,
-               other_keys=None):
-    r"""Write out floating point arrays directly to a FITS file, optionally
-    adding coordinates and header keywords.
-        
-    Parameters
-    ----------
-    image : array_like, or dict of array_like objects
-        This is either an (unscaled) array of floating point values, or a dict of
-        such arrays, shape (N,N,) to save in a FITS file. 
-    filename : string
-        This name of the FITS file to be written.
-    clobber : boolean
-        If the file exists, this governs whether we will overwrite.
-    coords : dictionary, optional
-        A set of header keys and values to write to the FITS header to set up
-        a coordinate system, which is assumed to be linear unless specified otherwise
-        in *other_keys*
-        "units": the length units
-        "xctr","yctr": the center of the image
-        "dx","dy": the pixel width in each direction                                                
-    other_keys : dictionary, optional
-        A set of header keys and values to write into the FITS header.    
-    """
-
-    try:
-        import astropy.io.fits as pyfits
-    except:
-        mylog.error("You don't have AstroPy installed!")
-        raise ImportError
-    
-    try:
-        image.keys()
-        image_dict = image
-    except:
-        image_dict = dict(yt_data=image)
-
-    hdulist = [pyfits.PrimaryHDU()]
-
-    for key in image_dict.keys():
-
-        mylog.info("Writing image block \"%s\"" % (key))
-        hdu = pyfits.ImageHDU(image_dict[key])
-        hdu.update_ext_name(key)
-        
-        if coords is not None:
-            nx, ny = image_dict[key].shape
-            hdu.header.update('CUNIT1', coords["units"])
-            hdu.header.update('CUNIT2', coords["units"])
-            hdu.header.update('CRPIX1', 0.5*(nx+1))
-            hdu.header.update('CRPIX2', 0.5*(ny+1))
-            hdu.header.update('CRVAL1', coords["xctr"])
-            hdu.header.update('CRVAL2', coords["yctr"])
-            hdu.header.update('CDELT1', coords["dx"])
-            hdu.header.update('CDELT2', coords["dy"])
-            # These are the defaults, but will get overwritten if
-            # the caller has specified them
-            hdu.header.update('CTYPE1', "LINEAR")
-            hdu.header.update('CTYPE2', "LINEAR")
-                                    
-        if other_keys is not None:
-            for k,v in other_keys.items():
-                hdu.header.update(k,v)
-
-        hdulist.append(hdu)
-
-    hdulist = pyfits.HDUList(hdulist)
-    hdulist.writeto(filename, clobber=clobber)                    
 
 def display_in_notebook(image, max_val=None):
     """

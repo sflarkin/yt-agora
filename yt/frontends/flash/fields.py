@@ -20,12 +20,8 @@ from yt.data_objects.field_info_container import \
     NullFunc, \
     TranslationFunc, \
     FieldInfo, \
-    ValidateParameter, \
-    ValidateDataField, \
-    ValidateProperty, \
-    ValidateSpatial, \
-    ValidateGridType
-import yt.data_objects.universal_fields
+    ValidateSpatial
+import yt.fields.universal_fields
 from yt.utilities.physical_constants import \
     kboltz, mh, Na
 KnownFLASHFields = FieldInfoContainer()
@@ -241,7 +237,6 @@ for f,v in translation_dict.items():
     if v not in KnownFLASHFields:
         pfield = v.startswith("particle")
         add_flash_field(v, function=NullFunc, take_log=False,
-                  validators = [ValidateDataField(v)],
                   particle_type = pfield)
     if f.endswith("_Fraction") :
         dname = "%s\/Fraction" % f.split("_")[0]
@@ -354,6 +349,7 @@ add_field('edens', function=_nele, take_log=True, units=r"\rm{cm}^{-3}")
 def _nion(field, data):
     return data['dens'] * data['sumy'] * Na
 add_field('nion', function=_nion, take_log=True, units=r"\rm{cm}^{-3}")
+
 
 def _abar(field, data):
     try:
