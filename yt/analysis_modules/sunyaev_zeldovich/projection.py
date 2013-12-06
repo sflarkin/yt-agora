@@ -21,7 +21,7 @@ Chluba, Switzer, Nagai, Nelson, MNRAS, 2012, arXiv:1211.3206
 from yt.utilities.physical_constants import sigma_thompson, clight, hcgs, kboltz, mh, Tcmb
 from yt.utilities.fits_image import FITSImageBuffer
 from yt.data_objects.image_array import ImageArray
-from yt.data_objects.field_info_container import add_field
+from yt.fields.field_info_container import add_field
 from yt.funcs import fix_axis, mylog, iterable, get_pbar
 from yt.utilities.definitions import inv_axis_names
 from yt.visualization.volume_rendering.camera import off_axis_projection
@@ -134,8 +134,8 @@ class SZProjection(object):
             axis = data.get_field_parameter("axis")
             # Load these, even though we will only use one
             for ax in 'xyz':
-                data['%s-velocity' % ax]
-            vpar = data["Density"]*data["%s-velocity" % (vlist[axis])]
+                data['velocity_%s' % ax]
+            vpar = data["Density"]*data["velocity_%s" % (vlist[axis])]
             return vpar/clight
         add_field("BetaPar", function=_beta_par)
         self.pf.h._derived_fields_add(["BetaPar"])
@@ -202,9 +202,9 @@ class SZProjection(object):
             raise NotImplementedError
 
         def _beta_par(field, data):
-            vpar = data["Density"]*(data["x-velocity"]*L[0]+
-                                    data["y-velocity"]*L[1]+
-                                    data["z-velocity"]*L[2])
+            vpar = data["Density"]*(data["velocity_x"]*L[0]+
+                                    data["velocity_y"]*L[1]+
+                                    data["velocity_z"]*L[2])
             return vpar/clight
         add_field("BetaPar", function=_beta_par)
         self.pf.h._derived_fields_add(["BetaPar"])

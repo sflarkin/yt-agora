@@ -15,6 +15,7 @@ Presumably at some point EnzoRun will be absorbed into here.
 #-----------------------------------------------------------------------------
 
 import string, re, gc, time, os, os.path, weakref
+import functools
 
 from yt.funcs import *
 
@@ -25,7 +26,8 @@ from yt.utilities.parameter_file_storage import \
     ParameterFileStore, \
     NoParameterShelf, \
     output_type_registry
-from yt.data_objects.field_info_container import \
+from yt.utilities.units import Unit, UnitRegistry, dimensionless
+from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc
 from yt.data_objects.particle_filters import \
     filter_registry
@@ -33,10 +35,15 @@ from yt.data_objects.particle_unions import \
     ParticleUnion
 from yt.utilities.minimal_representation import \
     MinimalStaticOutput
+from yt.data_objects.yt_array import \
+    YTArray, \
+    YTQuantity
 
-from yt.geometry.coordinate_handler import \
-    CartesianCoordinateHandler, \
-    PolarCoordinateHandler, \
+from yt.geometry.cartesian_coordinates import \
+    CartesianCoordinateHandler
+from yt.geometry.polar_coordinates import \
+    PolarCoordinateHandler
+from yt.geometry.cylindrical_coordinates import \
     CylindricalCoordinateHandler
 
 # We want to support the movie format in the future.
@@ -49,7 +56,7 @@ _pf_store = ParameterFileStore()
 class StaticOutput(object):
 
     default_fluid_type = "gas"
-    fluid_types = ("gas","deposit")
+    fluid_types = ("gas", "deposit", "index")
     particle_types = ("io",) # By default we have an 'all'
     particle_types_raw = ("io",)
     geometry = "cartesian"
@@ -69,6 +76,7 @@ class StaticOutput(object):
             mylog.debug("Registering: %s as %s", name, cls)
 
     def __new__(cls, filename=None, *args, **kwargs):
+        from yt.frontends.stream.data_structures import StreamHandler
         if not isinstance(filename, types.StringTypes):
             obj = object.__new__(cls)
             # The Stream frontend uses a StreamHandler object to pass metadata
@@ -117,10 +125,9 @@ class StaticOutput(object):
 
         self.min_level = 0
 
+        self._create_unit_registry()
         self._parse_parameter_file()
         self._setup_coordinate_handler()
-        self._set_units()
-        self._set_derived_attrs()
 
         # Because we need an instantiated class to check the pf's existence in
         # the cache, we move that check to here from __new__.  This avoids
@@ -131,11 +138,17 @@ class StaticOutput(object):
             pass
         self.print_key_parameters()
 
-        self.create_field_info()
+        self.set_units()
+        self._set_derived_attrs()
 
     def _set_derived_attrs(self):
         self.domain_center = 0.5 * (self.domain_right_edge + self.domain_left_edge)
         self.domain_width = self.domain_right_edge - self.domain_left_edge
+        for attr in ("center", "width", "left_edge", "right_edge"):
+            n = "domain_%s" % attr
+            v = getattr(self, n)
+            v = self.arr(v, "code_length")
+            setattr(self, n, v)
 
     def __reduce__(self):
         args = (self._hash(),)
@@ -170,10 +183,7 @@ class StaticOutput(object):
 
     def __getitem__(self, key):
         """ Returns units, parameters, or conversion_factors in that order. """
-        for d in [self.units, self.time_units, self.parameters, \
-                  self.conversion_factors]:
-            if key in d: return d[key]
-        raise KeyError(key)
+        return self.parameters[key]
 
     def keys(self):
         """
@@ -207,10 +217,7 @@ class StaticOutput(object):
         Checks units, parameters, and conversion factors. Returns a boolean.
 
         """
-        return key in self.units or \
-               key in self.time_units or \
-               key in self.parameters or \
-               key in self.conversion_factors
+        return key in self.parameters
 
     _instantiated_hierarchy = None
     @property
@@ -221,10 +228,8 @@ class StaticOutput(object):
             self._instantiated_hierarchy = self._hierarchy_class(
                 self, data_style=self.data_style)
             # Now we do things that we need an instantiated hierarchy for
-            if "all" not in self.particle_types:
-                mylog.debug("Creating Particle Union 'all'")
-                pu = ParticleUnion("all", list(self.particle_types_raw))
-                self.add_particle_union(pu)
+            # ...first off, we create our field_info now.
+            self.create_field_info()
         return self._instantiated_hierarchy
     h = hierarchy  # alias
 
@@ -248,16 +253,33 @@ class StaticOutput(object):
                 mylog.info("Parameters: %-25s = %s", a, v)
 
     def create_field_info(self):
-        if getattr(self, "field_info", None) is None:
-            # The setting up of fields occurs in the hierarchy, which is only
-            # instantiated once.  So we have to double check to make sure that,
-            # in the event of double-loads of a parameter file, we do not blow
-            # away the exising field_info.
-            self.field_info = FieldInfoContainer.create_with_fallback(
-                                self._fieldinfo_fallback)
-            self.field_info.update(self.coordinates.coordinate_fields())
-        if getattr(self, "field_dependencies", None) is None:
-            self.field_dependencies = {}
+        self.field_dependencies = {}
+        self.h.derived_field_list = []
+        self.field_info = self._field_info_class(self, self.h.field_list)
+        self.coordinates.setup_fields(self.field_info)
+        self.field_info.setup_fluid_fields()
+        for ptype in self.particle_types:
+            self.field_info.setup_particle_fields(ptype)
+        if "all" not in self.particle_types:
+            mylog.debug("Creating Particle Union 'all'")
+            pu = ParticleUnion("all", list(self.particle_types_raw))
+            self.add_particle_union(pu)
+        deps, unloaded = self.field_info.check_derived_fields()
+        self.field_dependencies.update(deps)
+        mylog.info("Loading field plugins.")
+        self.field_info.load_all_plugins()
+
+    def setup_deprecated_fields(self):
+        from yt.fields.field_aliases import _field_name_aliases
+        added = []
+        for old_name, new_name in _field_name_aliases:
+            try:
+                fi = self._get_field_info(new_name)
+            except YTFieldNotFound:
+                continue
+            self.field_info.alias(("gas", old_name), fi.name)
+            added.append(("gas", old_name))
+        self.field_info.find_dependencies(added)
 
     def _setup_coordinate_handler(self):
         if self.geometry == "cartesian":
@@ -268,6 +290,21 @@ class StaticOutput(object):
             self.coordinates = PolarCoordinateHandler(self)
         else:
             raise YTGeometryNotSupported(self.geometry)
+
+    def add_particle_union(self, union):
+        # No string lookups here, we need an actual union.
+        f = self.particle_fields_by_type
+        fields = set_intersection([f[s] for s in union
+                                   if s in self.particle_types_raw])
+        self.particle_types += (union.name,)
+        self.particle_unions[union.name] = union
+        fields = [ (union.name, field) for field in fields]
+        self.h.field_list.extend(fields)
+        # Give ourselves a chance to add them here, first, then...
+        # ...if we can't find them, we set them up as defaults.
+        self.h._setup_particle_types([union.name])
+        #self.h._setup_unknown_fields(fields, self.field_info,
+        #                             skip_removal = True)
 
     def add_particle_filter(self, filter):
         # This is a dummy, which we set up to enable passthrough of "all"
@@ -295,9 +332,9 @@ class StaticOutput(object):
         if fname is None:
             ftype, fname = "unknown", ftype
         guessing_type = False
-        if ftype == "unknown" and self._last_freq[0] != None:
-            ftype = self._last_freq[0]
+        if ftype == "unknown":
             guessing_type = True
+            ftype = self._last_freq[0] or ftype
         field = (ftype, fname)
         if field == self._last_freq:
             return self._last_finfo
@@ -323,27 +360,15 @@ class StaticOutput(object):
         # We also should check "all" for particles, which can show up if you're
         # mixing deposition/gas fields with particle fields.
         if guessing_type:
-            for ftype in ("all", self.default_fluid_type):
+            to_guess = ["all", self.default_fluid_type] \
+                     + list(self.fluid_types) \
+                     + list(self.particle_types)
+            for ftype in to_guess:
                 if (ftype, fname) in self.field_info:
                     self._last_freq = (ftype, fname)
                     self._last_finfo = self.field_info[(ftype, fname)]
                     return self._last_finfo
         raise YTFieldNotFound((ftype, fname), self)
-
-    def add_particle_union(self, union):
-        # No string lookups here, we need an actual union.
-        f = self.particle_fields_by_type
-        fields = set_intersection([f[s] for s in union
-                                   if s in self.particle_types_raw])
-        self.particle_types += (union.name,)
-        self.particle_unions[union.name] = union
-        fields = [ (union.name, field) for field in fields]
-        self.h.field_list.extend(fields)
-        # Give ourselves a chance to add them here, first, then...
-        # ...if we can't find them, we set them up as defaults.
-        self.h._setup_particle_types([union.name])
-        self.h._setup_unknown_fields(fields, self.field_info,
-                                     skip_removal = True)
 
     def _setup_particle_type(self, ptype):
         mylog.debug("Don't know what to do with %s", ptype)
@@ -367,8 +392,88 @@ class StaticOutput(object):
     def relative_refinement(self, l0, l1):
         return self.refine_by**(l1-l0)
 
+    def _create_unit_registry(self):
+        self.unit_registry = UnitRegistry()
+        import yt.utilities.units as units
+        self.unit_registry.lut["code_length"] = (1.0, units.length)
+        self.unit_registry.lut["code_mass"] = (1.0, units.mass)
+        self.unit_registry.lut["code_time"] = (1.0, units.time)
+        self.unit_registry.lut["code_magnetic"] = (1.0, units.magnetic_field)
+        self.unit_registry.lut["code_temperature"] = (1.0, units.temperature)
+
+    def set_units(self):
+        """
+        Creates the unit registry for this dataset.
+
+        """
+        self.set_code_units()
+
+        if hasattr(self, "cosmological_simulation") \
+           and getattr(self, "cosmological_simulation"):
+            # this dataset is cosmological, so add cosmological units.
+            self.unit_registry.add("h", self.hubble_constant, dimensionless)
+            # Comoving lengths: pc, AU, m... anything else?
+            #self.unit_registry.add("pccm", ...)
+
+    def get_unit_from_registry(self, unit_str):
+        """
+        Creates a unit object matching the string expression, using this
+        dataset's unit registry.
+
+        Parameters
+        ----------
+        unit_str : str
+            string that we can parse for a sympy Expr.
+
+        """
+        new_unit = Unit(unit_str, registry=self.unit_registry)
+        return new_unit
+
+    def set_code_units(self):
+        from yt.utilities.units import length, mass, time
+        # domain_width does not yet exist
+        DW = self.domain_right_edge - self.domain_left_edge
+        self._set_code_unit_attributes()
+        self.unit_registry.modify("code_length", self.length_unit.value)
+        self.unit_registry.modify("code_mass", self.mass_unit.value)
+        self.unit_registry.modify("code_time", self.time_unit.value)
+        self.unit_registry.modify("unitary", DW.max())
+
+    _arr = None
+    @property
+    def arr(self):
+        if self._arr is not None:
+            return self._arr
+        self._arr = functools.partial(YTArray, registry = self.unit_registry)
+        return self._arr
+
+    _quan = None
+    @property
+    def quan(self):
+        if self._quan is not None:
+            return self._quan
+        self._quan = functools.partial(YTQuantity,
+                registry = self.unit_registry)
+        return self._quan
+
 def _reconstruct_pf(*args, **kwargs):
     pfs = ParameterFileStore()
     pf = pfs.get_pf_hash(*args)
     return pf
 
+class ParticleFile(object):
+    def __init__(self, pf, io, filename, file_id):
+        self.pf = pf
+        self.io = weakref.proxy(io)
+        self.filename = filename
+        self.file_id = file_id
+        self.total_particles = self.io._count_particles(self)
+
+    def select(self, selector):
+        pass
+
+    def count(self, selector):
+        pass
+
+    def _calculate_offsets(self, fields):
+        pass

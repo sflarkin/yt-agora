@@ -117,18 +117,24 @@ class FixedResolutionBuffer(object):
         if item in self.data: return self.data[item]
         mylog.info("Making a fixed resolution buffer of (%s) %d by %d" % \
             (item, self.buff_size[0], self.buff_size[1]))
+        bounds = []
+        for b in self.bounds:
+            if hasattr(b, "in_units"):
+                b = float(b.in_units("code_length"))
+            bounds.append(b)
         buff = _MPL.Pixelize(self.data_source['px'],
                              self.data_source['py'],
                              self.data_source['pdx'],
                              self.data_source['pdy'],
                              self.data_source[item],
                              self.buff_size[0], self.buff_size[1],
-                             self.bounds, int(self.antialias),
+                             bounds, int(self.antialias),
                              self._period, int(self.periodic),
                              ).transpose()
-        ia = ImageArray(buff, info=self._get_info(item))
-        self[item] = ia
-        return ia 
+        ia = ImageArray(buff, input_units=self.data_source[item].units,
+                        info=self._get_info(item))
+        self.data[item] = ia
+        return self.data[item]
 
     def __setitem__(self, item, val):
         self.data[item] = val
@@ -148,11 +154,10 @@ class FixedResolutionBuffer(object):
         info['data_source'] = self.data_source.__str__()  
         info['axis'] = self.data_source.axis
         info['field'] = str(item)
-        info['units'] = finfo.get_units()
         info['xlim'] = self.bounds[:2]
         info['ylim'] = self.bounds[2:]
-        info['length_to_cm'] = self.data_source.pf['cm']
-        info['projected_units'] = finfo.get_projected_units()
+        info['length_unit'] = self.data_source.pf.length_unit
+        info['length_to_cm'] = info['length_unit'].in_cgs().to_ndarray()
         info['center'] = self.data_source.center
         
         try:
@@ -173,23 +178,6 @@ class FixedResolutionBuffer(object):
             info['label'] = info['label'].replace(' ','\/')
             info['label'] = r'$\rm{'+info['label']+r'}$'
         
-        # Try to determine the units of the data
-        units = None
-        if self.data_source._type_name in ("slice", "cutting"):
-            units = info['units']
-        elif self.data_source._type_name in ("proj", "overlap_proj"):
-            if (self.data_source.weight_field is not None or
-                self.data_source.proj_style == "mip"):
-                units = info['units']
-            else:
-                units = info['projected_units']
-        
-        if units is None or units == '':
-            pass
-        else:
-            info['label'] += r'$\/\/('+units+r')$'
-        
-
         return info
 
     def convert_to_pixel(self, coords):
@@ -360,7 +348,8 @@ class ObliqueFixedResolutionBuffer(FixedResolutionBuffer):
                                self.data_source[item],
                                self.buff_size[0], self.buff_size[1],
                                self.bounds).transpose()
-        ia = ImageArray(buff, info=self._get_info(item))
+        ia = ImageArray(buff, input_units=self.data_source[item].units,
+                        info=self._get_info(item))
         self[item] = ia
         return ia 
 
@@ -376,9 +365,9 @@ class OffAxisProjectionFixedResolutionBuffer(FixedResolutionBuffer):
         mylog.info("Making a fixed resolutuion buffer of (%s) %d by %d" % \
             (item, self.buff_size[0], self.buff_size[1]))
         ds = self.data_source
-        width = (self.bounds[1] - self.bounds[0],
-                 self.bounds[3] - self.bounds[2],
-                 self.bounds[5] - self.bounds[4])
+        width = self.pf.arr((self.bounds[1] - self.bounds[0],
+                             self.bounds[3] - self.bounds[2],
+                             self.bounds[5] - self.bounds[4]))
         buff = off_axis_projection(ds.pf, ds.center, ds.normal_vector,
                                    width, ds.resolution, item,
                                    weight=ds.weight_field, volume=ds.volume,

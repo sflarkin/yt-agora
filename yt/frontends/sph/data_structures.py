@@ -28,7 +28,7 @@ from yt.utilities.logger import ytLogger as mylog
 from yt.geometry.particle_geometry_handler import \
     ParticleGeometryHandler
 from yt.data_objects.static_output import \
-    StaticOutput
+    StaticOutput, ParticleFile
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
 from yt.utilities.physical_constants import \
@@ -44,7 +44,7 @@ from .fields import \
     TipsyFieldInfo, \
     KnownTipsyFields, \
     _setup_particle_fields
-from yt.data_objects.field_info_container import \
+from yt.fields.field_info_container import \
     NullFunc, \
     TranslationFunc
 from yt.fields.particle_fields import \
@@ -56,24 +56,6 @@ try:
     import json
 except ImportError:
     requests = None
-
-class ParticleFile(object):
-    def __init__(self, pf, io, filename, file_id):
-        self.pf = pf
-        self.io = weakref.proxy(io)
-        self.filename = filename
-        self.file_id = file_id
-        self.total_particles = self.io._count_particles(self)
-
-    def select(self, selector):
-        pass
-
-    def count(self, selector):
-        pass
-
-    def _calculate_offsets(self, fields):
-        pass
-
 
 class GadgetBinaryFile(ParticleFile):
     def __init__(self, pf, io, filename, file_id):

@@ -20,12 +20,14 @@ import warnings, struct, subprocess
 import numpy as np
 from distutils.version import LooseVersion
 from math import floor, ceil
+from numbers import Number as numeric_type
 
 from yt.utilities.exceptions import *
 from yt.utilities.logger import ytLogger as mylog
 from yt.utilities.definitions import inv_axis_names, axis_names, x_dict, y_dict
 import yt.extern.progressbar as pb
 import yt.utilities.rpdb as rpdb
+from yt.data_objects.yt_array import YTArray
 from collections import defaultdict
 from functools import wraps
 
@@ -584,11 +586,22 @@ def get_yt_supp():
     # Now we think we have our supplemental repository.
     return supp_path
 
-def fix_length(length, pf):
-    if isinstance(length, (list, tuple)) and len(length) == 2 and \
-       isinstance(length[1], types.StringTypes):
-       length = length[0]/pf[length[1]]
-    return length
+def fix_length(length, pf=None):
+    assert pf is not None
+    if pf is not None:
+        registry = pf.unit_registry
+    else:
+        registry = None
+    if isinstance(length, (numeric_type, YTArray)):
+        return YTArray(length, 'cm', registry=registry)
+    length_valid_tuple = isinstance(length, (list, tuple)) and len(length) == 2
+    unit_is_string = isinstance(length[1], types.StringTypes)
+    if length_valid_tuple and unit_is_string:
+        if length[1] in ('unitary', '1'):
+            length = (length[0], 'code_length')
+        return YTArray(*length, registry=registry)
+    else:
+        raise RuntimeError("Length %s is invalid" % str(length))
 
 @contextlib.contextmanager
 def parallel_profile(prefix):
@@ -625,6 +638,17 @@ def ensure_dir_exists(path):
         return
     if not os.path.exists(my_dir):
         only_on_root(os.makedirs, my_dir)
+
+def assert_valid_width_tuple(width):
+    try:
+        assert iterable(width) and len(width) == 2, \
+            "width (%s) is not a two element tuple" % width
+        valid = isinstance(width[0], numeric_type) and isinstance(width[1], str)
+        msg = "width (%s) is invalid. " % str(width)
+        msg += "Valid widths look like this: (12, 'au')"
+        assert valid, msg
+    except AssertionError, e:
+        raise YTInvalidWidthError(e)
 
 def camelcase_to_underscore(name):
     s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)

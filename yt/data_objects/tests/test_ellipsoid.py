@@ -36,9 +36,9 @@ def test_ellipsoid():
                 e0 = e0s[:,i]
                 tilt = tilts[i]
                 ell = pf.h.ellipsoid(c, A, B, C, e0, tilt)
-                yield assert_array_less, ell["Radius"], A
+                yield assert_array_less, ell["radius"], A
                 p = np.array([ell[ax] for ax in 'xyz'])
-                dot_evec = [np.zeros_like(ell["Radius"]) for i in range(3)]
+                dot_evec = [np.zeros_like(ell["radius"]) for i in range(3)]
                 vecs = [ell._e0, ell._e1, ell._e2]
                 mags = [ell._A, ell._B, ell._C]
                 my_c = np.array([c]*p.shape[1]).transpose()

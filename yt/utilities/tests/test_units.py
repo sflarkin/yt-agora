@@ -21,11 +21,11 @@ from sympy import Symbol
 # base dimensions
 from yt.utilities.units import mass, length, time, temperature
 # functions
-from yt.utilities.units import get_conversion_factor, make_symbols_positive
+from yt.utilities.units import get_conversion_factor
 # classes
 from yt.utilities.units import Unit, UnitParseError
 # objects
-from yt.utilities.units import unit_symbols_dict, unit_prefixes
+from yt.utilities.units import default_unit_symbol_lut, unit_prefixes
 
 
 def test_no_conflicting_symbols():
@@ -33,16 +33,19 @@ def test_no_conflicting_symbols():
     Check unit symbol definitions for conflicts.
 
     """
-    full_set = set(unit_symbols_dict.keys())
+    full_set = set(default_unit_symbol_lut.keys())
 
     # go through all possible prefix combos
-    for symbol in unit_symbols_dict.keys():
+    for symbol in default_unit_symbol_lut.keys():
         for prefix in unit_prefixes.keys():
             new_symbol = "%s%s" % (prefix, symbol)
 
             # test if we have seen this symbol
             if new_symbol in full_set:
                 print "Duplicate symbol: %s" % new_symbol
+                # Special case, see: http://lists.spacepope.org/pipermail/yt-dev-spacepope.org/2013-December/003763.html
+                if new_symbol == 'mpc':
+                    pass
                 assert False
 
             full_set.add(new_symbol)
@@ -59,6 +62,13 @@ def test_dimensionless():
     assert u1.expr == 1
     assert u1.cgs_value == 1
     assert u1.dimensions == 1
+
+    u2 = Unit("")
+
+    assert u2.is_dimensionless
+    assert u2.expr == 1
+    assert u2.cgs_value == 1
+    assert u2.dimensions == 1
 
 #
 # Start init tests
@@ -237,7 +247,7 @@ def test_string_representation():
     assert str(Myr) == "Myr"
     assert str(speed) == "pc/Myr"
     assert repr(speed) == "pc/Myr"
-    assert str(dimensionless) == "(dimensionless)"
+    assert str(dimensionless) == "dimensionless"
 
 #
 # Start operation tests

@@ -21,7 +21,7 @@ import os
 
 from yt.funcs import *
 
-from yt.data_objects.field_info_container import add_field
+from yt.fields.field_info_container import add_field
 from yt.utilities.exceptions import YTException
 from yt.utilities.linear_interpolators import \
     BilinearFieldInterpolator
@@ -195,8 +195,7 @@ def add_xray_emissivity_field(e_min, e_max, filename=None,
     add_field(field_name, function=_emissivity_field,
               projection_conversion="cm",
               display_name=r"\epsilon_{X}\/(%s-%s\/keV)" % (e_min, e_max),
-              units=r"\rm{erg}\/\rm{cm}^{-3}\/\rm{s}^{-1}",
-              projected_units=r"\rm{erg}\/\rm{cm}^{-2}\/\rm{s}^{-1}")
+              units=r"\rm{erg}\/\rm{cm}^{-3}\/\rm{s}^{-1}")
     return field_name
 
 def add_xray_luminosity_field(e_min, e_max, filename=None,
@@ -329,6 +328,5 @@ def add_xray_photon_emissivity_field(e_min, e_max, filename=None,
     add_field(field_name, function=_emissivity_field,
               projection_conversion="cm",
               display_name=r"\epsilon_{X}\/(%s-%s\/keV)" % (e_min, e_max),
-              units=r"\rm{photons}\/\rm{cm}^{-3}\/\rm{s}^{-1}",
-              projected_units=r"\rm{photons}\/\rm{cm}^{-2}\/\rm{s}^{-1}")
+              units=r"\rm{photons}\/\rm{cm}^{-3}\/\rm{s}^{-1}")
     return field_name
