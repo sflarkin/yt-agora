@@ -3,34 +3,25 @@ Quantities that can be derived from Enzo data that may also required additional
 arguments.  (Standard arguments -- such as the center of a distribution of
 points -- are excluded here, and left to the EnzoDerivedFields.)
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2007-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import numpy as np
 
 from yt.funcs import *
 
 from yt.config import ytcfg
-from yt.data_objects.field_info_container import \
+from yt.data_objects.yt_array import YTArray
+from yt.fields.field_info_container import \
     FieldDetector
 from yt.utilities.data_point_utilities import FindBindingEnergy
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
@@ -75,14 +66,13 @@ class DerivedQuantity(ParallelAnalysisInterface):
             rv = self.func(ds, *args, **kwargs)
             if not iterable(rv): rv = (rv,)
             for i in range(self.n_ret): retvals[i].append(rv[i])
-        retvals = [np.array(retvals[i]) for i in range(self.n_ret)]
         # Note that we do some fancy footwork here.
         # _par_combine_object and its affiliated alltoall function
         # assume that the *long* axis is the last one.  However,
         # our long axis is the first one!
         rv = []
         for my_list in retvals:
-            data = np.array(my_list).transpose()
+            data = YTArray(my_list).transpose()
             rv.append(self.comm.par_combine_object(data,
                         datatype="array", op="cat").transpose())
         retvals = rv
@@ -98,8 +88,12 @@ def add_quantity(name, **kwargs):
 
 class DerivedQuantityCollection(object):
     functions = quantity_info
-    def __init__(self, data_source):
-        self.data_source = data_source
+    def __new__(cls, data_source, *args, **kwargs):
+        inst = object.__new__(cls)
+        inst.data_source = data_source
+        for f in inst.keys():
+            setattr(inst, camelcase_to_underscore(f), inst[f])
+        return inst
 
     def __getitem__(self, key):
         if key not in self.functions:
@@ -120,11 +114,11 @@ def _TotalMass(data):
     particle masses in the object.
     """
     try:
-        cell_mass = _TotalQuantity(data,["CellMassMsun"])
+        cell_mass = _TotalQuantity(data,["cell_mass"])
     except KeyError:
         cell_mass = 0.0
     try:
-        particle_mass = _TotalQuantity(data,["ParticleMassMsun"])
+        particle_mass = _TotalQuantity(data,["particle_mass"])
     except KeyError:
         particle_mass = 0.0
     total_mass = cell_mass + particle_mass
@@ -149,15 +143,17 @@ def _CenterOfMass(data, use_cells=True, use_particles=False):
     """
     x = y = z = den = 0
     if use_cells: 
-        x += (data["x"] * data["CellMassMsun"]).sum(dtype=np.float64)
-        y += (data["y"] * data["CellMassMsun"]).sum(dtype=np.float64)
-        z += (data["z"] * data["CellMassMsun"]).sum(dtype=np.float64)
-        den += data["CellMassMsun"].sum(dtype=np.float64)
+        cmass = data["cell_mass"]
+        x += (data["index","x"] * cmass).sum(dtype=np.float64)
+        y += (data["index","y"] * cmass).sum(dtype=np.float64)
+        z += (data["index","z"] * cmass).sum(dtype=np.float64)
+        den += cmass.sum(dtype=np.float64)
     if use_particles:
-        x += (data["particle_position_x"] * data["ParticleMassMsun"]).sum(dtype=np.float64)
-        y += (data["particle_position_y"] * data["ParticleMassMsun"]).sum(dtype=np.float64)
-        z += (data["particle_position_z"] * data["ParticleMassMsun"]).sum(dtype=np.float64)
-        den += data["ParticleMassMsun"].sum(dtype=np.float64)
+        pmass = data["particle_mass"]
+        x += (data["particle_position_x"] * pmass).sum(dtype=np.float64)
+        y += (data["particle_position_y"] * pmass).sum(dtype=np.float64)
+        z += (data["particle_position_z"] * pmass).sum(dtype=np.float64)
+        den += pmass.sum(dtype=np.float64)
 
     return x,y,z, den
 def _combCenterOfMass(data, x,y,z, den):
@@ -207,10 +203,10 @@ def _BulkVelocity(data):
     """
     This function returns the mass-weighted average velocity in the object.
     """
-    xv = (data["x-velocity"] * data["CellMassMsun"]).sum(dtype=np.float64)
-    yv = (data["y-velocity"] * data["CellMassMsun"]).sum(dtype=np.float64)
-    zv = (data["z-velocity"] * data["CellMassMsun"]).sum(dtype=np.float64)
-    w = data["CellMassMsun"].sum(dtype=np.float64)
+    xv = (data["velocity_x"] * data["cell_mass"]).sum(dtype=np.float64)
+    yv = (data["velocity_y"] * data["cell_mass"]).sum(dtype=np.float64)
+    zv = (data["velocity_z"] * data["cell_mass"]).sum(dtype=np.float64)
+    w = data["cell_mass"].sum(dtype=np.float64)
     return xv, yv, zv, w
 def _combBulkVelocity(data, xv, yv, zv, w):
     w = w.sum()
@@ -225,26 +221,43 @@ def _AngularMomentumVector(data):
     """
     This function returns the mass-weighted average angular momentum vector.
     """
-    amx = data["SpecificAngularMomentumX"]*data["CellMassMsun"]
-    amy = data["SpecificAngularMomentumY"]*data["CellMassMsun"]
-    amz = data["SpecificAngularMomentumZ"]*data["CellMassMsun"]
+    amx = data["specific_angular_momentum_x"]*data["cell_mass"]
+    amy = data["specific_angular_momentum_y"]*data["cell_mass"]
+    amz = data["specific_angular_momentum_z"]*data["cell_mass"]
     j_mag = [amx.sum(dtype=np.float64), amy.sum(dtype=np.float64), amz.sum(dtype=np.float64)]
     return [j_mag]
 
-def _StarAngularMomentumVector(data):
+def _StarAngularMomentumVector(data, ftype=None):
     """
     This function returns the mass-weighted average angular momentum vector 
     for stars.
     """
-    is_star = data["creation_time"] > 0
-    star_mass = data["ParticleMassMsun"][is_star]
-    sLx = data["ParticleSpecificAngularMomentumX"][is_star]
-    sLy = data["ParticleSpecificAngularMomentumY"][is_star]
-    sLz = data["ParticleSpecificAngularMomentumZ"][is_star]
-    amx = sLx * star_mass
-    amy = sLy * star_mass
-    amz = sLz * star_mass
+    if ftype is None:
+        is_star = data["creation_time"] > 0
+        star_mass = data["particle_mass"][is_star]
+    else:
+        is_star = Ellipsis
+        key = (ftype, "ParticleSpecificAngularMomentum%s")
+    j_mag = np.ones(3, dtype='f8')
+    for i, ax in enumerate("XYZ"):
+        j_mag[i] = data[key % ax][is_star]
+        j_mag[i] *= star_mass
     j_mag = [amx.sum(dtype=np.float64), amy.sum(dtype=np.float64), amz.sum(dtype=np.float64)]
+    return [j_mag]
+
+def _ParticleAngularMomentumVector(data):
+    """
+    This function returns the mass-weighted average angular momentum vector 
+    for all particles.
+    """
+    mass = data["particle_mass"]
+    sLx = data["particle_specific_angular_momentum_x"]
+    sLy = data["particle_specific_angular_momentum_y"]
+    sLz = data["particle_specific_angular_momentum_z"]
+    amx = sLx * mass
+    amy = sLy * mass
+    amz = sLz * mass
+    j_mag = [amx.sum(), amy.sum(), amz.sum()]
     return [j_mag]
 
 def _combAngularMomentumVector(data, j_mag):
@@ -252,10 +265,14 @@ def _combAngularMomentumVector(data, j_mag):
     L_vec = j_mag.sum(axis=0,dtype=np.float64)
     L_vec_norm = L_vec / np.sqrt((L_vec**2.0).sum(dtype=np.float64))
     return L_vec_norm
+
 add_quantity("AngularMomentumVector", function=_AngularMomentumVector,
              combine_function=_combAngularMomentumVector, n_ret=1)
 
 add_quantity("StarAngularMomentumVector", function=_StarAngularMomentumVector,
+             combine_function=_combAngularMomentumVector, n_ret=1)
+
+add_quantity("ParticleAngularMomentumVector", function=_ParticleAngularMomentumVector,
              combine_function=_combAngularMomentumVector, n_ret=1)
 
 def _BaryonSpinParameter(data):
@@ -264,12 +281,12 @@ def _BaryonSpinParameter(data):
     the particles in calculating enclosed mass.
     """
     m_enc = _TotalMass(data)
-    amx = data["SpecificAngularMomentumX"]*data["CellMassMsun"]
-    amy = data["SpecificAngularMomentumY"]*data["CellMassMsun"]
-    amz = data["SpecificAngularMomentumZ"]*data["CellMassMsun"]
+    amx = data["specific_angular_momentum_x"]*data["cell_mass"]
+    amy = data["specific_angular_momentum_y"]*data["cell_mass"]
+    amz = data["specific_angular_momentum_z"]*data["cell_mass"]
     j_mag = np.array([amx.sum(dtype=np.float64), amy.sum(dtype=np.float64), amz.sum(dtype=np.float64)])
-    e_term_pre = np.sum(data["CellMassMsun"]*data["VelocityMagnitude"]**2.0,dtype=np.float64)
-    weight=data["CellMassMsun"].sum(dtype=np.float64)
+    e_term_pre = np.sum(data["cell_mass"]*data["velocity_magnitude"]**2.0,dtype=np.float64)
+    weight=data["cell_mass"].sum(dtype=np.float64)
     return j_mag, m_enc, e_term_pre, weight
 def _combBaryonSpinParameter(data, j_mag, m_enc, e_term_pre, weight):
     # Because it's a vector field, we have to ensure we have enough dimensions
@@ -289,14 +306,14 @@ def _ParticleSpinParameter(data):
     the particles in calculating enclosed mass.
     """
     m_enc = _TotalMass(data)
-    amx = data["ParticleSpecificAngularMomentumX"]*data["ParticleMassMsun"]
+    amx = data["particle_specific_angular_momentum_x"]*data["particle_mass"]
     if amx.size == 0: return (np.zeros((3,), dtype=np.float64), m_enc, 0, 0)
-    amy = data["ParticleSpecificAngularMomentumY"]*data["ParticleMassMsun"]
-    amz = data["ParticleSpecificAngularMomentumZ"]*data["ParticleMassMsun"]
+    amy = data["particle_specific_angular_momentum_y"]*data["particle_mass"]
+    amz = data["particle_specific_angular_momentum_z"]*data["particle_mass"]
     j_mag = np.array([amx.sum(dtype=np.float64), amy.sum(dtype=np.float64), amz.sum(dtype=np.float64)])
-    e_term_pre = np.sum(data["ParticleMassMsun"]
-                       *data["ParticleVelocityMagnitude"]**2.0,dtype=np.float64)
-    weight=data["ParticleMassMsun"].sum(dtype=np.float64)
+    e_term_pre = np.sum(data["particle_mass"]
+                       *data["particle_velocity_magnitude"]**2.0,dtype=np.float64)
+    weight=data["particle_mass"].sum(dtype=np.float64)
     return j_mag, m_enc, e_term_pre, weight
 add_quantity("ParticleSpinParameter", function=_ParticleSpinParameter,
              combine_function=_combBaryonSpinParameter, n_ret=4)
@@ -341,9 +358,9 @@ def _IsBound(data, truncate = True, include_thermal_energy = False,
     if data["CellMass"].size == 1: return [0.0]
 
     kinetic = 0.5 * (data["CellMass"] * 
-                     ((data["x-velocity"] - bv_x)**2 + 
-                      (data["y-velocity"] - bv_y)**2 +
-                      (data["z-velocity"] - bv_z)**2)).sum(dtype=np.float64)
+                     ((data["velocity_x"] - bv_x)**2 + 
+                      (data["velocity_y"] - bv_y)**2 +
+                      (data["velocity_z"] - bv_z)**2)).sum(dtype=np.float64)
 
     if (include_particles):
         mass_to_use = data["TotalMass"]
@@ -726,3 +743,28 @@ def _combParticleDensityCenter(data,densities,centers):
 
 add_quantity("ParticleDensityCenter",function=_ParticleDensityCenter,
              combine_function=_combParticleDensityCenter,n_ret=2)
+
+def _HalfMass(data, field):
+    """
+    Cumulative sum the given mass field and find 
+    at what radius the half mass is. Simple but 
+    memory-expensive method.
+    """
+    d = np.nan_to_num(data[field])
+    r = data['Radius']
+    return d, r
+
+def _combHalfMass(data, field_vals, radii, frac=0.5):
+    fv = np.concatenate(field_vals.tolist()).ravel()
+    r = np.concatenate(radii.tolist()).ravel()
+    idx = np.argsort(r)
+    r = r[idx]
+    fv = np.cumsum(fv[idx])
+    idx, = np.where(fv / fv[-1] > frac)
+    if len(idx) > 0:
+        return r[idx[0]]
+    else:
+        return np.nan
+
+add_quantity("HalfMass",function=_HalfMass,
+             combine_function=_combHalfMass,n_ret=2)

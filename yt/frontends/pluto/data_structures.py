@@ -1,28 +1,17 @@
 """
 Data structures for Pluto.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Author: J. S. Oishi <jsoishi@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2011 Matthew Turk, J. S. Oishi.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import h5py
 import re
@@ -57,7 +46,7 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
 from yt.utilities.io_handler import \
     io_registry
 
-from yt.data_objects.field_info_container import \
+from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc
 from .fields import PlutoFieldInfo, KnownPlutoFields
 
@@ -115,7 +104,7 @@ class PlutoHierarchy(GridGeometryHandler):
         self._levels = self._handle.keys()[2:]
         GridGeometryHandler.__init__(self,pf,data_style)
 
-    def _detect_fields(self):
+    def _detect_output_fields(self):
         ncomp = int(self._handle['/'].attrs['num_components'])
         self.field_list = [c[1] for c in self._handle['/'].attrs.items()[-ncomp:]]
           
@@ -178,9 +167,6 @@ class PlutoHierarchy(GridGeometryHandler):
         grids, grid_ind = self.get_box_grids(grid.LeftEdge, grid.RightEdge)
         mask[grid_ind] = True
         return [g for g in self.grids[mask] if g.Level == grid.Level + 1]
-
-    def _setup_data_io(self):
-        self.io = io_registry[self.data_style](self.parameter_file)
 
 class PlutoStaticOutput(StaticOutput):
     _hierarchy_class = PlutoHierarchy

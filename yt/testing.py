@@ -1,34 +1,29 @@
-"""Provides utility and helper functions for testing in yt.
-
-Author: Anthony Scpatz <scopatz@gmail.com>
-Affiliation: The University of Chicago
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2012 Anthony Scopatz.  All Rights Reserved.
-
-  This file is part of yt.
-
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+
+
+"""
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import itertools as it
 import numpy as np
+import importlib
+import os
 from yt.funcs import *
+from yt.config import ytcfg
 from numpy.testing import assert_array_equal, assert_almost_equal, \
     assert_approx_equal, assert_array_almost_equal, assert_equal, \
     assert_array_less, assert_string_equal, assert_array_almost_equal_nulp,\
     assert_allclose, assert_raises
+from yt.data_objects.yt_array import uconcatenate
+import yt.fields.api as field_api
 
 def assert_rel_equal(a1, a2, decimals, err_msg='', verbose=True):
     # We have nan checks in here because occasionally we have fields that get
@@ -144,8 +139,11 @@ def amrspace(extent, levels=7, cells=8):
 
     return left, right, level
 
-def fake_random_pf(ndims, peak_value = 1.0, fields = ("Density",),
-                   negative = False, nprocs = 1):
+def fake_random_pf(
+        ndims, peak_value = 1.0,
+        fields = ("density", "velocity_x", "velocity_y", "velocity_z"),
+        units = ('g/cm**3', 'cm/s', 'cm/s', 'cm/s'),
+        negative = False, nprocs = 1):
     from yt.data_objects.api import data_object_registry
     from yt.frontends.stream.api import load_uniform_grid
     if not iterable(ndims):
@@ -161,9 +159,14 @@ def fake_random_pf(ndims, peak_value = 1.0, fields = ("Density",),
             offsets.append(0.5)
         else:
             offsets.append(0.0)
-    data = dict((field, (np.random.random(ndims) - offset) * peak_value)
-                 for field,offset in zip(fields,offsets))
-    ug = load_uniform_grid(data, ndims, 1.0, nprocs = nprocs)
+    data = {}
+    for field, offset, u in zip(fields, offsets, units):
+        v = (np.random.random(ndims) - offset) * peak_value
+        if field[0] == "all":
+            data['number_of_particles'] = v.size
+            v = v.ravel()
+        data[field] = (v, u)
+    ug = load_uniform_grid(data, ndims, 1.0, nprocs=nprocs)
     return ug
 
 def expand_keywords(keywords, full=False):
@@ -262,3 +265,37 @@ def expand_keywords(keywords, full=False):
                     list_of_kwarg_dicts[i][key] = keywords[key][0]
 
     return list_of_kwarg_dicts
+
+def requires_module(module):
+    """
+    Decorator that takes a module name as an argument and tries to import it.
+    If the module imports without issue, the function is returned, but if not, 
+    a null function is returned. This is so tests that depend on certain modules
+    being imported will not fail if the module is not installed on the testing
+    platform.
+    """
+    def ffalse(func):
+        return lambda: None
+    def ftrue(func):
+        return func
+    try:
+        importlib.import_module(module)
+    except ImportError:
+        return ffalse
+    else:
+        return ftrue
+    
+def requires_file(req_file):
+    path = ytcfg.get("yt", "test_data_dir")
+    def ffalse(func):
+        return lambda: None
+    def ftrue(func):
+        return func
+    if os.path.exists(req_file):
+        return ftrue
+    else:
+        if os.path.exists(os.path.join(path,req_file)):
+            return ftrue
+        else:
+            return ffalse
+                                        

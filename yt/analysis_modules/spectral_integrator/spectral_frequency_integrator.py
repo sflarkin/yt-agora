@@ -2,29 +2,17 @@
 Integrator classes to deal with interpolation and integration of input spectral
 bins.  Currently only supports Cloudy-style data.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Author: Britton Smith <brittons@origins.colorado.edu>
-Affiliation: Michigan State University
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2007-2012 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from exceptions import IOError
 import h5py
@@ -33,7 +21,7 @@ import os
 
 from yt.funcs import *
 
-from yt.data_objects.field_info_container import add_field
+from yt.fields.field_info_container import add_field
 from yt.utilities.exceptions import YTException
 from yt.utilities.linear_interpolators import \
     BilinearFieldInterpolator
@@ -207,8 +195,7 @@ def add_xray_emissivity_field(e_min, e_max, filename=None,
     add_field(field_name, function=_emissivity_field,
               projection_conversion="cm",
               display_name=r"\epsilon_{X}\/(%s-%s\/keV)" % (e_min, e_max),
-              units=r"\rm{erg}\/\rm{cm}^{-3}\/\rm{s}^{-1}",
-              projected_units=r"\rm{erg}\/\rm{cm}^{-2}\/\rm{s}^{-1}")
+              units=r"\rm{erg}\/\rm{cm}^{-3}\/\rm{s}^{-1}")
     return field_name
 
 def add_xray_luminosity_field(e_min, e_max, filename=None,
@@ -341,6 +328,5 @@ def add_xray_photon_emissivity_field(e_min, e_max, filename=None,
     add_field(field_name, function=_emissivity_field,
               projection_conversion="cm",
               display_name=r"\epsilon_{X}\/(%s-%s\/keV)" % (e_min, e_max),
-              units=r"\rm{photons}\/\rm{cm}^{-3}\/\rm{s}^{-1}",
-              projected_units=r"\rm{photons}\/\rm{cm}^{-2}\/\rm{s}^{-1}")
+              units=r"\rm{photons}\/\rm{cm}^{-3}\/\rm{s}^{-1}")
     return field_name

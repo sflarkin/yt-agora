@@ -1,31 +1,23 @@
 """
 Definitions for the traversal code
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: Columbia University
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2012 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
 
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import numpy as np
 cimport numpy as np
 cimport cython
+cimport kdtree_utils
 
 cdef struct VolumeContainer:
     int n_fields
@@ -37,6 +29,20 @@ cdef struct VolumeContainer:
     np.float64_t dds[3]
     np.float64_t idds[3]
     int dims[3]
+
+cdef class PartitionedGrid:
+    cdef public object my_data
+    cdef public object source_mask 
+    cdef public object LeftEdge
+    cdef public object RightEdge
+    cdef public int parent_grid_id
+    cdef VolumeContainer *container
+    cdef kdtree_utils.kdtree *star_list
+    cdef np.float64_t star_er
+    cdef np.float64_t star_sigma_num
+    cdef np.float64_t star_coeff
+    cdef void get_vector_field(self, np.float64_t pos[3],
+                               np.float64_t *vel, np.float64_t *vel_mag)
 
 ctypedef void sample_function(
                 VolumeContainer *vc,
@@ -54,3 +60,12 @@ cdef int walk_volume(VolumeContainer *vc,
                      void *data,
                      np.float64_t *return_t = *,
                      np.float64_t enter_t = *) nogil
+
+cdef inline int vc_index(VolumeContainer *vc, int i, int j, int k):
+    return (i*vc.dims[1]+j)*vc.dims[2]+k
+
+cdef inline int vc_pos_index(VolumeContainer *vc, np.float64_t *spos):
+    cdef int i, index[3]
+    for i in range(3):
+        index[i] = <int> ((spos[i] - vc.left_edge[i]) * vc.idds[i])
+    return vc_index(vc, index[0], index[1], index[2])

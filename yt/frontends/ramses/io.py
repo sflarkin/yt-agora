@@ -1,27 +1,17 @@
 """
 RAMSES-specific IO
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2007-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from collections import defaultdict
 import numpy as np
@@ -59,40 +49,38 @@ class IOHandlerRAMSES(BaseIOHandler):
             d[field] = np.concatenate(tr.pop(field))
         return d
 
-    def _read_particle_selection(self, chunks, selector, fields):
-        size = 0
-        masks = {}
+    def _read_particle_coords(self, chunks, ptf):
+        pn = "particle_position_%s"
+        fields = [(ptype, "particle_position_%s" % ax)
+                  for ptype, field_list in ptf.items()
+                  for ax in 'xyz']
+        for chunk in chunks:
+            for subset in chunk.objs:
+                rv = self._read_particle_subset(subset, fields)
+                for ptype in sorted(ptf):
+                    yield ptype, (rv[ptype, pn % 'x'],
+                                  rv[ptype, pn % 'y'],
+                                  rv[ptype, pn % 'z'])
+
+    def _read_particle_fields(self, chunks, ptf, selector):
+        pn = "particle_position_%s"
         chunks = list(chunks)
-        pos_fields = [("all","particle_position_%s" % ax) for ax in "xyz"]
+        fields = [(ptype, fname) for ptype, field_list in ptf.items()
+                                 for fname in field_list]
+        for ptype, field_list in sorted(ptf.items()):
+            for ax in 'xyz':
+                if pn % ax not in field_list:
+                    fields.append((ptype, pn % ax))
         for chunk in chunks:
             for subset in chunk.objs:
-                # We read the whole thing, then feed it back to the selector
-                selection = self._read_particle_subset(subset, pos_fields)
-                mask = selector.select_points(
-                    selection["all", "particle_position_x"],
-                    selection["all", "particle_position_y"],
-                    selection["all", "particle_position_z"])
-                if mask is None: continue
-                #print "MASK", mask
-                size += mask.sum()
-                masks[id(subset)] = mask
-        # Now our second pass
-        tr = {}
-        pos = 0
-        for chunk in chunks:
-            for subset in chunk.objs:
-                selection = self._read_particle_subset(subset, fields)
-                mask = masks.pop(id(subset), None)
-                if mask is None: continue
-                count = mask.sum()
-                for field in fields:
-                    ti = selection.pop(field)[mask]
-                    if field not in tr:
-                        dt = subset.domain.particle_field_types[field]
-                        tr[field] = np.empty(size, dt)
-                    tr[field][pos:pos+count] = ti
-                pos += count
-        return tr
+                rv = self._read_particle_subset(subset, fields)
+                for ptype, field_list in sorted(ptf.items()):
+                    x, y, z = (np.asarray(rv[ptype, pn % ax], "=f8")
+                               for ax in 'xyz')
+                    mask = selector.select_points(x, y, z)
+                    for field in field_list:
+                        data = np.asarray(rv.pop((ptype, field))[mask], "=f8")
+                        yield (ptype, field), data
 
     def _read_particle_subset(self, subset, fields):
         f = open(subset.domain.part_fn, "rb")
@@ -101,7 +89,7 @@ class IOHandlerRAMSES(BaseIOHandler):
         # We do *all* conversion into boxlen here.
         # This means that no other conversions need to be applied to convert
         # positions into the same domain as the octs themselves.
-        for field in fields:
+        for field in sorted(fields, key = lambda a: foffsets[a]):
             f.seek(foffsets[field])
             dt = subset.domain.particle_field_types[field]
             tr[field] = fpu.read_vector(f, dt)

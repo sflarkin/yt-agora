@@ -1,27 +1,17 @@
 """
 RAMSES-specific data structures
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: UCSD
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2010-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import numpy as np
 import stat
@@ -38,19 +28,19 @@ from yt.data_objects.static_output import \
 from yt.data_objects.octree_subset import \
     OctreeSubset
 
+from yt.data_objects.yt_array import YTQuantity
 from .definitions import ramses_header
-from yt.utilities.definitions import \
-    mpc_conversion, sec_conversion
 from yt.utilities.lib import \
     get_box_grids_level
 from yt.utilities.io_handler import \
     io_registry
-from yt.data_objects.field_info_container import \
-    FieldInfoContainer, NullFunc
+from .fields import \
+    RAMSESFieldInfo
 import yt.utilities.fortran_utils as fpu
 from yt.geometry.oct_container import \
     RAMSESOctreeContainer
-from .fields import RAMSESFieldInfo, KnownRAMSESFields
+from yt.fields.particle_fields import \
+    standard_particle_fields
 
 class RAMSESDomainFile(object):
     _last_mask = None
@@ -63,7 +53,8 @@ class RAMSESDomainFile(object):
         num = os.path.basename(pf.parameter_filename).split("."
                 )[0].split("_")[1]
         basename = "%s/%%s_%s.out%05i" % (
-            os.path.dirname(pf.parameter_filename),
+            os.path.abspath(
+              os.path.dirname(pf.parameter_filename)),
             num, domain_id)
         for t in ['grav', 'hydro', 'part', 'amr']:
             setattr(self, "%s_fn" % t, basename % t)
@@ -159,11 +150,12 @@ class RAMSESDomainFile(object):
         _pfields = {}
         for field, vtype in particle_fields:
             if f.tell() >= flen: break
-            field_offsets["all", field] = f.tell()
-            _pfields["all", field] = vtype
+            field_offsets["io", field] = f.tell()
+            _pfields["io", field] = vtype
             fpu.skip(f, 1)
         self.particle_field_offsets = field_offsets
         self.particle_field_types = _pfields
+        self.particle_types = self.particle_types_raw = ("io",)
 
     def _read_amr_header(self):
         hvals = {}
@@ -215,6 +207,7 @@ class RAMSESDomainFile(object):
                                 self.amr_header['nboundary']*l]
             return ng
         min_level = self.pf.min_level
+        max_level = min_level
         nx, ny, nz = (((i-1.0)/2.0) for i in self.amr_header['nx'])
         for level in range(self.amr_header['nlevelmax']):
             # Easier if do this 1-indexed
@@ -246,9 +239,39 @@ class RAMSESDomainFile(object):
                 # Note that we're adding *grids*, not individual cells.
                 if level >= min_level:
                     assert(pos.shape[0] == ng)
-                    n = self.oct_handler.add(cpu + 1, level - min_level, pos)
-                    assert(n == ng)
+                    n = self.oct_handler.add(cpu + 1, level - min_level, pos,
+                                count_boundary = 1)
+                    self._error_check(cpu, level, pos, n, ng, (nx, ny, nz))
+                    if n > 0: max_level = max(level - min_level, max_level)
+        self.max_level = max_level
         self.oct_handler.finalize()
+
+    def _error_check(self, cpu, level, pos, n, ng, nn):
+        # NOTE: We have the second conditional here because internally, it will
+        # not add any octs in that case.
+        if n == ng or cpu + 1 > self.oct_handler.num_domains:
+            return
+        # This is where we now check for issues with creating the new octs, and
+        # we attempt to determine what precisely is going wrong.
+        # These are all print statements.
+        print "We have detected an error with the construction of the Octree."
+        print "  The number of Octs to be added :  %s" % ng
+        print "  The number of Octs added       :  %s" % n
+        print "  Level                          :  %s" % level
+        print "  CPU Number (0-indexed)         :  %s" % cpu
+        for i, ax in enumerate('xyz'):
+            print "  extent [%s]                     :  %s %s" % \
+            (ax, pos[:,i].min(), pos[:,i].max())
+        print "  domain left                    :  %s" % \
+            (self.pf.domain_left_edge,)
+        print "  domain right                   :  %s" % \
+            (self.pf.domain_right_edge,)
+        print "  offset applied                 :  %s %s %s" % \
+            (nn[0], nn[1], nn[2])
+        print "AMR Header:"
+        for key in sorted(self.amr_header):
+            print "   %-30s: %s" % (key, self.amr_header[key])
+        raise RuntimeError
 
     def included(self, selector):
         if getattr(selector, "domain_id", None) is not None:
@@ -297,7 +320,7 @@ class RAMSESGeometryHandler(OctreeGeometryHandler):
         # for now, the hierarchy file is the parameter file!
         self.hierarchy_filename = self.parameter_file.parameter_filename
         self.directory = os.path.dirname(self.hierarchy_filename)
-        self.max_level = pf.max_level
+        self.max_level = None
 
         self.float_type = np.float64
         super(RAMSESGeometryHandler, self).__init__(pf, data_style)
@@ -308,16 +331,18 @@ class RAMSESGeometryHandler(OctreeGeometryHandler):
                         for i in range(self.parameter_file['ncpu'])]
         total_octs = sum(dom.local_oct_count #+ dom.ngridbound.sum()
                          for dom in self.domains)
+        self.max_level = max(dom.max_level for dom in self.domains)
         self.num_grids = total_octs
 
-    def _detect_fields(self):
+    def _detect_output_fields(self):
         # TODO: Add additional fields
         pfl = set([])
         for domain in self.domains:
             pfl.update(set(domain.particle_field_offsets.keys()))
         self.particle_field_list = list(pfl)
-        self.field_list = self.fluid_field_list + self.particle_field_list
-    
+        self.field_list = [("gas", f) for f in self.fluid_field_list] \
+                        + self.particle_field_list
+
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
         super(RAMSESGeometryHandler, self)._setup_classes(dd)
@@ -339,7 +364,7 @@ class RAMSESGeometryHandler(OctreeGeometryHandler):
         oobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
         yield YTDataChunk(dobj, "all", oobjs, None)
 
-    def _chunk_spatial(self, dobj, ngz, sort = None):
+    def _chunk_spatial(self, dobj, ngz, sort = None, preload_fields = None):
         sobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
         for i,og in enumerate(sobjs):
             if ngz > 0:
@@ -355,8 +380,7 @@ class RAMSESGeometryHandler(OctreeGeometryHandler):
 
 class RAMSESStaticOutput(StaticOutput):
     _hierarchy_class = RAMSESGeometryHandler
-    _fieldinfo_fallback = RAMSESFieldInfo
-    _fieldinfo_known = KnownRAMSESFields
+    _field_info_class = RAMSESFieldInfo
     _particle_mass_name = "ParticleMass"
     _particle_coordinates_name = "Coordinates"
     
@@ -373,46 +397,26 @@ class RAMSESStaticOutput(StaticOutput):
 
     def __repr__(self):
         return self.basename.rsplit(".", 1)[0]
-        
-    def _set_units(self):
+
+    def _set_code_unit_attributes(self):
         """
         Generates the conversion to various physical _units based on the parameter file
         """
-        self.units = {}
-        self.time_units = {}
-        if len(self.parameters) == 0:
-            self._parse_parameter_file()
-        self._setup_nounits_units()
-        self.conversion_factors = defaultdict(lambda: 1.0)
-        self.time_units['1'] = 1
-        self.units['1'] = 1.0
-        self.units['unitary'] = 1.0 / (self.domain_right_edge - self.domain_left_edge).max()
-        rho_u = self.parameters['unit_d']
-        self.conversion_factors["Density"] = rho_u
-        vel_u = self.parameters['unit_l'] / self.parameters['unit_t']
-        self.conversion_factors["Pressure"] = rho_u*vel_u**2
-        self.conversion_factors["x-velocity"] = vel_u
-        self.conversion_factors["y-velocity"] = vel_u
-        self.conversion_factors["z-velocity"] = vel_u
-        # Necessary to get the length units in, which are needed for Mass
-        # We also have to multiply by the boxlength here to scale into our
-        # domain.
-        self.conversion_factors['mass'] = rho_u * self.parameters['unit_l']**3
-
-    def _setup_nounits_units(self):
         # Note that unit_l *already* converts to proper!
         # Also note that unit_l must be multiplied by the boxlen parameter to
         # ensure we are correctly set up for the current domain.
-        unit_l = self.parameters['unit_l'] * self.parameters['boxlen']
-        for unit in mpc_conversion.keys():
-            self.units[unit] = unit_l * mpc_conversion[unit] / mpc_conversion["cm"]
-            self.units['%sh' % unit] = self.units[unit] * self.hubble_constant
-            self.units['%scm' % unit] = (self.units[unit] /
-                                          (1 + self.current_redshift))
-            self.units['%shcm' % unit] = (self.units['%sh' % unit] /
-                                          (1 + self.current_redshift))
-        for unit in sec_conversion.keys():
-            self.time_units[unit] = self.parameters['unit_t'] / sec_conversion[unit]
+        length_unit = self.parameters['unit_l'] * self.parameters['boxlen']
+        rho_u = self.parameters['unit_d']
+        # We're not multiplying by the boxlength here.
+        mass_unit = rho_u * self.parameters['unit_l']**3
+        time_unit = self.parameters['unit_t']
+
+        magnetic_unit = np.sqrt(4*np.pi * mass_unit /
+                                (time_unit**2 * length_unit))
+        self.magnetic_unit = YTQuantity(magnetic_unit, "gauss")
+        self.length_unit = YTQuantity(length_unit, "cm")
+        self.mass_unit = YTQuantity(mass_unit, "g")
+        self.time_unit = YTQuantity(time_unit, "s")
 
     def _parse_parameter_file(self):
         # hardcoded for now
@@ -467,6 +471,11 @@ class RAMSESStaticOutput(StaticOutput):
         self.omega_matter = rheader["omega_m"]
         self.hubble_constant = rheader["H0"] / 100.0 # This is H100
         self.max_level = rheader['levelmax'] - self.min_level
+
+    def _setup_particle_type(self, ptype):
+        orig = set(self.field_info.items())
+        self.field_info.setup_particle_fields(ptype)
+        return [n for n, v in set(self.field_info.items()).difference(orig)]
 
     @classmethod
     def _is_valid(self, *args, **kwargs):

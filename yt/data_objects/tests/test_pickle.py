@@ -1,27 +1,17 @@
 """
 Testsuite for pickling yt objects.
 
-Author: Elizabeth Tasker <tasker@astro1.sci.hokudai.ac.jp>
-Affiliation: Hokkaido University
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2013 Elizabeth Tasker. All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 import cPickle
 import os
 import tempfile
@@ -46,11 +36,11 @@ def test_save_load_pickle():
     sp_inner = test_pf.h.sphere(center, test_pf.domain_width[0] / 10.0)
     sp_boolean = test_pf.h.boolean([sp_outer, "NOT", sp_inner])
 
-    minv, maxv = sp_boolean.quantities["Extrema"]("Density")[0]
+    minv, maxv = sp_boolean.quantities["Extrema"]("density")[0]
     contour_threshold = min(minv * 10.0, 0.9 * maxv)
 
     contours = sp_boolean.extract_connected_sets(
-        "Density", 1, contour_threshold, maxv + 1, log_space=True, cache=True)
+        "density", 1, contour_threshold, maxv + 1, log_space=True, cache=True)
 
     # save object
     cpklfile = tempfile.NamedTemporaryFile(delete=False)

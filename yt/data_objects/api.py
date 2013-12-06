@@ -1,32 +1,17 @@
 """ 
 API for yt.data_objects
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: UCSD
-Author: J.S. Oishi <jsoishi@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Author: Britton Smith <brittonsmith@gmail.com>
-Affiliation: MSU
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2010-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
-
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from grid_patch import \
     AMRGridPatch
@@ -67,28 +52,6 @@ from derived_quantities import \
 
 from image_array import \
     ImageArray
-
-from field_info_container import \
-    FieldInfoContainer, \
-    FieldInfo, \
-    NeedsGridType, \
-    NeedsOriginalGrid, \
-    NeedsDataField, \
-    NeedsProperty, \
-    NeedsParameter, \
-    FieldDetector, \
-    DerivedField, \
-    ValidateParameter, \
-    ValidateDataField, \
-    ValidateProperty, \
-    ValidateSpatial, \
-    ValidateGridType, \
-    add_field, \
-    add_grad, \
-    derived_field
-
-from particle_trajectories import \
-    ParticleTrajectoryCollection
 
 from particle_filters import \
     particle_filter

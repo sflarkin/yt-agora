@@ -1,32 +1,23 @@
 """
 Time series analysis functions.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2010-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import inspect, functools, weakref, glob, types
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
+
+import inspect, functools, weakref, glob, types, os
 
 from yt.funcs import *
 from yt.convenience import load
+from yt.config import ytcfg
 from .data_containers import data_object_registry
 from .analyzer_objects import create_quantity_proxy, \
     analysis_task_registry, AnalysisTask
@@ -99,9 +90,13 @@ class TimeSeriesData(object):
     ...     SlicePlot(pf, "x", "Density").save()
 
     """
-    def __init__(self, outputs, parallel = True ,**kwargs):
+    def __init__(self, outputs, parallel = True, setup_function = None,
+                 **kwargs):
         self.tasks = AnalysisTaskProxy(self)
         self.params = TimeSeriesParametersContainer(self)
+        if setup_function is None:
+            setup_function = lambda a: None
+        self._setup_function = setup_function
         self._pre_outputs = outputs[:]
         for type_name in data_object_registry:
             setattr(self, type_name, functools.partial(
@@ -113,7 +108,9 @@ class TimeSeriesData(object):
         # We can make this fancier, but this works
         for o in self._pre_outputs:
             if isinstance(o, types.StringTypes):
-                yield load(o,**self.kwargs)
+                pf = load(o, **self.kwargs)
+                self._setup_function(pf)
+                yield pf
             else:
                 yield o
 
@@ -125,7 +122,8 @@ class TimeSeriesData(object):
             return TimeSeriesData(self._pre_outputs[key], self.parallel)
         o = self._pre_outputs[key]
         if isinstance(o, types.StringTypes):
-            o = load(o,**self.kwargs)
+            o = load(o, **self.kwargs)
+            self._setup_function(o)
         return o
 
     def __len__(self):
@@ -172,7 +170,12 @@ class TimeSeriesData(object):
         
         This demonstrates how one might store results:
 
-        >>> ts = TimeSeriesData.from_filenames("DD*/DD*.hierarchy")
+        >>> def print_time(pf):
+        ...     print pf.current_time
+        ...
+        >>> ts = TimeSeriesData.from_filenames("DD*/DD*.hierarchy",
+        ...             setup_function = print_time )
+        ...
         >>> my_storage = {}
         >>> for sto, pf in ts.piter(storage=my_storage):
         ...     v, c = pf.h.find_max("Density")
@@ -224,7 +227,8 @@ class TimeSeriesData(object):
         return [v for k, v in sorted(return_values.items())]
 
     @classmethod
-    def from_filenames(cls, filenames, parallel = True, **kwargs):
+    def from_filenames(cls, filenames, parallel = True, setup_function = None,
+                       **kwargs):
         r"""Create a time series from either a filename pattern or a list of
         filenames.
 
@@ -248,23 +252,38 @@ class TimeSeriesData(object):
             this is set to either True or an integer, it will be iterated with
             1 or that integer number of processors assigned to each parameter
             file provided to the loop.
+        setup_function : callable, accepts a pf
+            This function will be called whenever a parameter file is loaded.
 
         Examples
         --------
 
+        >>> def print_time(pf):
+        ...     print pf.current_time
+        ...
         >>> ts = TimeSeriesData.from_filenames(
-                "GasSloshingLowRes/sloshing_low_res_hdf5_plt_cnt_0[0-6][0-9]0")
+        ...     "GasSloshingLowRes/sloshing_low_res_hdf5_plt_cnt_0[0-6][0-9]0",
+        ...      setup_function = print_time)
+        ...
         >>> for pf in ts:
         ...     SlicePlot(pf, "x", "Density").save()
 
         """
         
         if isinstance(filenames, types.StringTypes):
-            filenames = glob.glob(filenames)
+            if len(glob.glob(filenames)) == 0:
+                data_dir = ytcfg.get("yt", "test_data_dir")
+                pattern = os.path.join(data_dir, filenames)
+                td_filenames = glob.glob(pattern)
+                if len(td_filenames) > 0:
+                    filenames = td_filenames
+                else:
+                    raise YTOutputNotIdentified(filenames, {})
+            else:
+                filenames = glob.glob(filenames)
             filenames.sort()
-        if len(filenames) == 0:
-            raise YTOutputNotIdentified(filenames, {})
-        obj = cls(filenames[:], parallel = parallel, **kwargs)
+        obj = cls(filenames[:], parallel = parallel,
+                  setup_function = setup_function, **kwargs)
         return obj
 
     @classmethod
@@ -347,6 +366,7 @@ class SimulationTimeSeries(TimeSeriesData):
         # Figure out the starting and stopping times and redshift.
         self._calculate_simulation_bounds()
         # Get all possible datasets.
+        self.all_time_outputs = []
         self._get_all_outputs(find_outputs=find_outputs)
         
         self.print_key_parameters()

@@ -1,5 +1,7 @@
 from yt.testing import *
+from yt.utilities.units import Unit
 import os
+import tempfile
 
 def setup():
     from yt.config import ytcfg
@@ -7,7 +9,10 @@ def setup():
 
 def teardown_func(fns):
     for fn in fns:
-        os.remove(fn)
+        try:
+            os.remove(fn)
+        except OSError:
+            pass
 
 def test_cutting_plane():
     for nprocs in [8, 1]:
@@ -19,27 +24,29 @@ def test_cutting_plane():
         normal = [1,1,1]
         fns = []
         cut = pf.h.cutting(normal, center)
-        yield assert_equal, cut["Ones"].sum(), cut["Ones"].size
-        yield assert_equal, cut["Ones"].min(), 1.0
-        yield assert_equal, cut["Ones"].max(), 1.0
+        yield assert_equal, cut["ones"].sum(), cut["ones"].size
+        yield assert_equal, cut["ones"].min(), 1.0
+        yield assert_equal, cut["ones"].max(), 1.0
         pw = cut.to_pw()
-        fns += pw.save()
+        tmpfd, tmpname = tempfile.mkstemp(suffix='.png')
+        os.close(tmpfd)
+        fns += pw.save(name=tmpname)
         frb = cut.to_frb((1.0,'unitary'), 64)
-        for cut_field in ['Ones', 'Density']:
+        for cut_field in ['ones', 'density']:
             yield assert_equal, frb[cut_field].info['data_source'], \
                 cut.__str__()
             yield assert_equal, frb[cut_field].info['axis'], \
                 4
             yield assert_equal, frb[cut_field].info['field'], \
                 cut_field
-            yield assert_equal, frb[cut_field].info['units'], \
-                pf.field_info[cut_field].get_units()
+            yield assert_equal, frb[cut_field].units, \
+                Unit(pf._get_field_info("unknown", cut_field).units)
             yield assert_equal, frb[cut_field].info['xlim'], \
                 frb.bounds[:2]
             yield assert_equal, frb[cut_field].info['ylim'], \
                 frb.bounds[2:]
             yield assert_equal, frb[cut_field].info['length_to_cm'], \
-                pf['cm']
+                pf.length_unit.in_cgs()
             yield assert_equal, frb[cut_field].info['center'], \
                 cut.center
         teardown_func(fns)

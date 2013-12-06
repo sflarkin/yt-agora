@@ -1,41 +1,33 @@
 """
 Useful functions.  If non-original, see function for citation.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2007-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
+
 import __builtin__
-import time, types, signal, inspect, traceback, sys, pdb, os
+import time, types, signal, inspect, traceback, sys, pdb, os, re
 import contextlib
 import warnings, struct, subprocess
 import numpy as np
 from distutils.version import LooseVersion
 from math import floor, ceil
+from numbers import Number as numeric_type
 
 from yt.utilities.exceptions import *
 from yt.utilities.logger import ytLogger as mylog
 from yt.utilities.definitions import inv_axis_names, axis_names, x_dict, y_dict
-import yt.utilities.progressbar as pb
+import yt.extern.progressbar as pb
 import yt.utilities.rpdb as rpdb
+from yt.data_objects.yt_array import YTArray
 from collections import defaultdict
 from functools import wraps
 
@@ -347,7 +339,6 @@ def get_pbar(title, maxval):
     maxval = max(maxval, 1)
     from yt.config import ytcfg
     if ytcfg.getboolean("yt", "suppressStreamLogging") or \
-       "__IPYTHON__" in dir(__builtin__) or \
        ytcfg.getboolean("yt", "__withintesting"):
         return DummyProgressBar()
     elif ytcfg.getboolean("yt", "__withinreason"):
@@ -355,12 +346,13 @@ def get_pbar(title, maxval):
         return ExtProgressBar(title, maxval)
     elif ytcfg.getboolean("yt", "__parallel"):
         return ParallelProgressBar(title, maxval)
-    widgets = [ title,
-            pb.Percentage(), ' ',
-            pb.Bar(marker=pb.RotatingMarker()),
-            ' ', pb.ETA(), ' ']
-    pbar = pb.ProgressBar(widgets=widgets,
-                          maxval=maxval).start()
+    else:
+        widgets = [ title,
+                    pb.Percentage(), ' ',
+                    pb.Bar(marker=pb.RotatingMarker()),
+                    ' ', pb.ETA(), ' ']
+        pbar = pb.ProgressBar(widgets=widgets,
+                              maxval=maxval).start()
     return pbar
 
 def only_on_root(func, *args, **kwargs):
@@ -594,11 +586,22 @@ def get_yt_supp():
     # Now we think we have our supplemental repository.
     return supp_path
 
-def fix_length(length, pf):
-    if isinstance(length, (list, tuple)) and len(length) == 2 and \
-       isinstance(length[1], types.StringTypes):
-       length = length[0]/pf[length[1]]
-    return length
+def fix_length(length, pf=None):
+    assert pf is not None
+    if pf is not None:
+        registry = pf.unit_registry
+    else:
+        registry = None
+    if isinstance(length, (numeric_type, YTArray)):
+        return YTArray(length, 'cm', registry=registry)
+    length_valid_tuple = isinstance(length, (list, tuple)) and len(length) == 2
+    unit_is_string = isinstance(length[1], types.StringTypes)
+    if length_valid_tuple and unit_is_string:
+        if length[1] in ('unitary', '1'):
+            length = (length[0], 'code_length')
+        return YTArray(*length, registry=registry)
+    else:
+        raise RuntimeError("Length %s is invalid" % str(length))
 
 @contextlib.contextmanager
 def parallel_profile(prefix):
@@ -635,3 +638,61 @@ def ensure_dir_exists(path):
         return
     if not os.path.exists(my_dir):
         only_on_root(os.makedirs, my_dir)
+
+def assert_valid_width_tuple(width):
+    try:
+        assert iterable(width) and len(width) == 2, \
+            "width (%s) is not a two element tuple" % width
+        valid = isinstance(width[0], numeric_type) and isinstance(width[1], str)
+        msg = "width (%s) is invalid. " % str(width)
+        msg += "Valid widths look like this: (12, 'au')"
+        assert valid, msg
+    except AssertionError, e:
+        raise YTInvalidWidthError(e)
+
+def camelcase_to_underscore(name):
+    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+
+def set_intersection(some_list):
+    if len(some_list) == 0: return set([])
+    # This accepts a list of iterables, which we get the intersection of.
+    s = set(some_list[0])
+    for l in some_list[1:]:
+        s.intersection_update(l)
+    return s
+
+@contextlib.contextmanager
+def memory_checker(interval = 15):
+    r"""This is a context manager that monitors memory usage.
+
+    Parameters
+    ----------
+    interval : int
+        The number of seconds between printing the current memory usage in
+        gigabytes of the current Python interpreter.
+
+    Examples
+    --------
+
+    >>> with memory_checker(10):
+    ...     arr = np.zeros(1024*1024*1024, dtype="float64")
+    ...     time.sleep(15)
+    ...     del arr
+    """
+    import threading
+    class MemoryChecker(threading.Thread):
+        def __init__(self, event, interval):
+            self.event = event
+            self.interval = interval
+            threading.Thread.__init__(self)
+
+        def run(self):
+            while not self.event.wait(self.interval):
+                print "MEMORY: %0.3e gb" % (get_memory_usage()/1024.)
+
+    e = threading.Event()
+    mem_check = MemoryChecker(e, interval)
+    mem_check.start()
+    yield
+    e.set()

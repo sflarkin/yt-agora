@@ -1,27 +1,17 @@
 """
 Fixed resolution buffer support, along with a primitive image analysis tool.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from yt.funcs import *
 from yt.utilities.definitions import \
@@ -127,18 +117,24 @@ class FixedResolutionBuffer(object):
         if item in self.data: return self.data[item]
         mylog.info("Making a fixed resolution buffer of (%s) %d by %d" % \
             (item, self.buff_size[0], self.buff_size[1]))
+        bounds = []
+        for b in self.bounds:
+            if hasattr(b, "in_units"):
+                b = float(b.in_units("code_length"))
+            bounds.append(b)
         buff = _MPL.Pixelize(self.data_source['px'],
                              self.data_source['py'],
                              self.data_source['pdx'],
                              self.data_source['pdy'],
                              self.data_source[item],
                              self.buff_size[0], self.buff_size[1],
-                             self.bounds, int(self.antialias),
+                             bounds, int(self.antialias),
                              self._period, int(self.periodic),
                              ).transpose()
-        ia = ImageArray(buff, info=self._get_info(item))
-        self[item] = ia
-        return ia 
+        ia = ImageArray(buff, input_units=self.data_source[item].units,
+                        info=self._get_info(item))
+        self.data[item] = ia
+        return self.data[item]
 
     def __setitem__(self, item, val):
         self.data[item] = val
@@ -158,11 +154,10 @@ class FixedResolutionBuffer(object):
         info['data_source'] = self.data_source.__str__()  
         info['axis'] = self.data_source.axis
         info['field'] = str(item)
-        info['units'] = finfo.get_units()
         info['xlim'] = self.bounds[:2]
         info['ylim'] = self.bounds[2:]
-        info['length_to_cm'] = self.data_source.pf['cm']
-        info['projected_units'] = finfo.get_projected_units()
+        info['length_unit'] = self.data_source.pf.length_unit
+        info['length_to_cm'] = info['length_unit'].in_cgs().to_ndarray()
         info['center'] = self.data_source.center
         
         try:
@@ -183,23 +178,6 @@ class FixedResolutionBuffer(object):
             info['label'] = info['label'].replace(' ','\/')
             info['label'] = r'$\rm{'+info['label']+r'}$'
         
-        # Try to determine the units of the data
-        units = None
-        if self.data_source._type_name in ("slice", "cutting"):
-            units = info['units']
-        elif self.data_source._type_name in ("proj", "overlap_proj"):
-            if (self.data_source.weight_field is not None or
-                self.data_source.proj_style == "mip"):
-                units = info['units']
-            else:
-                units = info['projected_units']
-        
-        if units is None or units == '':
-            pass
-        else:
-            info['label'] += r'$\/\/('+units+r')$'
-        
-
         return info
 
     def convert_to_pixel(self, coords):
@@ -279,141 +257,47 @@ class FixedResolutionBuffer(object):
             output.create_dataset(field,data=self[field])
         output.close()
 
-    def export_fits(self, filename_prefix, fields = None, clobber=False,
-                    other_keys=None, gzip_file=False, units="1"):
-
-        """
-        This will export a set of FITS images of either the fields specified
-        or all the fields already in the object.  The output filename is
-        *filename_prefix*. If clobber is set to True, this will overwrite any
-        existing FITS file.
-
-        This requires the *pyfits* module, which is a standalone module
-        provided by STSci to interface with FITS-format files.
-        """
+    def export_fits(self, filename, fields=None, clobber=False,
+                    other_keys=None, units="cm"):
         r"""Export a set of pixelized fields to a FITS file.
 
         This will export a set of FITS images of either the fields specified
-        or all the fields already in the object.  The output filename is the
-        the specified prefix.
+        or all the fields already in the object.
 
         Parameters
         ----------
-        filename_prefix : string
-            This prefix will be prepended to every FITS file name.
+        filename : string
+            The name of the FITS file to be written.
         fields : list of strings
             These fields will be pixelized and output.
         clobber : boolean
             If the file exists, this governs whether we will overwrite.
         other_keys : dictionary, optional
             A set of header keys and values to write into the FITS header.
-        gzip_file : boolean, optional
-            gzip the file after writing, default False
         units : string, optional
-            the length units that the coordinates are written in, default '1'
+            the length units that the coordinates are written in, default 'cm'
+            If units are set to "deg" then assume that sky coordinates are
+            requested.
         """
-        
-        import pyfits
-        from os import system
-        
+
+        try:
+            import astropy.io.fits as pyfits
+        except:
+            mylog.error("You don't have AstroPy installed!")
+            raise ImportError
+        from yt.utilities.fits_image import FITSImageBuffer
+
         extra_fields = ['x','y','z','px','py','pz','pdx','pdy','pdz','weight_field']
-        if filename_prefix.endswith('.fits'): filename_prefix=filename_prefix[:-5]
         if fields is None: 
             fields = [field for field in self.data_source.fields 
                       if field not in extra_fields]
 
-        nx, ny = self.buff_size
-        dx = (self.bounds[1]-self.bounds[0])/nx*self.pf[units]
-        dy = (self.bounds[3]-self.bounds[2])/ny*self.pf[units]
-        xmin = self.bounds[0]*self.pf[units]
-        ymin = self.bounds[2]*self.pf[units]
-        simtime = self.pf.current_time
-
-        hdus = []
-
-        first = True
+        fib = FITSImageBuffer(self, fields=fields, units=units)
+        if other_keys is not None:
+            for k,v in other_keys.items():
+                fib.update_all_headers(k,v)
+        fib.writeto(filename, clobber=clobber)
         
-        for field in fields:
-
-            if (first) :
-                hdu = pyfits.PrimaryHDU(self[field])
-                first = False
-            else :
-                hdu = pyfits.ImageHDU(self[field])
-                
-            if self.data_source.has_key('weight_field'):
-                weightname = self.data_source._weight
-                if weightname is None: weightname = 'None'
-                field = field +'_'+weightname
-
-            hdu.header.update("Field", field)
-            hdu.header.update("Time", simtime)
-
-            hdu.header.update('WCSNAMEP', "PHYSICAL")            
-            hdu.header.update('CTYPE1P', "LINEAR")
-            hdu.header.update('CTYPE2P', "LINEAR")
-            hdu.header.update('CRPIX1P', 0.5)
-            hdu.header.update('CRPIX2P', 0.5)
-            hdu.header.update('CRVAL1P', xmin)
-            hdu.header.update('CRVAL2P', ymin)
-            hdu.header.update('CDELT1P', dx)
-            hdu.header.update('CDELT2P', dy)
-                    
-            hdu.header.update('CTYPE1', "LINEAR")
-            hdu.header.update('CTYPE2', "LINEAR")                                
-            hdu.header.update('CUNIT1', units)
-            hdu.header.update('CUNIT2', units)
-            hdu.header.update('CRPIX1', 0.5)
-            hdu.header.update('CRPIX2', 0.5)
-            hdu.header.update('CRVAL1', xmin)
-            hdu.header.update('CRVAL2', ymin)
-            hdu.header.update('CDELT1', dx)
-            hdu.header.update('CDELT2', dy)
-
-            if (other_keys is not None) :
-
-                for k,v in other_keys.items() :
-
-                    hdu.header.update(k,v)
-
-            hdus.append(hdu)
-
-            del hdu
-            
-        hdulist = pyfits.HDUList(hdus)
-
-        hdulist.writeto("%s.fits" % (filename_prefix), clobber=clobber)
-        
-        if (gzip_file) :
-            clob = ""
-            if (clobber) : clob = "-f"
-            system("gzip "+clob+" %s.fits" % (filename_prefix))
-        
-    def open_in_ds9(self, field, take_log=True):
-        """
-        This will open a given field in the DS9 viewer.
-
-        Displaying fields can often be much easier in an interactive viewer,
-        particularly one as versatile as DS9.  This function will pixelize a
-        field and export it to an interactive DS9 package.  This requires the
-        *numdisplay* package, which is a simple download from STSci.
-        Furthermore, it presupposed that it can connect to DS9 -- that is, that
-        DS9 is already open.
-
-        Parameters
-        ----------
-        field : strings
-            This field will be pixelized and displayed.
-        take_log : boolean
-            DS9 seems to have issues with logging fields in-memory.  This will
-            pre-log the field before sending it to DS9.
-        """
-        import numdisplay
-        numdisplay.open()
-        if take_log: data=np.log10(self[field])
-        else: data=self[field]
-        numdisplay.display(data)    
-
     @property
     def limits(self):
         rv = dict(x = None, y = None, z = None)
@@ -464,7 +348,8 @@ class ObliqueFixedResolutionBuffer(FixedResolutionBuffer):
                                self.data_source[item],
                                self.buff_size[0], self.buff_size[1],
                                self.bounds).transpose()
-        ia = ImageArray(buff, info=self._get_info(item))
+        ia = ImageArray(buff, input_units=self.data_source[item].units,
+                        info=self._get_info(item))
         self[item] = ia
         return ia 
 
@@ -480,9 +365,9 @@ class OffAxisProjectionFixedResolutionBuffer(FixedResolutionBuffer):
         mylog.info("Making a fixed resolutuion buffer of (%s) %d by %d" % \
             (item, self.buff_size[0], self.buff_size[1]))
         ds = self.data_source
-        width = (self.bounds[1] - self.bounds[0],
-                 self.bounds[3] - self.bounds[2],
-                 self.bounds[5] - self.bounds[4])
+        width = self.pf.arr((self.bounds[1] - self.bounds[0],
+                             self.bounds[3] - self.bounds[2],
+                             self.bounds[5] - self.bounds[4]))
         buff = off_axis_projection(ds.pf, ds.center, ds.normal_vector,
                                    width, ds.resolution, item,
                                    weight=ds.weight_field, volume=ds.volume,
