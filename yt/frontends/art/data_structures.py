@@ -1,29 +1,17 @@
 """
 ART-specific data structures
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: UCSD
-Author: Christopher Moody <cemoody@ucsc.edu>
-Affiliation: UCSC
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2010-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 import numpy as np
 import os.path
 import glob
@@ -43,8 +31,8 @@ from yt.data_objects.static_output import \
 from yt.data_objects.octree_subset import \
     OctreeSubset
 from yt.geometry.oct_container import \
-    OctreeContainer
-from yt.data_objects.field_info_container import \
+    ARTOctreeContainer
+from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc
 from .fields import \
     ARTFieldInfo, add_art_field, KnownARTFields
@@ -65,8 +53,6 @@ from .io import _read_root_level
 from .io import _count_art_octs
 from .io import b2t
 
-import yt.frontends.ramses._ramses_reader as _ramses_reader
-
 from .fields import ARTFieldInfo, KnownARTFields
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
@@ -74,7 +60,7 @@ from yt.utilities.lib import \
     get_box_grids_level
 from yt.utilities.io_handler import \
     io_registry
-from yt.data_objects.field_info_container import \
+from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc
 from yt.utilities.physical_constants import \
     mass_hydrogen_cgs, sec_per_Gyr
@@ -106,7 +92,7 @@ class ARTGeometryHandler(OctreeGeometryHandler):
         allocate the requisite memory in the oct tree
         """
         nv = len(self.fluid_field_list)
-        self.oct_handler = OctreeContainer(
+        self.oct_handler = ARTOctreeContainer(
             self.parameter_file.domain_dimensions/2,  # dd is # of root cells
             self.parameter_file.domain_left_edge,
             self.parameter_file.domain_right_edge,
@@ -123,7 +109,7 @@ class ARTGeometryHandler(OctreeGeometryHandler):
         domain._read_amr_level(self.oct_handler)
         self.oct_handler.finalize()
 
-    def _detect_fields(self):
+    def _detect_output_fields(self):
         self.particle_field_list = particle_fields
         self.field_list = [("gas", f) for f in fluid_fields]
         self.field_list += set(particle_fields + particle_star_fields \
@@ -132,9 +118,11 @@ class ARTGeometryHandler(OctreeGeometryHandler):
         if "wspecies" in self.parameter_file.parameters.keys():
             wspecies = self.parameter_file.parameters['wspecies']
             nspecies = len(wspecies)
-            self.parameter_file.particle_types = ["all", "darkmatter", "stars"]
+            self.parameter_file.particle_types = ["darkmatter", "stars"]
             for specie in range(nspecies):
                 self.parameter_file.particle_types.append("specie%i" % specie)
+            self.parameter_file.particle_types_raw = tuple(
+                self.parameter_file.particle_types)
         else:
             self.parameter_file.particle_types = []
         for ptype in self.parameter_file.particle_types:
@@ -171,7 +159,7 @@ class ARTGeometryHandler(OctreeGeometryHandler):
         # as well as the referring data source
         yield YTDataChunk(dobj, "all", oobjs, None)
 
-    def _chunk_spatial(self, dobj, ngz, sort = None):
+    def _chunk_spatial(self, dobj, ngz, sort = None, preload_fields = None):
         sobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
         for i,og in enumerate(sobjs):
             if ngz > 0:
@@ -423,6 +411,7 @@ class ARTStaticOutput(StaticOutput):
             self.max_level = self.force_max_level
         self.hubble_time = 1.0/(self.hubble_constant*100/3.08568025e19)
         self.current_time = b2t(self.parameters['t']) * sec_per_Gyr
+        self.gamma = self.parameters["gamma"]
         mylog.info("Max level is %02i", self.max_level)
 
     @classmethod
@@ -433,11 +422,12 @@ class ARTStaticOutput(StaticOutput):
         """
         f = ("%s" % args[0])
         prefix, suffix = filename_pattern['amr']
+        if not os.path.isfile(f): return False
         with open(f, 'rb') as fh:
             try:
                 amr_header_vals = read_attrs(fh, amr_header_struct, '>')
                 return True
-            except AssertionError:
+            except:
                 return False
         return False
 
@@ -472,8 +462,9 @@ class ARTDomainSubset(OctreeSubset):
                 for j in range(2):
                     for k in range(2):
                         ii = ((k*2)+j)*2+i
+                        # Note: C order because our index converts C to F.
                         source[field][:,ii] = \
-                            dt[i::2,j::2,k::2].ravel(order="F")
+                            dt[i::2,j::2,k::2].ravel(order="C")
         oct_handler.fill_level(0, levels, cell_inds, file_inds, tr, source)
         del source
         # Now we continue with the additional levels.

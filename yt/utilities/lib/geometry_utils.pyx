@@ -1,27 +1,17 @@
 """
 Simple integrators for the radiative transfer equation
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: Columbia University
-Homepage: http://yt.enzotools.org/
-License:
-  Copyright (C) 2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import numpy as np
 cimport numpy as np
@@ -418,11 +408,11 @@ def obtain_rv_vec(data):
     if bulk_velocity == None:
         bulk_velocity = np.zeros(3)
     bv[0] = bulk_velocity[0]; bv[1] = bulk_velocity[1]; bv[2] = bulk_velocity[2]
-    if len(data['x-velocity'].shape) == 1:
+    if len(data['velocity_x'].shape) == 1:
         # One dimensional data
-        vxf = data['x-velocity'].astype("float64")
-        vyf = data['y-velocity'].astype("float64")
-        vzf = data['z-velocity'].astype("float64")
+        vxf = data['velocity_x'].astype("float64")
+        vyf = data['velocity_y'].astype("float64")
+        vzf = data['velocity_z'].astype("float64")
         rvf = np.empty((3, vxf.shape[0]), 'float64')
         for i in range(vxf.shape[0]):
             rvf[0, i] = vxf[i] - bv[0]
@@ -431,9 +421,9 @@ def obtain_rv_vec(data):
         return rvf
     else:
         # Three dimensional data
-        vxg = data['x-velocity'].astype("float64")
-        vyg = data['y-velocity'].astype("float64")
-        vzg = data['z-velocity'].astype("float64")
+        vxg = data['velocity_x'].astype("float64")
+        vyg = data['velocity_y'].astype("float64")
+        vzg = data['velocity_z'].astype("float64")
         rvg = np.empty((3, vxg.shape[0], vxg.shape[1], vxg.shape[2]), 'float64')
         for i in range(vxg.shape[0]):
             for j in range(vxg.shape[1]):

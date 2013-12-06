@@ -1,26 +1,17 @@
 """
 Clump finding helper classes
 
-Author: Britton Smith <Britton.Smith@colorado.edu>
-Affiliation: University of Colorado at Boulder
-License:
-  Copyright (C) 2008-2011 Britton Smith.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import numpy as np
 import copy
@@ -116,10 +107,11 @@ class Clump(object):
             print "Wiping out existing children clumps."
         self.children = []
         if max_val is None: max_val = self.max_val
-        contour_info = identify_contours(self.data, self.field, min_val, max_val,
-                                         self.cached_fields)
-        for cid in contour_info:
-            new_clump = self.data.extract_region(contour_info[cid])
+        nj, cids = identify_contours(self.data, self.field, min_val, max_val)
+        for cid in range(nj):
+            new_clump = self.data.cut_region(
+                    ["obj['Contours'] == %s" % (cid + 1)],
+                    {'contour_slices': cids})
             self.children.append(Clump(new_clump, self, self.field,
                                        self.cached_fields,function=self.function,
                                        clump_info=self.clump_info))

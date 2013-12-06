@@ -1,26 +1,18 @@
 """
 Test for Volume Rendering Cameras, and their movement. 
 
-Author: Samuel Skillman <samskillman@gmail.com>
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2013 Samuel Skillman.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
 
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 import os
 import os.path
 import tempfile
@@ -59,7 +51,7 @@ class CameraTest(TestCase):
         self.L = np.array([0.5, 0.5, 0.5])
         self.W = 1.5*self.pf.domain_width
         self.N = 64
-        self.field = "Density"
+        self.field = "density"
 
     def tearDown(self):
         if use_tmpdir:
@@ -69,7 +61,7 @@ class CameraTest(TestCase):
     def setup_transfer_function(self, camera_type):
         if camera_type in ['perspective', 'camera',
                            'stereopair', 'interactive']:
-            mi, ma = self.pf.h.all_data().quantities['Extrema']('Density')[0]
+            mi, ma = self.pf.h.all_data().quantities['Extrema']("density")[0]
             tf = ColorTransferFunction((mi-1., ma+1.), grey_opacity=True)
             tf.map_to_colormap(mi, ma, scale=10., colormap='RdBu_r')
             return tf
@@ -117,7 +109,7 @@ class CameraTest(TestCase):
         pf = self.pf
 
         cam = ProjectionCamera(self.c, self.L, self.W, self.N, pf=pf,
-                               field='Density')
+                               field="density")
         cam.snapshot('projection.png')
         assert_fname('projection.png')
 

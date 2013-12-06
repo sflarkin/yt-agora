@@ -1,33 +1,24 @@
 """
 Import the components of the volume rendering extension
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2009 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import __builtin__
 import numpy as np
 
 from yt.funcs import *
 from yt.utilities.math_utils import *
+from yt.data_objects.yt_array import YTArray
 from copy import deepcopy
 
 from .grid_partitioner import HomogenizedVolume
@@ -82,6 +73,9 @@ class Camera(ParallelAnalysisInterface):
         cubical, but if not, it is left/right, top/bottom, front/back.
     resolution : int or list of ints
         The number of pixels in each direction.
+    transfer_function : `yt.visualization.volume_rendering.TransferFunction`
+        The transfer function used to map values to colors in an image.  If
+        not specified, defaults to a ProjectionTransferFunction.
     north_vector : array_like, optional
         The 'up' direction for the plane of rays.  If not specific, calculated
         automatically.
@@ -162,7 +156,7 @@ class Camera(ParallelAnalysisInterface):
     _tf_figure = None
     _render_figure = None
     def __init__(self, center, normal_vector, width,
-                 resolution, transfer_function,
+                 resolution, transfer_function = None,
                  north_vector = None, steady_north=False,
                  volume = None, fields = None,
                  log_fields = None,
@@ -179,11 +173,13 @@ class Camera(ParallelAnalysisInterface):
         self.rotation_vector = north_vector
         if not iterable(width):
             width = (width, width, width) # left/right, top/bottom, front/back 
+        if not isinstance(width, YTArray):
+            width = self.pf.arr(width, input_units="code_length")
         self.orienter = Orientation(normal_vector, north_vector=north_vector, steady_north=steady_north)
         if not steady_north:
             self.rotation_vector = self.orienter.unit_vectors[1]
         self._setup_box_properties(width, center, self.orienter.unit_vectors)
-        if fields is None: fields = ["Density"]
+        if fields is None: fields = ["density"]
         self.fields = fields
         if transfer_function is None:
             transfer_function = ProjectionTransferFunction()
@@ -212,10 +208,10 @@ class Camera(ParallelAnalysisInterface):
     def _setup_box_properties(self, width, center, unit_vectors):
         self.width = width
         self.center = center
-        self.box_vectors = np.array([unit_vectors[0]*width[0],
-                                     unit_vectors[1]*width[1],
-                                     unit_vectors[2]*width[2]])
-        self.origin = center - 0.5*np.dot(width,unit_vectors)
+        self.box_vectors = YTArray([unit_vectors[0]*width[0],
+                                    unit_vectors[1]*width[1],
+                                    unit_vectors[2]*width[2]])
+        self.origin = center - 0.5*width.dot(YTArray(unit_vectors, ""))
         self.back_center =  center - 0.5*width[2]*unit_vectors[2]
         self.front_center = center + 0.5*width[2]*unit_vectors[2]         
 
@@ -237,7 +233,7 @@ class Camera(ParallelAnalysisInterface):
                    max_level=None):
         r"""Draws Grids on an existing volume rendering.
 
-        By mapping grid level to a color, drawes edges of grids on 
+        By mapping grid level to a color, draws edges of grids on 
         a volume rendering using the camera orientation.
 
         Parameters
@@ -767,7 +763,7 @@ class Camera(ParallelAnalysisInterface):
         You will need to call snapshot() again to get a new image.
 
         """
-        self.width = [w / factor for w in self.width]
+        self.width /= factor
         self._setup_box_properties(self.width, self.center, self.orienter.unit_vectors)
 
     def zoomin(self, final, n_steps, clip_ratio = None):
@@ -827,30 +823,36 @@ class Camera(ParallelAnalysisInterface):
         >>> for i, snapshot in enumerate(cam.move_to([0.2,0.3,0.6], 10)):
         ...     iw.write_bitmap(snapshot, "move_%04i.png" % i)
         """
-        self.center = np.array(self.center)
         dW = None
+        old_center = self.center.copy()
+        if not isinstance(final, YTArray):
+            final = self.pf.arr(final, input_units = "code_length")
         if exponential:
             if final_width is not None:
                 if not iterable(final_width):
-                    width = np.array([final_width, final_width, final_width]) 
+                    final_width = [final_width, final_width, final_width] 
+                if not isinstance(final_width, YTArray):
+                    final_width = self.pf.arr(final_width, input_units="code_length")
                     # left/right, top/bottom, front/back 
                 if (self.center == 0.0).all():
-                    self.center += (np.array(final) - self.center) / (10. * n_steps)
-                final_zoom = final_width/np.array(self.width)
+                    self.center += (final - self.center) / (10. * n_steps)
+                final_zoom = final_width/self.width
                 dW = final_zoom**(1.0/n_steps)
             else:
-                dW = np.array([1.0,1.0,1.0])
-            position_diff = (np.array(final)/self.center)*1.0
+                dW = self.pf.arr([1.0,1.0,1.0], "code_length")
+            position_diff = final/self.center
             dx = position_diff**(1.0/n_steps)
         else:
             if final_width is not None:
                 if not iterable(final_width):
-                    width = np.array([final_width, final_width, final_width]) 
+                    width = [final_width, final_width, final_width] 
+                if not isinstance(final_width, YTArray):
+                    final_width = self.pf.arr(final_width, input_units="code_length")
                     # left/right, top/bottom, front/back
-                dW = (1.0*final_width-np.array(self.width))/n_steps
+                dW = (1.0*final_width-self.width)/n_steps
             else:
-                dW = np.array([0.0,0.0,0.0])
-            dx = (np.array(final)-self.center)*1.0/n_steps
+                dW = self.pf.arr([0.0,0.0,0.0], "code_length")
+            dx = (final-self.center)*1.0/n_steps
         for i in xrange(n_steps):
             if exponential:
                 self.switch_view(center=self.center*dx, width=self.width*dW)
@@ -1061,6 +1063,7 @@ class PerspectiveCamera(Camera):
         inv_mat = self.orienter.inv_mat
         positions = np.zeros((self.resolution[0], self.resolution[1], 3),
                           dtype='float64', order='C')
+        positions = self.pf.arr(positions, "code_length")
         positions[:,:,0] = inv_mat[0,0]*px+inv_mat[0,1]*py+self.back_center[0]
         positions[:,:,1] = inv_mat[1,0]*px+inv_mat[1,1]*py+self.back_center[1]
         positions[:,:,2] = inv_mat[2,0]*px+inv_mat[2,1]*py+self.back_center[2]
@@ -1068,6 +1071,7 @@ class PerspectiveCamera(Camera):
 
         # We are likely adding on an odd cutting condition here
         vectors = self.front_center - positions
+        vectors = vectors / (vectors**2).sum()**0.5
         positions = self.front_center - 1.0*(((self.back_center-self.front_center)**2).sum())**0.5*vectors
         vectors = (self.front_center - positions)
 
@@ -1149,7 +1153,7 @@ class HEALpixCamera(Camera):
             self._sampler_object = VolumeRenderSampler
             self._needs_tf = 1
 
-        if fields is None: fields = ["Density"]
+        if fields is None: fields = ["density"]
         self.fields = fields
         self.sub_samples = sub_samples
         self.log_fields = log_fields
@@ -1284,7 +1288,7 @@ class AdaptiveHEALpixCamera(Camera):
         if transfer_function is None:
             transfer_function = ProjectionTransferFunction()
         self.transfer_function = transfer_function
-        if fields is None: fields = ["Density"]
+        if fields is None: fields = ["density"]
         self.fields = fields
         self.sub_samples = sub_samples
         self.log_fields = log_fields
@@ -1373,7 +1377,7 @@ class FisheyeCamera(Camera):
         if transfer_function is None:
             transfer_function = ProjectionTransferFunction()
         self.transfer_function = transfer_function
-        if fields is None: fields = ["Density"]
+        if fields is None: fields = ["density"]
         self.fields = fields
         self.sub_samples = sub_samples
         self.log_fields = log_fields
@@ -1435,7 +1439,7 @@ class FisheyeCamera(Camera):
 
 class MosaicCamera(Camera):
     def __init__(self, center, normal_vector, width,
-                 resolution, transfer_function,
+                 resolution, transfer_function = None,
                  north_vector = None, steady_north=False,
                  volume = None, fields = None,
                  log_fields = None,
@@ -1465,7 +1469,7 @@ class MosaicCamera(Camera):
         if north_vector is not None: self.steady_north=True
         self.north_vector = north_vector
         self.normal_vector = normal_vector
-        if fields is None: fields = ["Density"]
+        if fields is None: fields = ["density"]
         self.fields = fields
         if transfer_function is None:
             transfer_function = ProjectionTransferFunction()
@@ -1757,7 +1761,7 @@ class MosaicFisheyeCamera(Camera):
         if transfer_function is None:
             transfer_function = ProjectionTransferFunction()
         self.transfer_function = transfer_function
-        if fields is None: fields = ["Density"]
+        if fields is None: fields = ["density"]
         self.fields = fields
         self.sub_samples = sub_samples
         self.log_fields = log_fields
@@ -2017,7 +2021,7 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
     --------
 
     >>> image = allsky_projection(pf, [0.5, 0.5, 0.5], 1.0/pf['mpc'],
-                      32, "Temperature", "Density")
+                      32, "temperature", "density")
     >>> plot_allsky_healpix(image, 32, "healpix.png")
 
     """
@@ -2036,7 +2040,7 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
             function=_make_wf(field, weight))
         # Now we have to tell the parameter file to add it and to calculate its
         # dependencies..
-        pf.h._derived_fields_add(["temp_weightfield"], [])
+        pf.h._derived_fields_add(["temp_weightfield"])
         fields = ["temp_weightfield", weight]
     nv = 12*nside**2
     image = np.zeros((nv,1,4), dtype='float64', order='C')
@@ -2053,29 +2057,17 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
     positions += inner_radius * dx * vs
     vs *= radius
     uv = np.ones(3, dtype='float64')
-    if data_source is not None:
-        grids = data_source._grids
-    else:
-        grids = pf.h.sphere(center, radius)._grids
+    if data_source is None:
+        data_source = pf.h.sphere(center, radius)
     sampler = ProjectionSampler(positions, vs, center, (0.0, 0.0, 0.0, 0.0),
                                 image, uv, uv, np.zeros(3, dtype='float64'))
-    pb = get_pbar("Sampling ", len(grids))
-    for i,grid in enumerate(grids):
-        if data_source is not None:
-            data = [grid[field] * data_source._get_cut_mask(grid) * \
-                grid.child_mask.astype('float64')
-                for field in fields]
-        else:
-            data = [grid[field] * grid.child_mask.astype('float64')
-                for field in fields]
+    for i, (grid, mask) in enumerate(data_source.blocks):
+        data = [(grid[field] * mask).astype("float64") for field in fields]
         pg = PartitionedGrid(
             grid.id, data,
             grid.LeftEdge, grid.RightEdge,
             grid.ActiveDimensions.astype("int64"))
-        grid.clear_data()
         sampler(pg)
-        pb.update(i)
-    pb.finish()
     image = sampler.aimage
     dd = self.pf.h.all_data()
     field = dd._determine_fields([field])[0]
@@ -2139,7 +2131,7 @@ class ProjectionCamera(Camera):
                 function=_make_wf(self.field, self.weight))
             # Now we have to tell the parameter file to add it and to calculate
             # its dependencies..
-            pf.h._derived_fields_add(["temp_weightfield"], [])
+            pf.h._derived_fields_add(["temp_weightfield"])
             fields = ["temp_weightfield", self.weight]
         
         self.fields = fields
@@ -2178,7 +2170,7 @@ class ProjectionCamera(Camera):
         field = dd._determine_fields([self.field])[0]
         finfo = pf._get_field_info(*field)
         if self.weight is None:
-            dl = self.width[2] * pf.units[finfo.projection_conversion]
+            dl = self.width[2]
             image *= dl
         else:
             image[:,:,0] /= image[:,:,1]
@@ -2323,7 +2315,7 @@ def off_axis_projection(pf, center, normal_vector, width, resolution,
     --------
 
     >>> image = off_axis_projection(pf, [0.5, 0.5, 0.5], [0.2,0.3,0.4],
-                      0.2, N, "Temperature", "Density")
+                      0.2, N, "temperature", "density")
     >>> write_image(np.log10(image), "offaxis.png")
 
     """

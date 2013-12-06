@@ -1,27 +1,17 @@
 """
 Import the components of the volume rendering extension
 
-Author: Samuel Skillman <samskillman@gmail.com>
-Affiliation: University of Colorado
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2010-2011 Samuel Skillman.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import numpy as np
 from yt.data_objects.construction_data_containers import YTStreamlineBase
@@ -44,13 +34,13 @@ class Streamlines(ParallelAnalysisInterface):
         An array of initial starting positions of the streamlines.
     xfield: field, optional
         The x component of the vector field to be streamlined.
-        Default:'x-velocity'
+        Default:'velocity_x'
     yfield: field, optional
         The y component of the vector field to be streamlined.
-        Default:'y-velocity'
+        Default:'velocity_y'
     zfield: field, optional
         The z component of the vector field to be streamlined.
-        Default:'z-velocity'
+        Default:'velocity_z'
     volume : `yt.extensions.volume_rendering.HomogenizedVolume`, optional
         The volume to be streamlined.  Can be specified for
         finer-grained control, but otherwise will be automatically
@@ -83,7 +73,7 @@ class Streamlines(ParallelAnalysisInterface):
     >>> pos_dx = np.random.random((N,3))*scale-scale/2.
     >>> pos = c+pos_dx
     
-    >>> streamlines = Streamlines(pf,pos,'x-velocity', 'y-velocity', 'z-velocity', length=1.0) 
+    >>> streamlines = Streamlines(pf,pos,'velocity_x', 'velocity_y', 'velocity_z', length=1.0) 
     >>> streamlines.integrate_through_volume()
     
     >>> import matplotlib.pylab as pl
@@ -95,8 +85,8 @@ class Streamlines(ParallelAnalysisInterface):
     >>>     ax.plot3D(stream[:,0], stream[:,1], stream[:,2], alpha=0.1)
     >>> pl.savefig('streamlines.png')
     """
-    def __init__(self, pf, positions, xfield='x-velocity', yfield='x-velocity',
-                 zfield='x-velocity', volume=None,
+    def __init__(self, pf, positions, xfield='velocity_x', yfield='velocity_x',
+                 zfield='velocity_x', volume=None,
                  dx=None, length=None, direction=1,
                  get_magnitude=False):
         ParallelAnalysisInterface.__init__(self)

@@ -1,34 +1,22 @@
 """
 ImageArray Class
 
-Authors: Samuel Skillman <samskillman@gmail.com>
-Affiliation: University of Colorado at Boulder
+"""
 
-Homepage: http://yt-project.org/
-License:
-    Copyright (C) 2012 Samuel Skillman.  All Rights Reserved.
-
-  This file is part of yt.
-
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-  """
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import numpy as np
 import h5py as h5
 from yt.visualization.image_writer import write_bitmap, write_image
+from yt.data_objects.yt_array import YTArray
 
-class ImageArray(np.ndarray):
+class ImageArray(YTArray):
     r"""A custom Numpy ndarray used for images.
 
     This differs from ndarray in that you can optionally specify an
@@ -84,20 +72,16 @@ class ImageArray(np.ndarray):
     Numpy ndarray documentation appended:
 
     """
-    def __new__(cls, input_array, info=None):
-        # Input array is an already formed ndarray instance
-        # We first cast to be our class type
-        obj = np.asarray(input_array).view(cls)
-        # add the new attribute to the created instance
+    def __new__(cls, input_array, input_units=None, registry=None, info=None):
+        obj = super(ImageArray, cls).__new__(cls, input_array, input_units, registry)
         if info is None:
             info = {}
         obj.info = info
-        # Finally, we must return the newly created object:
         return obj
 
     def __array_finalize__(self, obj):
         # see InfoArray.__array_finalize__ for comments
-        if obj is None: return
+        super(ImageArray, self).__array_finalize__(obj)
         self.info = getattr(obj, 'info', None)
 
     def write_hdf5(self, filename):
@@ -364,11 +348,12 @@ class ImageArray(np.ndarray):
             filename += '.png'
 
         if channel is None:
-            return write_image(self.swapaxes(0,1), filename, 
-                               color_bounds=color_bounds, cmap_name=cmap_name, 
+            return write_image(self.swapaxes(0,1).to_ndarray(), filename,
+                               color_bounds=color_bounds, cmap_name=cmap_name,
                                func=func)
         else:
-            return write_image(self.swapaxes(0,1)[:,:,channel], filename, 
+            return write_image(self.swapaxes(0,1)[:,:,channel].to_ndarray(),
+                               filename,
                                color_bounds=color_bounds, cmap_name=cmap_name, 
                                func=func)
 

@@ -1,33 +1,21 @@
 """
 The data-file handling functions
 
-Author: Samuel W. Skillman <samskillman@gmail.com>
-Affiliation: University of Colorado at Boulder
-Author: Matthew Turk <matthewturk@gmail.com>
-Author: J. S. Oishi <jsoishi@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2007-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 from yt.utilities.io_handler import \
            BaseIOHandler
 import numpy as np
+from yt.funcs import mylog, defaultdict
 
 class IOHandlerAthena(BaseIOHandler):
     _data_style = "athena"
@@ -43,35 +31,45 @@ class IOHandlerAthena(BaseIOHandler):
     def _read_field_names(self,grid):
         pass
 
-    def _read_data(self,grid,field):
-        f = file(grid.filename, 'rb')
-        dtype, offsetr = grid.hierarchy._field_map[field]
-        grid_ncells = np.prod(grid.ActiveDimensions)
-        grid_dims = grid.ActiveDimensions
-        grid0_ncells = np.prod(grid.hierarchy.grid_dimensions[0,:])
-        read_table_offset = get_read_table_offset(f)
-        if grid_ncells != grid0_ncells:
-            offset = offsetr + ((grid_ncells-grid0_ncells) * (offsetr//grid0_ncells))
-        if grid_ncells == grid0_ncells:
-            offset = offsetr
-        f.seek(read_table_offset+offset)
-        if dtype == 'scalar':
-            data = np.fromfile(f, dtype='>f4',
-                    count=grid_ncells).reshape(grid_dims,order='F').copy()
-        if dtype == 'vector':
-            data = np.fromfile(f, dtype='>f4', count=3*grid_ncells)
-            if '_x' in field:
-                data = data[0::3].reshape(grid_dims,order='F').copy()
-            elif '_y' in field:
-                data = data[1::3].reshape(grid_dims,order='F').copy()
-            elif '_z' in field:
-                data = data[2::3].reshape(grid_dims,order='F').copy()
-        f.close()
-        if grid.pf.field_ordering == 1:
-            return data.T
-        else:
-            return data
-
+    def _read_chunk_data(self,chunk,fields):
+        data = {}
+        grids_by_file = defaultdict(list)
+        if len(chunk.objs) == 0: return data
+        field_list = set(f[1] for f in fields)
+        for grid in chunk.objs:
+            if grid.filename is None:
+                continue
+            f = open(grid.filename, "rb")
+            data[grid.id] = {}
+            grid_ncells = np.prod(grid.ActiveDimensions)
+            grid_dims = grid.ActiveDimensions
+            grid0_ncells = np.prod(grid.hierarchy.grid_dimensions[0,:])
+            read_table_offset = get_read_table_offset(f)
+            for field in self.pf.h.field_list:
+                dtype, offsetr = grid.hierarchy._field_map[field]
+                if grid_ncells != grid0_ncells:
+                    offset = offsetr + ((grid_ncells-grid0_ncells) * (offsetr//grid0_ncells))
+                if grid_ncells == grid0_ncells:
+                    offset = offsetr
+                f.seek(read_table_offset+offset)
+                if dtype == 'scalar':
+                    v = np.fromfile(f, dtype='>f4',
+                                    count=grid_ncells).reshape(grid_dims,order='F').copy()
+                if dtype == 'vector':
+                    v = np.fromfile(f, dtype='>f4', count=3*grid_ncells)
+                if '_x' in field:
+                    v = v[0::3].reshape(grid_dims,order='F').copy()
+                elif '_y' in field:
+                    v = v[1::3].reshape(grid_dims,order='F').copy()
+                elif '_z' in field:
+                    v = v[2::3].reshape(grid_dims,order='F').copy()
+                if grid.pf.field_ordering == 1:
+                    data[grid.id][field] = v.T.astype("float64")
+                else:
+                    data[grid.id][field] = v.astype("float64")
+            f.close()
+        return data
+    
     def _read_data_slice(self, grid, field, axis, coord):
         sl = [slice(None), slice(None), slice(None)]
         sl[axis] = slice(coord, coord + 1)
@@ -79,6 +77,27 @@ class IOHandlerAthena(BaseIOHandler):
             sl.reverse()
         return self._read_data_set(grid, field)[sl]
 
+    def _read_fluid_selection(self, chunks, selector, fields, size):
+        chunks = list(chunks)
+        if any((ftype != "gas" for ftype, fname in fields)):
+            raise NotImplementedError
+        rv = {}
+        for field in fields:
+            rv[field] = np.empty(size, dtype="float64")
+        ng = sum(len(c.objs) for c in chunks)
+        mylog.debug("Reading %s cells of %s fields in %s grids",
+                    size, [f2 for f1, f2 in fields], ng)
+        ind = 0
+        for chunk in chunks:
+            data = self._read_chunk_data(chunk, fields)
+            for g in chunk.objs:
+                for field in fields:
+                    ftype, fname = field
+                    ds = data[g.id].pop(fname)
+                    nd = g.select(selector, ds, rv[field], ind) # caches
+                ind += nd
+                data.pop(g.id)
+        return rv
 
 def get_read_table_offset(f):
     line = f.readline()

@@ -1,27 +1,17 @@
 """
 Data structures for Enzo
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2007-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import h5py
 import weakref
@@ -44,29 +34,19 @@ from yt.geometry.grid_geometry_handler import \
     GridGeometryHandler
 from yt.data_objects.static_output import \
     StaticOutput
-from yt.data_objects.field_info_container import \
+from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
-from yt.utilities import hdf5_light_reader
+from yt.utilities.io_handler import io_registry
 from yt.utilities.logger import ytLogger as mylog
+from yt.data_objects.yt_array import YTQuantity
 
-from .definitions import parameterDict
 from .fields import \
-    EnzoFieldInfo, Enzo2DFieldInfo, Enzo1DFieldInfo, \
-    add_enzo_field, add_enzo_2d_field, add_enzo_1d_field, \
-    KnownEnzoFields
+    EnzoFieldInfo
 
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     parallel_blocking_call
-
-def get_field_names_helper(filename, id, results):
-    try:
-        names = hdf5_light_reader.ReadListOfDatasets(
-                    filename, "/Grid%08i" % id)
-        results.put((names, "Grid %s has: %s" % (id, names)))
-    except (exceptions.KeyError, hdf5_light_reader.ReadingError):
-        results.put((None, "Grid %s is a bit funky?" % id))
 
 class EnzoGrid(AMRGridPatch):
     """
@@ -139,8 +119,11 @@ class EnzoGrid(AMRGridPatch):
 
     @property
     def NumberOfActiveParticles(self):
-        if not hasattr(self.hierarchy, "grid_active_particle_count"): return 0
-        return self.hierarchy.grid_active_particle_count[self.id - self._id_offset]
+        if not hasattr(self.hierarchy, "grid_active_particle_count"): return {}
+        id = self.id - self._id_offset
+        nap = dict((ptype, self.hierarchy.grid_active_particle_count[ptype][id]) \
+                   for ptype in self.hierarchy.grid_active_particle_count)
+        return nap
 
 class EnzoGridInMemory(EnzoGrid):
     __slots__ = ['proc_num']
@@ -153,10 +136,11 @@ class EnzoGridGZ(EnzoGrid):
 
     def retrieve_ghost_zones(self, n_zones, fields, all_levels=False,
                              smoothed=False):
-        # We ignore smoothed in this case.
-        if n_zones > 3:
+        NGZ = self.pf.parameters.get("NumberOfGhostZones", 3)
+        if n_zones > NGZ:
             return EnzoGrid.retrieve_ghost_zones(
                 self, n_zones, fields, all_levels, smoothed)
+
         # ----- Below is mostly the original code, except we remove the field
         # ----- access section
         # We will attempt this by creating a datacube that is exactly bigger
@@ -184,7 +168,12 @@ class EnzoGridGZ(EnzoGrid):
                 level, new_left_edge, **kwargs)
         # ----- This is EnzoGrid.get_data, duplicated here mostly for
         # ----  efficiency's sake.
-        sl = [slice(3 - n_zones, -(3 - n_zones)) for i in range(3)]
+        start_zone = NGZ - n_zones
+        if start_zone == 0:
+            end_zone = None
+        else:
+            end_zone = -(NGZ - n_zones)
+        sl = [slice(start_zone, end_zone) for i in range(3)]
         if fields is None: return cube
         for field in ensure_list(fields):
             if field in self.hierarchy.field_list:
@@ -233,6 +222,7 @@ class EnzoHierarchy(GridGeometryHandler):
         self.object_types.sort()
 
     def _count_grids(self):
+        self.num_grids = None
         test_grid = test_grid_id = None
         self.num_stars = 0
         for line in rlines(open(self.hierarchy_filename, "rb")):
@@ -243,8 +233,11 @@ class EnzoHierarchy(GridGeometryHandler):
             if line.startswith("NumberOfStarParticles"):
                 self.num_stars = int(line.split("=")[-1])
             if line.startswith("Grid "):
-                self.num_grids = test_grid_id = int(line.split("=")[-1])
-                break
+                if self.num_grids is None:
+                    self.num_grids = int(line.split("=")[-1])
+                test_grid_id = int(line.split("=")[-1])
+                if test_grid is not None:
+                    break
         self._guess_data_style(self.pf.dimensionality, test_grid, test_grid_id)
 
     def _guess_data_style(self, rank, test_grid, test_grid_id):
@@ -256,34 +249,21 @@ class EnzoHierarchy(GridGeometryHandler):
             mylog.debug("Your data uses the annoying hardcoded path.")
             self._strip_path = True
         if self.data_style is not None: return
-        try:
-            a = SD.SD(test_grid)
-            self.data_style = 'enzo_hdf4'
-            mylog.debug("Detected HDF4")
-        except:
-            try:
-                list_of_sets = hdf5_light_reader.ReadListOfDatasets(test_grid, "/")
-            except:
-                print "Could not find dataset.  Defaulting to packed HDF5"
-                list_of_sets = []
-            if len(list_of_sets) == 0 and rank == 3:
-                mylog.debug("Detected packed HDF5")
-                if self.parameters.get("WriteGhostZones", 0) == 1:
-                    self.data_style= "enzo_packed_3d_gz"
-                    self.grid = EnzoGridGZ
-                else:
-                    self.data_style = 'enzo_packed_3d'
-            elif len(list_of_sets) > 0 and rank == 3:
-                mylog.debug("Detected unpacked HDF5")
-                self.data_style = 'enzo_hdf5'
-            elif len(list_of_sets) == 0 and rank == 2:
-                mylog.debug("Detect packed 2D")
-                self.data_style = 'enzo_packed_2d'
-            elif len(list_of_sets) == 0 and rank == 1:
-                mylog.debug("Detect packed 1D")
-                self.data_style = 'enzo_packed_1d'
+        if rank == 3:
+            mylog.debug("Detected packed HDF5")
+            if self.parameters.get("WriteGhostZones", 0) == 1:
+                self.data_style= "enzo_packed_3d_gz"
+                self.grid = EnzoGridGZ
             else:
-                raise TypeError
+                self.data_style = 'enzo_packed_3d'
+        elif rank == 2:
+            mylog.debug("Detect packed 2D")
+            self.data_style = 'enzo_packed_2d'
+        elif rank == 1:
+            mylog.debug("Detect packed 1D")
+            self.data_style = 'enzo_packed_1d'
+        else:
+            raise NotImplementedError
 
     # Sets are sorted, so that won't work!
     def _parse_hierarchy(self):
@@ -299,7 +279,7 @@ class EnzoHierarchy(GridGeometryHandler):
         self.grids[0].Level = 0
         si, ei, LE, RE, fn, npart = [], [], [], [], [], []
         all = [si, ei, LE, RE, fn]
-        pbar = get_pbar("Parsing Hierarchy", self.num_grids)
+        pbar = get_pbar("Parsing Hierarchy ", self.num_grids)
         if self.parameter_file.parameters["VersionNumber"] > 2.0:
             active_particles = True
             nap = {}
@@ -347,11 +327,9 @@ class EnzoHierarchy(GridGeometryHandler):
         super(EnzoHierarchy, self)._initialize_grid_arrays()
         if "AppendActiveParticleType" in self.parameters.keys() and \
                 len(self.parameters["AppendActiveParticleType"]):
-            pdtype = [(ptype, 'i4') for ptype in
-                self.parameters["AppendActiveParticleType"]]
-        else:
-            pdtype = None
-        self.grid_active_particle_count = np.zeros(self.num_grids, dtype=pdtype)
+            gac = dict((ptype, np.zeros(self.num_grids, dtype='i4')) \
+                       for ptype in self.parameters["AppendActiveParticleType"])
+            self.grid_active_particle_count = gac
 
     def _fill_arrays(self, ei, si, LE, RE, npart, nap):
         self.grid_dimensions.flat[:] = ei
@@ -425,7 +403,7 @@ class EnzoHierarchy(GridGeometryHandler):
                 continue
             gs = self.grids[select_grids > 0]
             g = gs[0]
-            handle = h5py.File(g.filename)
+            handle = h5py.File(g.filename, "r")
             node = handle["/Grid%08i/Particles/" % g.id]
             for ptype in (str(p) for p in node):
                 if ptype not in _fields: continue
@@ -448,61 +426,28 @@ class EnzoHierarchy(GridGeometryHandler):
                 dd.pop("name")
                 add_field((apt, fname), **dd)
 
-    def _detect_fields(self):
+    def _detect_output_fields(self):
         self.field_list = []
         # Do this only on the root processor to save disk work.
         if self.comm.rank in (0, None):
-            field_list = self.get_data("/", "DataFields")
-            if field_list is None:
-                mylog.info("Gathering a field list (this may take a moment.)")
-                field_list = set()
-                random_sample = self._generate_random_grids()
-                tothread = ytcfg.getboolean("yt","thread_field_detection")
-                if tothread:
-                    jobs = []
-                    result_queue = Queue.Queue()
-                    # Start threads
-                    for grid in random_sample:
-                        if not hasattr(grid, 'filename'): continue
-                        helper = Thread(target = get_field_names_helper, 
-                            args = (grid.filename, grid.id, result_queue))
-                        jobs.append(helper)
-                        helper.start()
-                    # Here we make sure they're finished.
-                    for helper in jobs:
-                        helper.join()
-                    for grid in random_sample:
-                        res = result_queue.get()
-                        mylog.debug(res[1])
-                        if res[0] is not None:
-                            field_list = field_list.union(res[0])
-                else:
-                    for grid in random_sample:
-                        if not hasattr(grid, 'filename'): continue
-                        try:
-                            gf = self.io._read_field_names(grid)
-                        except self.io._read_exception:
-                            mylog.debug("Grid %s is a bit funky?", grid.id)
-                            continue
-                        mylog.debug("Grid %s has: %s", grid.id, gf)
-                        field_list = field_list.union(gf)
+            mylog.info("Gathering a field list (this may take a moment.)")
+            field_list = set()
+            random_sample = self._generate_random_grids()
+            for grid in random_sample:
+                if not hasattr(grid, 'filename'): continue
+                try:
+                    gf = self.io._read_field_names(grid)
+                except self.io._read_exception:
+                    mylog.debug("Grid %s is a bit funky?", grid.id)
+                    continue
+                mylog.debug("Grid %s has: %s", grid.id, gf)
+                field_list = field_list.union(gf)
             if "AppendActiveParticleType" in self.parameter_file.parameters:
                 ap_fields = self._detect_active_particle_fields()
                 field_list = list(set(field_list).union(ap_fields))
         else:
             field_list = None
-        field_list = self.comm.mpi_bcast(field_list)
-        self.field_list = []
-        # Now we will iterate over all fields, trying to avoid the problem of
-        # particle types not having names.  This should convert all known
-        # particle fields that exist in Enzo outputs into the construction
-        # ("all", field) and should not otherwise affect ActiveParticle
-        # simulations.
-        for field in field_list:
-            if ("all", field) in KnownEnzoFields:
-                self.field_list.append(("all", field))
-            else:
-                self.field_list.append(field)
+        self.field_list = list(self.comm.mpi_bcast(field_list))
 
     def _generate_random_grids(self):
         if self.num_grids > 40:
@@ -574,7 +519,6 @@ class EnzoHierarchy(GridGeometryHandler):
                 for p in pfields:
                     result[p] = result[p][0:max_num]
         return result
-
 
 class EnzoHierarchyInMemory(EnzoHierarchy):
 
@@ -649,7 +593,7 @@ class EnzoHierarchyInMemory(EnzoHierarchy):
     _cached_field_list = None
     _cached_derived_field_list = None
 
-    def _detect_fields(self):
+    def _detect_output_fields(self):
         if self.__class__._cached_field_list is None:
             EnzoHierarchy._detect_fields(self)
             self.__class__._cached_field_list = self.field_list
@@ -709,8 +653,7 @@ class EnzoStaticOutput(StaticOutput):
     Enzo-specific output, set at a fixed time.
     """
     _hierarchy_class = EnzoHierarchy
-    _fieldinfo_fallback = EnzoFieldInfo
-    _fieldinfo_known = KnownEnzoFields
+    _field_info_class = EnzoFieldInfo
     _particle_mass_name = "ParticleMass"
     _particle_coordinates_name = "Coordinates"
 
@@ -728,6 +671,7 @@ class EnzoStaticOutput(StaticOutput):
         paarmeter file and a *conversion_override* dictionary that consists
         of {fieldname : conversion_to_cgs} that will override the #DataCGS.
         """
+        self.fluid_types += ("enzo",)
         if filename.endswith(".hierarchy"): filename = filename[:-10]
         if parameter_override is None: parameter_override = {}
         self._parameter_override = parameter_override
@@ -741,7 +685,6 @@ class EnzoStaticOutput(StaticOutput):
 
     def _setup_1d(self):
         self._hierarchy_class = EnzoHierarchy1D
-        self._fieldinfo_fallback = Enzo1DFieldInfo
         self.domain_left_edge = \
             np.concatenate([[self.domain_left_edge], [0.0, 0.0]])
         self.domain_right_edge = \
@@ -749,7 +692,6 @@ class EnzoStaticOutput(StaticOutput):
 
     def _setup_2d(self):
         self._hierarchy_class = EnzoHierarchy2D
-        self._fieldinfo_fallback = Enzo2DFieldInfo
         self.domain_left_edge = \
             np.concatenate([self.domain_left_edge, [0.0]])
         self.domain_right_edge = \
@@ -761,12 +703,7 @@ class EnzoStaticOutput(StaticOutput):
         """
         if self.parameters.has_key(parameter):
             return self.parameters[parameter]
-
-        # Let's read the file
-        self.unique_identifier = \
-            int(os.stat(self.parameter_filename)[stat.ST_CTIME])
-        lines = open(self.parameter_filename).readlines()
-        for lineI, line in enumerate(lines):
+        for line in open(self.parameter_filename):
             if line.find("#") >= 1: # Keep the commented lines
                 line=line[:line.find("#")]
             line=line.strip().rstrip()
@@ -801,10 +738,10 @@ class EnzoStaticOutput(StaticOutput):
         # Let's read the file
         self.unique_identifier = \
             int(os.stat(self.parameter_filename)[stat.ST_CTIME])
-        lines = open(self.parameter_filename).readlines()
         data_labels = {}
         data_label_factors = {}
-        for line in (l.strip() for l in lines):
+        conversion_factors = {}
+        for line in (l.strip() for l in open(self.parameter_filename)):
             if len(line) < 2: continue
             param, vals = (i.strip() for i in line.split("=",1))
             # First we try to decipher what type of value it is.
@@ -828,39 +765,21 @@ class EnzoStaticOutput(StaticOutput):
                     else:
                         pcast = int
             # Now we figure out what to do with it.
-            if param.endswith("Units") and not param.startswith("Temperature"):
-                dataType = param[:-5]
-                # This one better be a float.
-                self.conversion_factors[dataType] = float(vals[0])
-            if param.startswith("#DataCGS") or \
-                 param.startswith("#CGSConversionFactor"):
-                # Assume of the form: #DataCGSConversionFactor[7] = 2.38599e-26 g/cm^3
-                # Which one does it belong to?
-                data_id = param[param.find("[")+1:param.find("]")]
-                data_label_factors[data_id] = float(vals[0])
-            if param.startswith("DataLabel"):
-                data_id = param[param.find("[")+1:param.find("]")]
-                data_labels[data_id] = vals[0]
             if len(vals) == 0:
                 vals = ""
             elif len(vals) == 1:
                 vals = pcast(vals[0])
             else:
                 vals = np.array([pcast(i) for i in vals if i != "-99999"])
-            if param.startswith("Append") and param not in self.parameters:
-                self.parameters[param] = []
             if param.startswith("Append"):
+                if param not in self.parameters:
+                    self.parameters[param] = []
                 self.parameters[param].append(vals)
             else:
                 self.parameters[param] = vals
-        for p, v in self._parameter_override.items():
-            self.parameters[p] = v
-        for p, v in self._conversion_override.items():
-            self.conversion_factors[p] = v
-        for k, v in data_label_factors.items():
-            self.conversion_factors[data_labels[k]] = v
         self.refine_by = self.parameters["RefineBy"]
-        self.periodicity = ensure_tuple(self.parameters["LeftFaceBoundaryCondition"] == 3)
+        self.periodicity = ensure_tuple(
+            self.parameters["LeftFaceBoundaryCondition"] == 3)
         self.dimensionality = self.parameters["TopGridRank"]
         if self.dimensionality > 1:
             self.domain_dimensions = self.parameters["TopGridDimensions"]
@@ -881,12 +800,12 @@ class EnzoStaticOutput(StaticOutput):
             self.domain_dimensions = np.array([self.parameters["TopGridDimensions"],1,1])
             self.periodicity += (False, False)
 
-        self.current_time = self.parameters["InitialTime"]
+        self.gamma = self.parameters["Gamma"]
         # To be enabled when we can break old pickles:
         #if "MetaDataSimulationUUID" in self.parameters:
         #    self.unique_identifier = self.parameters["MetaDataSimulationUUID"]
-        if "CurrentTimeIdentifier" in self.parameters:
-            self.unique_identifier = self.parameters["CurrentTimeIdentifier"]
+        self.unique_identifier = self.parameters.get("MetaDataDatasetUUID",
+                self.parameters.get("CurrentTimeIdentifier", None))
         if self.parameters["ComovingCoordinates"]:
             self.cosmological_simulation = 1
             self.current_redshift = self.parameters["CosmologyCurrentRedshift"]
@@ -896,78 +815,57 @@ class EnzoStaticOutput(StaticOutput):
         else:
             self.current_redshift = self.omega_lambda = self.omega_matter = \
                 self.hubble_constant = self.cosmological_simulation = 0.0
-        self.particle_types = ["all"]
-        for ptype in self.parameters.get("AppendActiveParticleType", []):
-            self.particle_types.append(ptype)
+        self.particle_types = []
+        self.current_time = self.quan(self.parameters["InitialTime"], "code_time")
         if self.parameters["NumberOfParticles"] > 0 and \
             "AppendActiveParticleType" in self.parameters.keys():
-            self.particle_types.append("DarkMatter")
+            # If this is the case, then we know we should have a DarkMatter
+            # particle type, and we don't need the "io" type.
             self.parameters["AppendActiveParticleType"].append("DarkMatter")
+        else:
+            # We do not have an "io" type for Enzo particles if the
+            # ActiveParticle machinery is on, as we simply will ignore any of
+            # the non-DarkMatter particles in that case.  However, for older
+            # datasets, we call this particle type "io".
+            self.particle_types = ["io"]
+        for ptype in self.parameters.get("AppendActiveParticleType", []):
+            self.particle_types.append(ptype)
+        self.particle_types = tuple(self.particle_types)
+        self.particle_types_raw = self.particle_types
 
         if self.dimensionality == 1:
             self._setup_1d()
         elif self.dimensionality == 2:
             self._setup_2d()
 
-    def _set_units(self):
-        """
-        Generates the conversion to various physical _units based on the parameter file
-        """
-        self.units = {}
-        self.time_units = {}
-        if len(self.parameters) == 0:
-            self._parse_parameter_file()
-        if "EOSType" not in self.parameters: self.parameters["EOSType"] = -1
-        if self["ComovingCoordinates"]:
-            self._setup_comoving_units()
-        elif self.has_key("LengthUnit"):
-            # 'Why share when we can reinvent incompatibly?'
-            self.parameters["LengthUnits"] = self["LengthUnit"]
-            self._setup_getunits_units()
-        elif self.has_key("LengthUnits"):
-            self._setup_getunits_units()
+    def set_code_units(self):
+        if self.cosmological_simulation:
+            k = self.cosmology_get_units()
+            # Now some CGS values
+            length_unit = k['uxyz']
+            mass_unit = k['urho'] * length_unit**3
+            time_unit = k['utim']
+        elif "LengthUnits" in self.parameters:
+            length_unit = self.parameters["LengthUnits"]
+            mass_unit = self.parameters["MassUnits"]
+            time_unit = self.parameters["TimeUnits"]
         else:
-            self._setup_nounits_units()
-        self.time_units['1'] = 1
-        self.units['1'] = 1
-        self.units['unitary'] = 1.0 / (self.domain_right_edge - self.domain_left_edge).max()
-        for unit in sec_conversion.keys():
-            self.time_units[unit] = self["Time"] / sec_conversion[unit]
+            mylog.warning("Setting 1.0 in code units to be 1.0 cm")
+            mylog.warning("Setting 1.0 in code units to be 1.0 s")
+            mylog.warning("Setting 1.0 in code units to be 1.0 g")
+            length_unit = mass_unit = time_unit = 1.0
 
-    def _setup_comoving_units(self):
-        z = self["CosmologyCurrentRedshift"]
-        h = self["CosmologyHubbleConstantNow"]
-        boxcm_cal = self["CosmologyComovingBoxSize"]
-        boxcm_uncal = boxcm_cal / h
-        box_proper = boxcm_uncal/(1+z)
-        self.units['aye']  = (1.0 + self["CosmologyInitialRedshift"])/(z + 1.0)
-        if not self.has_key("Time"):
-            cu = self.cosmology_get_units()
-            self.conversion_factors["Time"] = cu['utim']
-        for unit in mpc_conversion:
-            self.units[unit] = mpc_conversion[unit] * box_proper
-            self.units[unit+'h'] = mpc_conversion[unit] * box_proper * h
-            self.units[unit+'cm'] = mpc_conversion[unit] * boxcm_uncal
-            self.units[unit+'hcm'] = mpc_conversion[unit] * boxcm_cal
+        magnetic_unit = np.sqrt(4*np.pi * mass_unit /
+                                (time_unit**2 * length_unit))
+        self.magnetic_unit = YTQuantity(magnetic_unit, "gauss")
+        self.length_unit = YTQuantity(length_unit, "cm")
+        self.mass_unit = YTQuantity(mass_unit, "g")
+        self.time_unit = YTQuantity(time_unit, "s")
 
-    def _setup_getunits_units(self):
-        # We are given LengthUnits, which is number of cm per box length
-        # So we convert that to box-size in Mpc
-        box_proper = 3.24077e-25 * self["LengthUnits"]
-        self.units['aye']  = 1.0
-        for unit in mpc_conversion.keys():
-            self.units[unit] = mpc_conversion[unit] * box_proper
-        if not self.has_key("TimeUnits"):
-            self.conversion_factors["Time"] = self["LengthUnits"] / self["x-velocity"]
-
-    def _setup_nounits_units(self):
-        z = 0
-        mylog.warning("Setting 1.0 in code units to be 1.0 cm")
-        if not self.has_key("TimeUnits"):
-            mylog.warning("No time units.  Setting 1.0 = 1 second.")
-            self.conversion_factors["Time"] = 1.0
-        for unit in mpc_conversion.keys():
-            self.units[unit] = mpc_conversion[unit] / mpc_conversion["cm"]
+        self.unit_registry.modify("code_magnetic", self.magnetic_unit.value)
+        self.unit_registry.modify("code_length", self.length_unit.value)
+        self.unit_registry.modify("code_mass", self.mass_unit.value)
+        self.unit_registry.modify("code_time", self.time_unit.value)
 
     def cosmology_get_units(self):
         """
@@ -1002,6 +900,11 @@ class EnzoStaticOutput(StaticOutput):
         if ("%s" % (args[0])).endswith(".hierarchy"):
             return True
         return os.path.exists("%s.hierarchy" % args[0])
+
+    def _setup_particle_type(self, ptype):
+        orig = set(self.field_info.items())
+        self.field_info.setup_particle_fields(ptype)
+        return [n for n, v in set(self.field_info.items()).difference(orig)]
 
 class EnzoStaticOutputInMemory(EnzoStaticOutput):
     _hierarchy_class = EnzoHierarchyInMemory

@@ -1,28 +1,18 @@
 """
 Test symbolic unit handling.
 
-Author: Casey W. Stark <caseywstark@gmail.com>
-Affiliation: UC Berkeley
 
-License:
-  Copyright (C) 2012 Casey W. Stark.  All Rights Reserved.
 
-  This file is part of yt.
-
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import nose
 from numpy.testing import assert_approx_equal
@@ -31,11 +21,11 @@ from sympy import Symbol
 # base dimensions
 from yt.utilities.units import mass, length, time, temperature
 # functions
-from yt.utilities.units import get_conversion_factor, make_symbols_positive
+from yt.utilities.units import get_conversion_factor
 # classes
 from yt.utilities.units import Unit, UnitParseError
 # objects
-from yt.utilities.units import unit_symbols_dict, unit_prefixes
+from yt.utilities.units import default_unit_symbol_lut, unit_prefixes
 
 
 def test_no_conflicting_symbols():
@@ -43,16 +33,19 @@ def test_no_conflicting_symbols():
     Check unit symbol definitions for conflicts.
 
     """
-    full_set = set(unit_symbols_dict.keys())
+    full_set = set(default_unit_symbol_lut.keys())
 
     # go through all possible prefix combos
-    for symbol in unit_symbols_dict.keys():
+    for symbol in default_unit_symbol_lut.keys():
         for prefix in unit_prefixes.keys():
             new_symbol = "%s%s" % (prefix, symbol)
 
             # test if we have seen this symbol
             if new_symbol in full_set:
                 print "Duplicate symbol: %s" % new_symbol
+                # Special case, see: http://lists.spacepope.org/pipermail/yt-dev-spacepope.org/2013-December/003763.html
+                if new_symbol == 'mpc':
+                    pass
                 assert False
 
             full_set.add(new_symbol)
@@ -69,6 +62,13 @@ def test_dimensionless():
     assert u1.expr == 1
     assert u1.cgs_value == 1
     assert u1.dimensions == 1
+
+    u2 = Unit("")
+
+    assert u2.is_dimensionless
+    assert u2.expr == 1
+    assert u2.cgs_value == 1
+    assert u2.dimensions == 1
 
 #
 # Start init tests
@@ -247,7 +247,7 @@ def test_string_representation():
     assert str(Myr) == "Myr"
     assert str(speed) == "pc/Myr"
     assert repr(speed) == "pc/Myr"
-    assert str(dimensionless) == "(dimensionless)"
+    assert str(dimensionless) == "dimensionless"
 
 #
 # Start operation tests
