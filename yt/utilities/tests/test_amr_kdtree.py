@@ -1,27 +1,17 @@
 """
 Unit test the ARMKDTree in yt.
 
-Author: Samuel Skillman <samskillman@gmail.com>
-Affiliation: University of Colorado at Boulder
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2013 Samuel Skillman.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from yt.utilities.amr_kdtree.api import AMRKDTree
 from yt.utilities.lib.amr_kdtools import depth_traverse, \
@@ -38,9 +28,9 @@ def test_amr_kdtree_coverage():
     domain_dims = (32, 32, 32)
     data = np.zeros(domain_dims) + 0.25
     fo = [ic.CoredSphere(0.05, 0.3, [0.7, 0.4, 0.75],
-                         {"Density": (0.25, 100.0)})]
+                         {"density": (0.25, 100.0)})]
     rc = [fm.flagging_method_registry["overdensity"](8.0)]
-    ug = load_uniform_grid({'Density': data}, domain_dims, 1.0)
+    ug = load_uniform_grid({"density": data}, domain_dims, 1.0)
     pf = refine_amr(ug, rc, fo, 5)
 
     kd = AMRKDTree(pf)

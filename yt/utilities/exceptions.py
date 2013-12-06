@@ -1,35 +1,25 @@
 """
 This is a library of yt-defined exceptions
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2009 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 # We don't need to import 'exceptions'
 #import exceptions
 import os.path
 
 class YTException(Exception):
-    def __init__(self, pf = None):
-        Exception.__init__(self)
+    def __init__(self, message = None, pf = None):
+        Exception.__init__(self, message)
         self.pf = pf
 
 # Data access exceptions:
@@ -45,7 +35,7 @@ class YTOutputNotIdentified(YTException):
 
 class YTSphereTooSmall(YTException):
     def __init__(self, pf, radius, smallest_cell):
-        YTException.__init__(self, pf)
+        YTException.__init__(self, pf=pf)
         self.radius = radius
         self.smallest_cell = smallest_cell
 
@@ -129,7 +119,7 @@ class InvalidSimulationTimeSeries(YTException):
             
 class MissingParameter(YTException):
     def __init__(self, pf, parameter):
-        YTException.__init__(self, pf)
+        YTException.__init__(self, pf=pf)
         self.parameter = parameter
 
     def __str__(self):
@@ -138,7 +128,7 @@ class MissingParameter(YTException):
 
 class NoStoppingCondition(YTException):
     def __init__(self, pf):
-        YTException.__init__(self, pf)
+        YTException.__init__(self, pf=pf)
 
     def __str__(self):
         return "Simulation %s has no stopping condition.  StopTime or StopCycle should be set." % \
@@ -172,6 +162,34 @@ class YTUnitNotRecognized(YTException):
     def __str__(self):
         return "This parameter file doesn't recognize %s" % self.unit
 
+class YTUnitOperationError(YTException):
+    def __init__(self, operation, unit1, unit2=None):
+        self.operation = operation
+        self.unit1 = unit1
+        self.unit2 = unit2
+        YTException.__init__(self)
+
+    def __str__(self):
+        err = "The %s operator for YTArrays with units (%s) "
+        if self.unit2 is not None:
+            err += "and (%s) "
+        err += "is not well defined."
+        return err % (self.operation, self.unit1, self.unit2)
+
+class YTUnitConversionError(YTException):
+    def __init__(self, unit1, dimension1, unit2, dimension2):
+        self.unit1 = unit1
+        self.unit2 = unit2
+        self.dimension1 = dimension1
+        self.dimension2 = dimension2
+        YTException.__init__(self)
+
+    def __str__(self):
+        err = "Unit dimensionalities do not match. Tried to convert between " \
+          "%s (dim %s) and %s (dim %s)." \
+          % (self.unit1, self.dimension1, self.unit2, self.dimension2)
+        return err
+
 class YTHubRegisterError(YTException):
     def __str__(self):
         return "You must create an API key before uploading.  See " + \
@@ -203,7 +221,7 @@ class YTCloudError(YTException):
 
 class YTEllipsoidOrdering(YTException):
     def __init__(self, pf, A, B, C):
-        YTException.__init__(self, pf)
+        YTException.__init__(self, pf=pf)
         self._A = A
         self._B = B
         self._C = C
@@ -251,7 +269,7 @@ class YTFieldNotParseable(YTException):
         self.field = field
 
     def __str__(self):
-        return "Cannot identify field %s" % self.field
+        return "Cannot identify field %s" % (self.field,)
 
 class YTDataSelectorNotImplemented(YTException):
     def __init__(self, class_name):
@@ -297,4 +315,27 @@ class YTIllDefinedBounds(YTException):
         v =  "The bounds %0.3e and %0.3e are ill-defined. " % (self.lb, self.ub)
         v += "Typically this happens when a log binning is specified "
         v += "and zero or negative values are given for the bounds."
+        return v
+
+class YTObjectNotImplemented(YTException):
+    def __init__(self, pf, obj_name):
+        self.pf = pf
+        self.obj_name = obj_name
+
+    def __str__(self):
+        v  = r"The object type '%s' is not implemented for the parameter file "
+        v += r"'%s'."
+        return v % (self.obj_name, self.pf)
+
+class YTRockstarMultiMassNotSupported(YTException):
+    def __init__(self, mi, ma, ptype):
+        self.mi = mi
+        self.ma = ma
+        self.ptype = ptype
+
+    def __str__(self):
+        v = "Particle type '%s' has minimum mass %0.3e and maximum " % (
+            self.ptype, self.mi)
+        v += "mass %0.3e.  Multi-mass particles are not currently supported." % (
+            self.ma)
         return v

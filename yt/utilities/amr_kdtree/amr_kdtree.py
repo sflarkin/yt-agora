@@ -1,28 +1,17 @@
 """
 AMR kD-Tree Framework
 
-Authors: Samuel Skillman <samskillman@gmail.com>
-Affiliation: University of Colorado at Boulder
 
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2010-2011 Samuel Skillman.  All Rights Reserved.
-
-  This file is part of yt.
-
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
+
 from yt.funcs import *
 import numpy as np
 import h5py
@@ -57,7 +46,10 @@ class Tree(object):
         min_level=None, max_level=None, data_source=None):
 
         self.pf = pf
-        self._id_offset = self.pf.h.grids[0]._id_offset
+        try:
+            self._id_offset = pf.h.grids[0]._id_offset
+        except AttributeError:
+            self._id_offset = 0
 
         if data_source is None:
             data_source = pf.h.all_data()
@@ -91,6 +83,7 @@ class Tree(object):
             grids = np.array([b for b, mask in self.data_source.blocks if b.Level == lvl])
             gids = np.array([g.id for g in grids if g.Level == lvl],
                             dtype="int64")
+            if len(grids) == 0: continue
             self.add_grids(grids)
 
     def check_tree(self):
@@ -169,7 +162,7 @@ class AMRKDTree(ParallelAnalysisInterface):
                          data_source=data_source)
 
     def set_fields(self, fields, log_fields, no_ghost):
-        self.fields = fields
+        self.fields = self.data_source._determine_fields(fields)
         self.log_fields = log_fields
         self.no_ghost = no_ghost
         del self.bricks, self.brick_dimensions
@@ -243,8 +236,8 @@ class AMRKDTree(ParallelAnalysisInterface):
     def get_brick_data(self, node):
         if node.data is not None: return node.data
         grid = self.pf.h.grids[node.grid - self._id_offset]
-        dds = grid.dds
-        gle = grid.LeftEdge
+        dds = grid.dds.ndarray_view()
+        gle = grid.LeftEdge.ndarray_view()
         nle = get_left_edge(node)
         nre = get_right_edge(node)
         li = np.rint((nle-gle)/dds).astype('int32')
@@ -538,6 +531,3 @@ if __name__ == "__main__":
     print kd_sum_volume(hv.tree.trunk)
     print kd_node_check(hv.tree.trunk)
     print 'Time: %e seconds' % (t2-t1)
-
-
-

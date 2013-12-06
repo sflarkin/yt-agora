@@ -2,27 +2,17 @@
 Very simple convenience function for importing all the modules, setting up
 the namespace and getting the last argument on the command line.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from __future__ import absolute_import
 
@@ -48,21 +38,29 @@ unparsed_args = __startup_tasks.unparsed_args
 from yt.funcs import *
 from yt.utilities.logger import ytLogger as mylog
 from yt.utilities.performance_counters import yt_counters, time_function
-from yt.config import ytcfg, ytcfgDefaults
+from yt.config import ytcfg, ytcfg_defaults
 import yt.utilities.physical_constants as physical_constants
 
 from yt.utilities.logger import level as __level
-if __level >= int(ytcfgDefaults["loglevel"]):
+if __level >= int(ytcfg_defaults["loglevel"]):
     # This won't get displayed.
     mylog.debug("Turning off NumPy error reporting")
     np.seterr(all = 'ignore')
 
+from yt.fields.api import \
+    field_plugins, \
+    DerivedField, \
+    FieldDetector, \
+    FieldInfoContainer, \
+    ValidateParameter, \
+    ValidateDataField, \
+    ValidateProperty, \
+    ValidateSpatial, \
+    ValidateGridType
+
 from yt.data_objects.api import \
     BinnedProfile1D, BinnedProfile2D, BinnedProfile3D, \
     data_object_registry, \
-    derived_field, add_field, add_grad, FieldInfo, \
-    ValidateParameter, ValidateDataField, ValidateProperty, \
-    ValidateSpatial, ValidateGridType, \
     TimeSeriesData, AnalysisTask, analysis_task, \
     ParticleTrajectoryCollection, ImageArray, \
     particle_filter
@@ -72,64 +70,66 @@ from yt.data_objects.derived_quantities import \
 
 from yt.frontends.enzo.api import \
     EnzoStaticOutput, EnzoStaticOutputInMemory, \
-    EnzoSimulation, EnzoFieldInfo, \
-    add_enzo_field, add_enzo_1d_field, add_enzo_2d_field
+    EnzoSimulation, EnzoFieldInfo, add_enzo_field
 
-from yt.frontends.castro.api import \
-    CastroStaticOutput, CastroFieldInfo, add_castro_field
+# Boxlib stuff
+from yt.frontends.boxlib.api import \
+    BoxlibStaticOutput
 
-from yt.frontends.nyx.api import \
-    NyxStaticOutput, NyxFieldInfo, add_nyx_field
+# Orion stuff
+#from yt.frontends.boxlib.api import \
+#    OrionStaticOutput, OrionFieldInfo, add_orion_field
 
-from yt.frontends.orion.api import \
-    OrionStaticOutput, OrionFieldInfo, add_orion_field
+# Maestro stuff
+#from yt.frontends.boxlib.api import \
+#    MaestroStaticOutput
+
+# Castro stuff
+#from yt.frontends.boxlib.api import \
+#    CastroStaticOutput
 
 from yt.frontends.flash.api import \
-    FLASHStaticOutput, FLASHFieldInfo, add_flash_field
+    FLASHStaticOutput, FLASHFieldInfo
 
-from yt.frontends.tiger.api import \
-    TigerStaticOutput, TigerFieldInfo, add_tiger_field
-
-from yt.frontends.artio.api import \
-    ARTIOStaticOutput, ARTIOFieldInfo, add_artio_field
-
-#from yt.frontends.artio2.api import \
-#    Artio2StaticOutput
+#from yt.frontends.artio.api import \
+#    ARTIOStaticOutput, ARTIOFieldInfo, add_artio_field
 
 from yt.frontends.ramses.api import \
-    RAMSESStaticOutput, RAMSESFieldInfo, add_ramses_field
+    RAMSESStaticOutput, RAMSESFieldInfo
 
-from yt.frontends.chombo.api import \
-    ChomboStaticOutput, ChomboFieldInfo, add_chombo_field
+#from yt.frontends.chombo.api import \
+#    ChomboStaticOutput, ChomboFieldInfo, add_chombo_field
 
-from yt.frontends.gdf.api import \
-    GDFStaticOutput, GDFFieldInfo, add_gdf_field
+#from yt.frontends.gdf.api import \
+#    GDFStaticOutput, GDFFieldInfo, add_gdf_field
 
-from yt.frontends.athena.api import \
-    AthenaStaticOutput, AthenaFieldInfo, add_athena_field
+#from yt.frontends.moab.api import \
+#    MoabHex8StaticOutput, MoabFieldInfo, add_moab_field, \
+#    PyneMoabHex8StaticOutput
 
-from yt.frontends.art.api import \
-    ARTStaticOutput, ARTFieldInfo, add_art_field
+#from yt.frontends.athena.api import \
+#    AthenaStaticOutput, AthenaFieldInfo, add_athena_field
 
-from yt.frontends.pluto.api import \
-     PlutoStaticOutput, PlutoFieldInfo, add_pluto_field
+#from yt.frontends.art.api import \
+#    ARTStaticOutput, ARTFieldInfo, add_art_field
 
-#from yt.frontends.maestro.api import \
-#    MaestroStaticOutput, MaestroFieldInfo, add_maestro_field
+#from yt.frontends.pluto.api import \
+#     PlutoStaticOutput, PlutoFieldInfo, add_pluto_field
 
 from yt.frontends.stream.api import \
-    StreamStaticOutput, StreamFieldInfo, add_stream_field, \
+    StreamStaticOutput, \
     StreamHandler, load_uniform_grid, load_amr_grids, \
-    load_particles
+    load_particles, load_hexahedral_mesh, load_octree
 
-from yt.frontends.sph.api import \
-    OWLSStaticOutput, OWLSFieldInfo, add_owls_field, \
-    GadgetStaticOutput, GadgetFieldInfo, add_gadget_field, \
-    TipsyStaticOutput, TipsyFieldInfo, add_tipsy_field
+#from yt.frontends.sph.api import \
+#    OWLSStaticOutput, OWLSFieldInfo, add_owls_field, \
+#    GadgetStaticOutput, GadgetHDF5StaticOutput, \
+#    GadgetFieldInfo, add_gadget_field, \
+#    TipsyStaticOutput, TipsyFieldInfo, add_tipsy_field
 
-from yt.analysis_modules.list_modules import \
-    get_available_modules, amods
-available_analysis_modules = get_available_modules()
+#from yt.analysis_modules.list_modules import \
+#    get_available_modules, amods
+#available_analysis_modules = get_available_modules()
 
 # Import our analysis modules
 from yt.analysis_modules.halo_finding.api import \
@@ -142,9 +142,11 @@ from yt.utilities.definitions import \
 from yt.visualization.api import \
     PlotCollection, PlotCollectionInteractive, \
     get_multi_plot, FixedResolutionBuffer, ObliqueFixedResolutionBuffer, \
-    callback_registry, write_bitmap, write_image, annotate_image, \
+    callback_registry, write_bitmap, write_image, \
     apply_colormap, scale_image, write_projection, write_fits, \
-    SlicePlot, OffAxisSlicePlot, ProjectionPlot, OffAxisProjectionPlot
+    SlicePlot, AxisAlignedSlicePlot, OffAxisSlicePlot, \
+    ProjectionPlot, OffAxisProjectionPlot, \
+    show_colormaps
 
 from yt.visualization.volume_rendering.api import \
     ColorTransferFunction, PlanckTransferFunction, ProjectionTransferFunction, \

@@ -1,35 +1,17 @@
 """
 Data structures for Athena.
 
-Author: Samuel W. Skillman <samskillman@gmail.com>
-Affiliation: University of Colorado at Boulder
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Author: J. S. Oishi <jsoishi@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Author: John ZuHone <jzuhone@gmail.com>
-Affiliation: NASA/Goddard Space Flight Center
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2013 Samuel W. Skillman, Matthew Turk, J. S. Oishi.,
-  John ZuHone.
-  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import h5py
 import numpy as np
@@ -46,7 +28,7 @@ from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
 
 from .fields import AthenaFieldInfo, KnownAthenaFields
-from yt.data_objects.field_info_container import \
+from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc
 
 def _get_convert(fname):
@@ -131,7 +113,7 @@ class AthenaHierarchy(GridGeometryHandler):
 
         self._fhandle.close()
 
-    def _detect_fields(self):
+    def _detect_output_fields(self):
         field_map = {}
         f = open(self.hierarchy_filename,'rb')
         line = f.readline()
@@ -215,13 +197,18 @@ class AthenaHierarchy(GridGeometryHandler):
             raise TypeError
 
         # Need to determine how many grids: self.num_grids
-        dname = self.hierarchy_filename
-        gridlistread = glob.glob('id*/%s-id*%s' % (dname[4:-9],dname[-9:] ))
+        dataset_dir = os.path.dirname(self.hierarchy_filename)
+        dname = os.path.split(self.hierarchy_filename)[-1]
+        if dataset_dir.endswith("id0"):
+            dname = "id0/"+dname
+            dataset_dir = dataset_dir[:-3]
+                        
+        gridlistread = glob.glob(os.path.join(dataset_dir, 'id*/%s-id*%s' % (dname[4:-9],dname[-9:])))
         gridlistread.insert(0,self.hierarchy_filename)
         if 'id0' in dname :
-            gridlistread += glob.glob('id*/lev*/%s*-lev*%s' % (dname[4:-9],dname[-9:]))
+            gridlistread += glob.glob(os.path.join(dataset_dir, 'id*/lev*/%s*-lev*%s' % (dname[4:-9],dname[-9:])))
         else :
-            gridlistread += glob.glob('lev*/%s*-lev*%s' % (dname[:-9],dname[-9:]))
+            gridlistread += glob.glob(os.path.join(dataset_dir, 'lev*/%s*-lev*%s' % (dname[:-9],dname[-9:])))
         self.num_grids = len(gridlistread)
         dxs=[]
         self.grids = np.empty(self.num_grids, dtype='object')
@@ -443,13 +430,21 @@ class AthenaStaticOutput(StaticOutput):
             self.periodicity = ensure_tuple(self.specified_parameters['periodicity'])
         else:
             self.periodicity = (True,)*self.dimensionality
-
-        dname = self.parameter_filename
-        gridlistread = glob.glob('id*/%s-id*%s' % (dname[4:-9],dname[-9:] ))
+        if 'gamma' in self.specified_parameters:
+            self.gamma = float(self.specified_parameters['gamma'])
+        else:
+            self.gamma = 5./3.
+        dataset_dir = os.path.dirname(self.parameter_filename)
+        dname = os.path.split(self.parameter_filename)[-1]
+        if dataset_dir.endswith("id0"):
+            dname = "id0/"+dname
+            dataset_dir = dataset_dir[:-3]
+            
+        gridlistread = glob.glob(os.path.join(dataset_dir, 'id*/%s-id*%s' % (dname[4:-9],dname[-9:])))
         if 'id0' in dname :
-            gridlistread += glob.glob('id*/lev*/%s*-lev*%s' % (dname[4:-9],dname[-9:]))
+            gridlistread += glob.glob(os.path.join(dataset_dir, 'id*/lev*/%s*-lev*%s' % (dname[4:-9],dname[-9:])))
         else :
-            gridlistread += glob.glob('lev*/%s*-lev*%s' % (dname[:-9],dname[-9:]))
+            gridlistread += glob.glob(os.path.join(dataset_dir, 'lev*/%s*-lev*%s' % (dname[:-9],dname[-9:])))
         self.nvtk = len(gridlistread)+1 
 
         self.current_redshift = self.omega_lambda = self.omega_matter = \

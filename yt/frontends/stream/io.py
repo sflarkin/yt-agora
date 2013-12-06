@@ -1,27 +1,17 @@
 """
 Enzo-specific IO functions
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2007-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from collections import defaultdict
 
@@ -32,6 +22,7 @@ import numpy as np
 from yt.utilities.io_handler import \
     BaseIOHandler, _axis_ids
 from yt.utilities.logger import ytLogger as mylog
+from yt.data_objects.yt_array import YTArray
 from yt.utilities.lib.geometry_utils import compute_morton
 from yt.utilities.exceptions import *
 
@@ -39,9 +30,10 @@ class IOHandlerStream(BaseIOHandler):
 
     _data_style = "stream"
 
-    def __init__(self, stream_handler):
-        self.fields = stream_handler.fields
-        BaseIOHandler.__init__(self)
+    def __init__(self, pf):
+        self.fields = pf.stream_handler.fields
+        self.field_units = pf.stream_handler.field_units
+        super(IOHandlerStream, self).__init__(pf)
 
     def _read_data_set(self, grid, field):
         # This is where we implement processor-locking
@@ -61,7 +53,8 @@ class IOHandlerStream(BaseIOHandler):
         rv = {}
         for field in fields:
             ftype, fname = field
-            rv[field] = np.empty(size, dtype="float64")
+            rv[field] = self.pf.arr(np.empty(size, dtype="float64"),
+                                self.field_units[fname])
         ng = sum(len(c.objs) for c in chunks)
         mylog.debug("Reading %s cells of %s fields in %s blocks",
                     size, [f2 for f1, f2 in fields], ng)
@@ -72,7 +65,7 @@ class IOHandlerStream(BaseIOHandler):
             ind = 0
             for chunk in chunks:
                 for g in chunk.objs:
-                    ds = self.fields[g.id][fname]
+                    ds = self.fields[g.id][ftype, fname]
                     ind += g.select(selector, ds, rv[field], ind) # caches
         return rv
 
@@ -133,23 +126,12 @@ class StreamParticleIOHandler(BaseIOHandler):
 
     _data_style = "stream_particles"
 
-    def __init__(self, stream_handler):
-        self.fields = stream_handler.fields
-        BaseIOHandler.__init__(self)
+    def __init__(self, pf):
+        self.fields = pf.stream_handler.fields
+        super(StreamParticleIOHandler, self).__init__(pf)
 
-    def _read_particle_selection(self, chunks, selector, fields):
-        rv = {}
-        # We first need a set of masks for each particle type
-        ptf = defaultdict(list)
-        psize = defaultdict(lambda: 0)
+    def _read_particle_coords(self, chunks, ptf):
         chunks = list(chunks)
-        for ftype, fname in fields:
-            ptf[ftype].append(fname)
-        # For this type of file, we actually have something slightly different.
-        # We are given a list of ParticleDataChunks, which is composed of
-        # individual ParticleOctreeSubsets.  The data_files attribute on these
-        # may in fact overlap.  So we will iterate over a union of all the
-        # data_files.
         data_files = set([])
         for chunk in chunks:
             for obj in chunk.objs:
@@ -158,38 +140,29 @@ class StreamParticleIOHandler(BaseIOHandler):
             f = self.fields[data_file.filename]
             # This double-reads
             for ptype, field_list in sorted(ptf.items()):
-                assert(ptype == "all")
-                psize[ptype] += selector.count_points(
-                        f["particle_position_x"],
-                        f["particle_position_y"],
-                        f["particle_position_z"])
-        # Now we have all the sizes, and we can allocate
-        ind = {}
-        for field in fields:
-            mylog.debug("Allocating %s values for %s", psize[field[0]], field)
-            rv[field] = np.empty(psize[field[0]], dtype="float64")
-            ind[field] = 0
+                yield ptype, (f[ptype, "particle_position_x"],
+                              f[ptype, "particle_position_y"],
+                              f[ptype, "particle_position_z"])
+            
+    def _read_particle_fields(self, chunks, ptf, selector):
+        data_files = set([])
+        for chunk in chunks:
+            for obj in chunk.objs:
+                data_files.update(obj.data_files)
         for data_file in data_files:
             f = self.fields[data_file.filename]
             for ptype, field_list in sorted(ptf.items()):
-                assert(ptype == "all")
-                mask = selector.select_points(
-                        f["particle_position_x"],
-                        f["particle_position_y"],
-                        f["particle_position_z"])
+                x, y, z = (f[ptype, "particle_position_%s" % ax]
+                           for ax in 'xyz')
+                mask = selector.select_points(x, y, z)
                 if mask is None: continue
                 for field in field_list:
-                    data = f[field][mask,...]
-                    my_ind = ind[ptype, field]
-                    mylog.debug("Filling from %s to %s with %s",
-                        my_ind, my_ind+data.shape[0], field)
-                    rv[ptype, field][my_ind:my_ind + data.shape[0],...] = data
-                    ind[ptype, field] += data.shape[0]
-        return rv
+                    data = f[ptype, field][mask]
+                    yield (ptype, field), data
 
     def _initialize_index(self, data_file, regions):
         # self.fields[g.id][fname] is the pattern here
-        pos = np.column_stack(self.fields[data_file.filename][
+        pos = np.column_stack(self.fields[data_file.filename]["io",
                               "particle_position_%s" % ax] for ax in 'xyz')
         if np.any(pos.min(axis=0) <= data_file.pf.domain_left_edge) or \
            np.any(pos.max(axis=0) >= data_file.pf.domain_right_edge):
@@ -204,8 +177,57 @@ class StreamParticleIOHandler(BaseIOHandler):
         return morton
 
     def _count_particles(self, data_file):
-        npart = self.fields[data_file.filename]["particle_position_x"].size
+        npart = self.fields[data_file.filename]["io", "particle_position_x"].size
         return {'all': npart}
 
     def _identify_fields(self, data_file):
-        return [ ("all", k) for k in self.fields[data_file.filename].keys()]
+        return self.fields[data_file.filename].keys()
+
+class IOHandlerStreamHexahedral(BaseIOHandler):
+    _data_style = "stream_hexahedral"
+
+    def __init__(self, pf):
+        self.fields = pf.stream_handler.fields
+        super(IOHandlerStreamHexahedral, self).__init__(pf)
+
+    def _read_fluid_selection(self, chunks, selector, fields, size):
+        chunks = list(chunks)
+        assert(len(chunks) == 1)
+        chunk = chunks[0]
+        rv = {}
+        for field in fields:
+            ftype, fname = field
+            rv[field] = np.empty(size, dtype="float64")
+        ngrids = sum(len(chunk.objs) for chunk in chunks)
+        mylog.debug("Reading %s cells of %s fields in %s blocks",
+                    size, [fname for ftype, fname in fields], ngrids)
+        for field in fields:
+            ind = 0
+            ftype, fname = field
+            for chunk in chunks:
+                for g in chunk.objs:
+                    ds = self.fields[g.mesh_id].get(field, None)
+                    if ds is None:
+                        ds = self.fields[g.mesh_id][fname]
+                    ind += g.select(selector, ds, rv[field], ind) # caches
+        return rv
+
+class IOHandlerStreamOctree(BaseIOHandler):
+    _data_style = "stream_octree"
+
+    def __init__(self, pf):
+        self.fields = pf.stream_handler.fields
+        super(IOHandlerStreamOctree, self).__init__(pf)
+
+    def _read_fluid_selection(self, chunks, selector, fields, size):
+        rv = {}
+        ind = 0
+        chunks = list(chunks)
+        assert(len(chunks) == 1)
+        for chunk in chunks:
+            assert(len(chunk.objs) == 1)
+            for subset in chunk.objs:
+                field_vals = self.fields[subset.domain_id -
+                                    subset._domain_offset]
+                subset.fill(field_vals, rv, selector, ind)
+        return rv

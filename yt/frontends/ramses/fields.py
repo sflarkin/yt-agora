@@ -1,207 +1,134 @@
 """
 RAMSES-specific fields
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: UCSD
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2010-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-from yt.data_objects.field_info_container import \
-    FieldInfoContainer, \
-    NullFunc, \
-    TranslationFunc, \
-    FieldInfo, \
-    ValidateParameter, \
-    ValidateDataField, \
-    ValidateProperty, \
-    ValidateSpatial, \
-    ValidateGridType
-import yt.data_objects.universal_fields
-from yt.data_objects.particle_fields import \
-    particle_deposition_functions, \
-    particle_vector_functions
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
+
+import os
+import numpy as np
+
 from yt.utilities.physical_constants import \
     boltzmann_constant_cgs, \
     mass_hydrogen_cgs, \
     mass_sun_cgs, \
     mh
-import numpy as np
+from yt.utilities.linear_interpolators import \
+    BilinearFieldInterpolator
+import yt.utilities.fortran_utils as fpu
+from yt.funcs import mylog
+from yt.fields.field_info_container import \
+    FieldInfoContainer
+from yt.data_objects.yt_array import \
+    YTArray
 
-RAMSESFieldInfo = FieldInfoContainer.create_with_fallback(FieldInfo, "RFI")
-add_field = RAMSESFieldInfo.add_field
+b_units = "code_magnetic"
+ra_units = "code_length / code_time**2"
+rho_units = "code_mass / code_length**3"
+vel_units = "code_length / code_time"
 
-KnownRAMSESFields = FieldInfoContainer()
-add_ramses_field = KnownRAMSESFields.add_field
+known_species_masses = dict(
+  (sp, mh * v) for sp, v in [
+                ("HI", 1.0),
+                ("HII", 1.0),
+                ("Electron", 1.0),
+                ("HeI", 4.0),
+                ("HeII", 4.0),
+                ("HeIII", 4.0),
+                ("H2I", 2.0),
+                ("H2II", 2.0),
+                ("HM", 1.0),
+                ("DI", 2.0),
+                ("DII", 2.0),
+                ("HDI", 3.0),
+    ])
 
-known_ramses_fields = [
-    "Density",
-    "x-velocity",
-    "y-velocity",
-    "z-velocity",
-    "Pressure",
-    "Metallicity",
-]
+_cool_axes = ("lognH", "logT", "logTeq")
+_cool_arrs = ("metal", "cool", "heat", "metal_prime", "cool_prime",
+              "heat_prime", "mu", "abundances")
+_cool_species = ("Electron_number_density",
+                 "HI_number_density",
+                 "HII_number_density",
+                 "HeI_number_density",
+                 "HeII_number_density",
+                 "HeIII_number_density")
 
-for f in known_ramses_fields:
-    if f not in KnownRAMSESFields:
-        add_ramses_field(f, function=NullFunc, take_log=True,
-                  validators = [ValidateDataField(f)])
+_X = 0.76 # H fraction, hardcoded
+_Y = 0.24 # He fraction, hardcoded
 
-def dx(field, data):
-    return data.fwidth[:,0]
-add_field("dx", function=dx)
+class RAMSESFieldInfo(FieldInfoContainer):
+    known_other_fields = (
+        ("Density", (rho_units, ["density"], None)),
+        ("x-velocity", (vel_units, ["velocity_x"], None)),
+        ("y-velocity", (vel_units, ["velocity_y"], None)),
+        ("z-velocity", (vel_units, ["velocity_z"], None)),
+        ("Pressure", ("code_mass / (code_length * code_time**2)", [], None)),
+        ("Metallicity", ("", ["metallicity"], None)),
+    )
+    known_particle_fields = (
+        ("particle_position_x", ("code_length", [], None)),
+        ("particle_position_y", ("code_length", [], None)),
+        ("particle_position_z", ("code_length", [], None)),
+        ("particle_velocity_x", (vel_units, [], None)),
+        ("particle_velocity_y", (vel_units, [], None)),
+        ("particle_velocity_z", (vel_units, [], None)),
+        ("particle_mass", ("code_mass", [], None)),
+        ("particle_identifier", ("", ["particle_index"], None)),
+        ("particle_refinement_level", ("", [], None)),
+        ("particle_age", ("code_time", [], None)),
+        ("particle_metallicity", ("", [], None)),
+    )
 
-def dy(field, data):
-    return data.fwidth[:,1]
-add_field("dy", function=dy)
+    def setup_fluid_fields(self):
+        def _temperature(field, data):
+            rv = data["gas", "pressure"]/data["gas", "density"]
+            rv *= mass_hydrogen_cgs/boltzmann_constant_cgs
+            return rv
+        self.add_field(("gas", "temperature"), function=_temperature,
+                        units="K")
 
-def dz(field, data):
-    return data.fwidth[:,2]
-add_field("dz", function=dz)
+    def create_cooling_fields(self, filename):
+        num = os.path.basename(self.pf.parameter_filename).split("."
+                )[0].split("_")[1]
+        filename = "%s/cooling_%05i.out" % (
+            os.path.dirname(self.pf.parameter_filename), int(num))
 
-def _convertDensity(data):
-    return data.convert("Density")
-KnownRAMSESFields["Density"]._units = r"\rm{g}/\rm{cm}^3"
-KnownRAMSESFields["Density"]._projected_units = r"\rm{g}/\rm{cm}^2"
-KnownRAMSESFields["Density"]._convert_function=_convertDensity
-
-def _convertPressure(data):
-    return data.convert("Pressure")
-KnownRAMSESFields["Pressure"]._units=r"\rm{dyne}/\rm{cm}^{2}/\mu"
-KnownRAMSESFields["Pressure"]._convert_function=_convertPressure
-
-def _convertVelocity(data):
-    return data.convert("x-velocity")
-for ax in ['x','y','z']:
-    f = KnownRAMSESFields["%s-velocity" % ax]
-    f._units = r"\rm{cm}/\rm{s}"
-    f._convert_function = _convertVelocity
-    f.take_log = False
-
-known_ramses_particle_fields = [
-    "particle_position_x",
-    "particle_position_y",
-    "particle_position_z",
-    "particle_velocity_x",
-    "particle_velocity_y",
-    "particle_velocity_z",
-    "particle_mass",
-    "particle_identifier",
-    "particle_refinement_level",
-    "particle_age",
-    "particle_metallicity",
-]
-
-for f in known_ramses_particle_fields:
-    add_ramses_field(("all", f), function=NullFunc, take_log=True,
-              particle_type = True)
-
-for ax in 'xyz':
-    KnownRAMSESFields["all", "particle_velocity_%s" % ax]._convert_function = \
-        _convertVelocity
-
-def _convertParticleMass(data):
-    return data.convert("mass")
-
-KnownRAMSESFields["all", "particle_mass"]._convert_function = \
-        _convertParticleMass
-KnownRAMSESFields["all", "particle_mass"]._units = r"\mathrm{g}"
-
-def _Temperature(field, data):
-    rv = data["Pressure"]/data["Density"]
-    rv *= mass_hydrogen_cgs/boltzmann_constant_cgs
-    return rv
-add_field("Temperature", function=_Temperature, units=r"\rm{K}")
-
-# We'll add a bunch of species fields here.  In the not too distant future,
-# we'll be moving all of these to a unified field location, so they can be
-# shared between various frontends.
-
-# NOTE: No Electron here because I don't know how RAMSES handles them, and if
-# they are handled differently than Enzo does (where they are scaled to mh)
-
-_speciesList = ["HI", "HII",
-                "HeI", "HeII", "HeIII",
-                "H2I", "H2II", "HM",
-                "DI", "DII", "HDI"]
-_speciesMass = {"HI": 1.0, "HII": 1.0,
-                "HeI": 4.0, "HeII": 4.0, "HeIII": 4.0,
-                "H2I": 2.0, "H2II": 2.0, "HM": 1.0,
-                "DI": 2.0, "DII": 2.0, "HDI": 3.0}
-
-def _SpeciesComovingDensity(field, data):
-    sp = field.name.split("_")[0] + "_Density"
-    ef = (1.0 + data.pf.current_redshift)**3.0
-    return data[sp] / ef
-
-def _SpeciesFraction(field, data):
-    sp = field.name.split("_")[0] + "_Density"
-    return data[sp] / data["Density"]
-
-def _SpeciesMass(field, data):
-    sp = field.name.split("_")[0] + "_Density"
-    return data[sp] * data["CellVolume"]
-
-def _SpeciesNumberDensity(field, data):
-    species = field.name.split("_")[0]
-    sp = field.name.split("_")[0] + "_Density"
-    return data[sp] / _speciesMass[species]
-
-def _convertCellMassMsun(data):
-    return 1.0/mass_sun_cgs # g^-1
-def _ConvertNumberDensity(data):
-    return 1.0/mh
-
-for species in _speciesList:
-    add_ramses_field("%s_Density" % species,
-             function = NullFunc,
-             display_name = "%s\/Density" % species,
-             convert_function = _convertDensity,
-             units = r"\rm{g}/\rm{cm}^3",
-             projected_units = r"\rm{g}/\rm{cm}^2")
-    add_field("%s_Fraction" % species,
-             function=_SpeciesFraction,
-             validators=ValidateDataField("%s_Density" % species),
-             display_name="%s\/Fraction" % species)
-    add_field("Comoving_%s_Density" % species,
-             function=_SpeciesComovingDensity,
-             validators=ValidateDataField("%s_Density" % species),
-             display_name="Comoving\/%s\/Density" % species)
-    add_field("%s_Mass" % species, units=r"\rm{g}", 
-              function=_SpeciesMass, 
-              validators=ValidateDataField("%s_Density" % species),
-              display_name="%s\/Mass" % species)
-    add_field("%s_MassMsun" % species, units=r"M_{\odot}", 
-              function=_SpeciesMass, 
-              convert_function=_convertCellMassMsun,
-              validators=ValidateDataField("%s_Density" % species),
-              display_name="%s\/Mass" % species)
-    if _speciesMass.has_key(species):
-        add_field("%s_NumberDensity" % species,
-                  function=_SpeciesNumberDensity,
-                  convert_function=_ConvertNumberDensity,
-                  validators=ValidateDataField("%s_Density" % species))
-
-# PARTICLE FIELDS
-particle_vector_functions("all", ["particle_position_%s" % ax for ax in 'xyz'],
-                                 ["particle_velocity_%s" % ax for ax in 'xyz'],
-                          RAMSESFieldInfo)
-particle_deposition_functions("all", "Coordinates", "particle_mass",
-                               RAMSESFieldInfo)
+        if not os.path.exists(filename): return
+        def _create_field(name, interp_object):
+            def _func(field, data):
+                shape = data["Temperature"].shape
+                d = {'lognH': np.log10(_X*data["Density"]/mh).ravel(),
+                     'logT' : np.log10(data["Temperature"]).ravel()}
+                rv = 10**interp_object(d).reshape(shape)
+                return rv
+            self.add_field(name = name, function=_func,
+                                 units = "code_length**-3")
+        avals = {}
+        tvals = {}
+        with open(filename, "rb") as f:
+            n1, n2 = fpu.read_vector(f, 'i')
+            n = n1 * n2
+            for ax in _cool_axes:
+                avals[ax] = fpu.read_vector(f, 'd')
+            for tname in _cool_arrs:
+                var = fpu.read_vector(f, 'd')
+                if var.size == n1*n2:
+                    tvals[tname] = var.reshape((n1, n2), order='F')
+                else:
+                    var = var.reshape((n1, n2, var.size / (n1*n2)), order='F')
+                    for i in range(var.shape[-1]):
+                        tvals[_cool_species[i]] = var[:,:,i]
+        
+        for n in tvals:
+            interp = BilinearFieldInterpolator(tvals[n],
+                        (avals["lognH"], avals["logT"]),
+                        ["lognH", "logT"], truncate = True)
+            _create_field(n, interp)

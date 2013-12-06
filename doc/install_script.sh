@@ -419,7 +419,7 @@ get_willwont ${INST_0MQ}
 echo "be installing ZeroMQ"
 
 printf "%-15s = %s so I " "INST_ROCKSTAR" "${INST_ROCKSTAR}"
-get_willwont ${INST_0MQ}
+get_willwont ${INST_ROCKSTAR}
 echo "be installing Rockstar"
 
 echo
@@ -554,6 +554,11 @@ mkdir -p ${DEST_DIR}/data
 cd ${DEST_DIR}/data
 echo 'de6d8c6ea849f0206d219303329a0276b3cce7c051eec34377d42aacbe0a4f47ac5145eb08966a338ecddd2b83c8f787ca9956508ad5c39ee2088ad875166410  xray_emissivity.h5' > xray_emissivity.h5.sha512
 get_ytdata xray_emissivity.h5
+
+# Set paths to what they should be when yt is activated.
+export PATH=${DEST_DIR}/bin:$PATH
+export LD_LIBRARY_PATH=${DEST_DIR}/lib:$LD_LIBRARY_PATH
+export PYTHONPATH=${DEST_DIR}/lib/python2.7/site-packages
 
 mkdir -p ${DEST_DIR}/src
 cd ${DEST_DIR}/src
@@ -832,8 +837,8 @@ else
 	    echo "Building BLAS"
 	    cd BLAS
 	    gfortran -O2 -fPIC -fno-second-underscore -c *.f
-	    ar r libfblas.a *.o &>> ${LOG_FILE}
-	    ranlib libfblas.a 1>> ${LOG_FILE}
+	    ( ar r libfblas.a *.o 2>&1 ) 1>> ${LOG_FILE}
+	    ( ranlib libfblas.a 2>&1 ) 1>> ${LOG_FILE}
 	    rm -rf *.o
 	    touch done
 	    cd ..
@@ -844,7 +849,7 @@ else
 	    echo "Building LAPACK"
 	    cd $LAPACK/
 	    cp INSTALL/make.inc.gfortran make.inc
-	    make lapacklib OPTS="-fPIC -O2" NOOPT="-fPIC -O0" CFLAGS=-fPIC LDFLAGS=-fPIC 1>> ${LOG_FILE} || do_exit
+	    ( make lapacklib OPTS="-fPIC -O2" NOOPT="-fPIC -O0" CFLAGS=-fPIC LDFLAGS=-fPIC 2>&1 ) 1>> ${LOG_FILE} || do_exit
 	    touch done
 	    cd ..
 	fi
@@ -877,6 +882,11 @@ fi
 mkdir -p ${DEST_DIR}/src/$MATPLOTLIB
 echo "[directories]" >> ${DEST_DIR}/src/$MATPLOTLIB/setup.cfg
 echo "basedirlist = ${DEST_DIR}" >> ${DEST_DIR}/src/$MATPLOTLIB/setup.cfg
+if [ `uname` = "Darwin" ]
+then
+   echo "[gui_support]" >> ${DEST_DIR}/src/$MATPLOTLIB/setup.cfg
+   echo "macosx = False" >> ${DEST_DIR}/src/$MATPLOTLIB/setup.cfg
+fi
 do_setup_py $MATPLOTLIB
 if [ -n "${OLD_LDFLAGS}" ]
 then
@@ -913,6 +923,8 @@ do_setup_py $PYTHON_HGLIB
 do_setup_py $SYMPY
 [ $INST_PYX -eq 1 ] && do_setup_py $PYX
 
+( ${DEST_DIR}/bin/pip install jinja2 2>&1 ) 1>> ${LOG_FILE}
+
 # Now we build Rockstar and set its environment variable.
 if [ $INST_ROCKSTAR -eq 1 ]
 then
@@ -936,17 +948,15 @@ cd $YT_DIR
 ( ${HG_EXEC} pull 2>1 && ${HG_EXEC} up -C 2>1 ${BRANCH} 2>&1 ) 1>> ${LOG_FILE}
 
 echo "Installing yt"
-echo $HDF5_DIR > hdf5.cfg
 [ $INST_PNG -eq 1 ] && echo $PNG_DIR > png.cfg
-[ $INST_FTYPE -eq 1 ] && echo $FTYPE_DIR > freetype.cfg
 ( export PATH=$DEST_DIR/bin:$PATH ; ${DEST_DIR}/bin/python2.7 setup.py develop 2>&1 ) 1>> ${LOG_FILE} || do_exit
 touch done
 cd $MY_PWD
 
-if !(${DEST_DIR}/bin/python2.7 -c "import readline" >> ${LOG_FILE})
+if !( ( ${DEST_DIR}/bin/python2.7 -c "import readline" 2>&1 )>> ${LOG_FILE})
 then
     echo "Installing pure-python readline"
-    ${DEST_DIR}/bin/pip install readline 1>> ${LOG_FILE}
+    ( ${DEST_DIR}/bin/pip install readline 2>&1 ) 1>> ${LOG_FILE}
 fi
 
 if [ $INST_ENZO -eq 1 ]

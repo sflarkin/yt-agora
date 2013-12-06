@@ -1,27 +1,18 @@
-""" 
+"""
 Geometry container base class.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2007-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
 
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import os
 import cPickle
@@ -37,20 +28,30 @@ from yt.funcs import *
 from yt.config import ytcfg
 from yt.data_objects.data_containers import \
     data_object_registry
-from yt.data_objects.field_info_container import \
+from yt.data_objects.yt_array import \
+    uconcatenate
+from yt.fields.field_info_container import \
     NullFunc
-from yt.data_objects.particle_fields import \
-    particle_deposition_functions
+from yt.fields.particle_fields import \
+    particle_deposition_functions, \
+    particle_scalar_functions
 from yt.utilities.io_handler import io_registry
 from yt.utilities.logger import ytLogger as mylog
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelAnalysisInterface, parallel_splitter
 from yt.utilities.exceptions import YTFieldNotFound
 
+def _unsupported_object(pf, obj_name):
+    def _raise_unsupp(*args, **kwargs):
+        raise YTObjectNotImplemented(pf, obj_name)
+    return _raise_unsupp
+
 class GeometryHandler(ParallelAnalysisInterface):
     _global_mesh = True
+    _unsupported_objects = ()
 
     def __init__(self, pf, data_style):
+        self.filtered_particle_types = []
         ParallelAnalysisInterface.__init__(self)
         self.parameter_file = weakref.proxy(pf)
         self.pf = self.parameter_file
@@ -70,38 +71,14 @@ class GeometryHandler(ParallelAnalysisInterface):
         mylog.debug("Initializing data grid data IO")
         self._setup_data_io()
 
+        # Note that this falls under the "geometry" object since it's
+        # potentially quite expensive, and should be done with the indexing.
         mylog.debug("Detecting fields.")
-        self._detect_fields()
-
-        mylog.debug("Detecting fields in backup.")
-        self._detect_fields_backup()
-
-        mylog.debug("Adding unknown detected fields")
-        self._setup_unknown_fields()
-
-        mylog.debug("Setting up derived fields")
-        self._setup_derived_fields()
+        self._detect_output_fields()
 
     def __del__(self):
         if self._data_file is not None:
             self._data_file.close()
-
-    def _detect_fields_backup(self):
-        # grab fields from backup file as well, if present
-        return
-        try:
-            backup_filename = self.parameter_file.backup_filename
-            f = h5py.File(backup_filename, 'r')
-            g = f["data"]
-            grid = self.grids[0] # simply check one of the grids
-            grid_group = g["grid_%010i" % (grid.id - grid._id_offset)]
-            for field_name in grid_group:
-                if field_name != 'particles':
-                    self.field_list.append(field_name)
-        except KeyError:
-            return
-        except IOError:
-            return
 
     def _initialize_state_variables(self):
         self._parallel_locking = False
@@ -116,6 +93,10 @@ class GeometryHandler(ParallelAnalysisInterface):
         self.objects = []
         self.plots = []
         for name, cls in sorted(data_object_registry.items()):
+            if name in self._unsupported_objects:
+                setattr(self, name,
+                    _unsupported_object(self.parameter_file, name))
+                continue
             cname = cls.__name__
             if cname.endswith("Base"): cname = cname[:-4]
             self._add_object_class(name, cname, cls, dd)
@@ -131,43 +112,49 @@ class GeometryHandler(ParallelAnalysisInterface):
             self.proj = self.overlap_proj
         self.object_types.sort()
 
-    def _setup_unknown_fields(self):
-        known_fields = self.parameter_file._fieldinfo_known
-        mylog.debug("Checking %s", self.field_list)
-        for field in self.field_list:
-            # By allowing a backup, we don't mandate that it's found in our
-            # current field info.  This means we'll instead simply override
-            # it.
-            ff = self.parameter_file.field_info.pop(field, None)
-            if field not in known_fields:
-                if isinstance(field, types.TupleType) and \
-                   field[0] in self.parameter_file.particle_types:
-                    particle_type = True
-                else:
-                    particle_type = False
-                rootloginfo("Adding unknown field %s to list of fields", field)
-                cf = None
-                if self.parameter_file.has_key(field):
-                    def external_wrapper(f):
-                        def _convert_function(data):
-                            return data.convert(f)
-                        return _convert_function
-                    cf = external_wrapper(field)
-                # Note that we call add_field on the field_info directly.  This
-                # will allow the same field detection mechanism to work for 1D, 2D
-                # and 3D fields.
-                self.pf.field_info.add_field(
-                        field, NullFunc, particle_type = particle_type,
-                        convert_function=cf, take_log=False, units=r"Unknown")
-            else:
-                mylog.debug("Adding known field %s to list of fields", field)
-                self.parameter_file.field_info[field] = known_fields[field]
+    def _setup_particle_types(self, ptypes = None):
+        mname = self.pf._particle_mass_name
+        cname = self.pf._particle_coordinates_name
+        vname = self.pf._particle_velocity_name
+        # We require overriding if any of this is true
+        df = []
+        if ptypes is None: ptypes = self.pf.particle_types_raw
+        if None in (mname, cname, vname): 
+            # If we don't know what to do, then let's not.
+            for ptype in set(ptypes):
+                df += self.pf._setup_particle_type(ptype)
+            # Now we have a bunch of new fields to add!
+            # This is where the dependencies get calculated.
+            #self._derived_fields_add(df)
+            return
+        fi = self.pf.field_info
+        def _get_conv(cf):
+            def _convert(data):
+                return data.convert(cf)
+            return _convert
+        for ptype in ptypes:
+            fi.add_field((ptype, vname), function=NullFunc,
+                particle_type = True,
+                convert_function=_get_conv("velocity"),
+                units = r"\mathrm{cm}/\mathrm{s}")
+            df.append((ptype, vname))
+            fi.add_field((ptype, mname), function=NullFunc,
+                particle_type = True,
+                convert_function=_get_conv("mass"),
+                units = r"\mathrm{g}")
+            df.append((ptype, mname))
+            df += particle_deposition_functions(ptype, cname, mname, fi)
+            df += particle_scalar_functions(ptype, cname, vname, fi)
+            fi.add_field((ptype, cname), function=NullFunc,
+                         particle_type = True)
+            df.append((ptype, cname))
+            # Now we add some translations.
+            df += self.pf._setup_particle_type(ptype)
+        self._derived_fields_add(df)
 
-    def _setup_derived_fields(self):
+    def _setup_field_registry(self):
         self.derived_field_list = []
         self.filtered_particle_types = []
-        fc, fac = self._derived_fields_to_check()
-        self._derived_fields_add(fc, fac)
 
     def _setup_filtered_type(self, filter):
         if not filter.available(self.derived_field_list):
@@ -187,90 +174,8 @@ class GeometryHandler(ParallelAnalysisInterface):
         if available:
             self.parameter_file.particle_types += (filter.name,)
             self.filtered_particle_types.append(filter.name)
-            self._setup_particle_fields(filter.name, True)
+            self._setup_particle_types([filter.name])
         return available
-
-    def _setup_particle_fields(self, ptype, filtered = False):
-        pf = self.parameter_file
-        pmass = self.parameter_file._particle_mass_name
-        pcoord = self.parameter_file._particle_coordinates_name
-        if pmass is None or pcoord is None: return
-        df = particle_deposition_functions(ptype,
-            pcoord, pmass, self.parameter_file.field_info)
-        self._derived_fields_add(df)
-
-    def _derived_fields_to_check(self):
-        fi = self.parameter_file.field_info
-        # First we construct our list of fields to check
-        fields_to_check = []
-        fields_to_allcheck = []
-        for field in fi.keys():
-            finfo = fi[field]
-            # Explicitly defined
-            if isinstance(field, tuple):
-                fields_to_check.append(field)
-                continue
-            # This one is implicity defined for all particle or fluid types.
-            # So we check each.
-            if not finfo.particle_type:
-                fields_to_check.append(field)
-                continue
-            # We do a special case for 'all' later
-            new_fields = []
-            for pt in self.parameter_file.particle_types:
-                new_fi = copy.copy(finfo)
-                new_fi.name = (pt, new_fi.name)
-                fi[new_fi.name] = new_fi
-                new_fields.append(new_fi.name)
-            fields_to_check += new_fields
-            fields_to_allcheck.append(field)
-        return fields_to_check, fields_to_allcheck
-
-    def _derived_fields_add(self, fields_to_check = None,
-                            fields_to_allcheck = None):
-        if fields_to_check is None:
-            fields_to_check = []
-        if fields_to_allcheck is None:
-            fields_to_allcheck = []
-        fi = self.parameter_file.field_info
-        for field in fields_to_check:
-            try:
-                fd = fi[field].get_dependencies(pf = self.parameter_file)
-            except Exception as e:
-                if type(e) != YTFieldNotFound:
-                    mylog.debug("Raises %s during field %s detection.",
-                                str(type(e)), field)
-                continue
-            missing = False
-            # This next bit checks that we can't somehow generate everything.
-            # We also manually update the 'requested' attribute
-            requested = []
-            for f in fd.requested:
-                if (field[0], f) in self.field_list:
-                    requested.append( (field[0], f) )
-                elif f in self.field_list:
-                    requested.append( f )
-                elif isinstance(f, tuple) and f[1] in self.field_list:
-                    requested.append( f )
-                else:
-                    missing = True
-                    break
-            if not missing: self.derived_field_list.append(field)
-            fd.requested = set(requested)
-            self.parameter_file.field_dependencies[field] = fd
-            if not fi[field].particle_type and not isinstance(field, tuple):
-                # Manually hardcode to 'gas'
-                self.parameter_file.field_dependencies["gas", field] = fd
-        for base_field in fields_to_allcheck:
-            # Now we expand our field_info with the new fields
-            all_available = all(((pt, field) in self.derived_field_list
-                                 for pt in self.parameter_file.particle_types))
-            if all_available:
-                self.derived_field_list.append( ("all", field) )
-                fi["all", base_field] = fi[base_field]
-        for field in self.field_list:
-            if field not in self.derived_field_list:
-                self.derived_field_list.append(field)
 
     # Now all the object related stuff
     def all_data(self, find_max=False):
@@ -328,7 +233,7 @@ class GeometryHandler(ParallelAnalysisInterface):
 
     def _setup_data_io(self):
         if getattr(self, "io", None) is not None: return
-        self.io = io_registry[self.data_style]()
+        self.io = io_registry[self.data_style](self.parameter_file)
 
     def _save_data(self, array, node, name, set_attr=None, force=False, passthrough = False):
         """
@@ -426,6 +331,18 @@ class GeometryHandler(ParallelAnalysisInterface):
             del self._data_file
             self._data_file = None
 
+    def find_max(self, field):
+        """
+        Returns (value, center) of location of maximum for a given field.
+        """
+        mylog.debug("Searching for maximum value of %s", field)
+        source = self.all_data()
+        max_val, maxi, mx, my, mz = \
+            source.quantities["MaxLocation"](field)
+        mylog.info("Max Value is %0.5e at %0.16f %0.16f %0.16f", 
+              max_val, mx, my, mz)
+        return max_val, np.array([mx, my, mz], dtype="float64")
+
     def _add_object_class(self, name, class_name, base, dd):
         self.object_types.append(name)
         obj = type(class_name, (base,), dd)
@@ -457,9 +374,6 @@ class GeometryHandler(ParallelAnalysisInterface):
         for field in fields_to_read:
             ftype, fname = field
             finfo = self.pf._get_field_info(*field)
-            conv_factor = finfo._convert_function(self)
-            np.multiply(fields_to_return[field], conv_factor,
-                        fields_to_return[field])
         return fields_to_return, fields_to_generate
 
     def _read_fluid_fields(self, fields, dobj, chunk = None):
@@ -475,15 +389,10 @@ class GeometryHandler(ParallelAnalysisInterface):
         if len(fields_to_read) == 0:
             return {}, fields_to_generate
         fields_to_return = self.io._read_fluid_selection(
-            self._chunk_io(dobj, cache = False),
+            self._chunk_io(dobj),
             selector,
             fields_to_read,
             chunk_size)
-        for field in fields_to_read:
-            ftype, fname = field
-            conv_factor = self.pf.field_info[fname]._convert_function(self)
-            np.multiply(fields_to_return[field], conv_factor,
-                        fields_to_return[field])
         #mylog.debug("Don't know how to read %s", fields_to_generate)
         return fields_to_return, fields_to_generate
 
@@ -536,13 +445,15 @@ class YTDataChunk(object):
         for obj in self.objs:
             f = getattr(obj, mname)
             arrs.append(f(self.dobj))
-        arrs = np.concatenate(arrs)
+        arrs = uconcatenate(arrs)
         self.data_size = arrs.shape[0]
         return arrs
 
     @cached_property
     def fcoords(self):
         ci = np.empty((self.data_size, 3), dtype='float64')
+        ci = YTArray(ci, input_units = "code_length",
+                     registry = self.dobj.pf.unit_registry)
         if self.data_size == 0: return ci
         ind = 0
         for obj in self.objs:
@@ -567,6 +478,8 @@ class YTDataChunk(object):
     @cached_property
     def fwidth(self):
         ci = np.empty((self.data_size, 3), dtype='float64')
+        ci = YTArray(ci, input_units = "code_length",
+                     registry = self.dobj.pf.unit_registry)
         if self.data_size == 0: return ci
         ind = 0
         for obj in self.objs:
@@ -640,3 +553,4 @@ class ChunkDataCache(object):
         g = self.queue.pop(0)
         g._initialize_cache(self.cache.pop(g.id, {}))
         return g
+

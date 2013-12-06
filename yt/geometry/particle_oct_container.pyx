@@ -1,29 +1,18 @@
 """
 Oct container tuned for Particles
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: Columbia University
-Author: Christopher Moody <chris.e.moody@gmail.com>
-Affiliation: UC Santa Cruz
-Homepage: http://yt.enzotools.org/
-License:
-  Copyright (C) 2013 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
 
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 from oct_container cimport OctreeContainer, Oct, OctInfo, ORDER_MAX
 cimport oct_visitors
@@ -58,9 +47,13 @@ cdef class ParticleOctreeContainer(OctreeContainer):
         #Call the freemem ops on every ocy
         #of the root mesh recursively
         cdef i, j, k
+        if self.root_mesh == NULL: return
         for i in range(self.nn[0]):
+            if self.root_mesh[i] == NULL: continue
             for j in range(self.nn[1]):
+                if self.root_mesh[i][j] == NULL: continue
                 for k in range(self.nn[2]):
+                    if self.root_mesh[i][j][k] == NULL: continue
                     self.visit_free(self.root_mesh[i][j][k])
         free(self.oct_list)
         free(self.dom_offsets)
@@ -205,6 +198,7 @@ cdef class ParticleOctreeContainer(OctreeContainer):
         cdef int i, j, k, m, n, ind[3]
         cdef Oct *noct
         cdef np.uint64_t prefix1, prefix2
+        # TODO: This does not need to be changed.
         o.children = <Oct **> malloc(sizeof(Oct *)*8)
         for i in range(2):
             for j in range(2):
@@ -265,12 +259,14 @@ ctypedef fused anyfloat:
     np.float32_t
     np.float64_t
 
+cdef np.uint64_t ONEBIT=1
+
 cdef class ParticleRegions:
     cdef np.float64_t left_edge[3]
     cdef np.float64_t dds[3]
     cdef np.float64_t idds[3]
     cdef np.int32_t dims[3]
-    cdef public int nfiles
+    cdef public np.uint64_t nfiles
     cdef public object masks
 
     def __init__(self, left_edge, right_edge, dims, nfiles):
@@ -293,13 +289,13 @@ cdef class ParticleRegions:
             self._mask_positions[np.float64_t](pos, file_id)
 
     cdef void _mask_positions(self, np.ndarray[anyfloat, ndim=2] pos,
-                              int file_id):
+                              np.uint64_t file_id):
         cdef np.int64_t no = pos.shape[0]
         cdef np.int64_t p
         cdef int ind[3], i
         cdef np.ndarray[np.uint64_t, ndim=3] mask
         mask = self.masks[file_id/64]
-        cdef np.int64_t val = 1 << (file_id - (file_id/64)*64)
+        cdef np.uint64_t val = ONEBIT << (file_id - (file_id/64)*64)
         for p in range(no):
             # Now we locate the particle
             for i in range(3):
@@ -309,7 +305,7 @@ cdef class ParticleRegions:
     def identify_data_files(self, SelectorObject selector):
         # This is relatively cheap to iterate over.
         cdef int i, j, k, n
-        cdef np.uint64_t fmask, offset
+        cdef np.uint64_t fmask, offset, fcheck
         cdef np.float64_t LE[3], RE[3]
         cdef np.ndarray[np.uint64_t, ndim=3] mask
         files = []
@@ -334,8 +330,8 @@ cdef class ParticleRegions:
                 LE[0] += self.dds[0]
                 RE[0] += self.dds[0]
             # Now we iterate through...
-            for i in range(64):
-                if ((fmask >> i) & 1) == 1:
-                    files.append(i + n * 64)
+            for fcheck in range(64):
+                if ((fmask >> fcheck) & ONEBIT) == ONEBIT:
+                    files.append(fcheck + n * 64)
         return files
 

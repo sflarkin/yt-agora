@@ -1,31 +1,17 @@
 """
 HOP-output data handling
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: KIPAC/SLAC/Stanford
-Author: Stephen Skory <s@skory.us>
-Affiliation: UCSD Physics/CASS
-Author: Geoffrey So <gsiisg@gmail.com> (Ellipsoidal functions)
-Affiliation: UCSD Physics/CASS
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import gc
 import h5py
@@ -1062,8 +1048,9 @@ class HaloList(object):
     def __init__(self, data_source, dm_only=True, redshift=-1):
         """
         Run hop on *data_source* with a given density *threshold*.  If
-        *dm_only* is True (default), only run it on the dark matter particles, otherwise
-        on all particles.  Returns an iterable collection of *HopGroup* items.
+        *dm_only* is True (default), only run it on the dark matter particles, 
+        otherwise on all particles.  Returns an iterable collection of 
+        *HopGroup* items.
         """
         self._data_source = data_source
         self.dm_only = dm_only
@@ -1136,106 +1123,6 @@ class HaloList(object):
 
     def __getitem__(self, key):
         return self._groups[key]
-
-    def nearest_neighbors_3D(self, haloID, num_neighbors=7, search_radius=.2):
-        r"""For a halo its nearest neighbors in 3D using the kd tree.
-
-        This will calculate the nearest neighbors of a halo, using the kD tree.
-        Returns a list of the neighbors distances and ID with format
-        [distance,haloID].
-
-        Parameters
-        ----------
-        haloID : integer
-            The halo to find neighbors for.
-        num_neighbors : integer
-            How many neighbors to search for. Default = 7.
-        search_radius : float
-            How far away to look for neighbors in code units. Default = 0.2.
-
-        Examples
-        --------
-        >>> neighbors = halos.nearest_neighbors_3D(0)
-        """
-        period = self.pf.domain_right_edge - self.pf.domain_left_edge
-        # Initialize the dataset of points from all the haloes
-        dataset = []
-        for group in self:
-            p = Point()
-            p.data = group.center_of_mass().tolist()
-            p.haloID = group.id
-            dataset.append(p)
-        mylog.info('Building kd tree...')
-        kd = buildKdHyperRectTree(dataset[:], 2 * num_neighbors)
-        # make the neighbors object
-        neighbors = Neighbors()
-        neighbors.k = num_neighbors
-        neighbors.points = []
-        neighbors.minDistanceSquared = search_radius * search_radius
-        mylog.info('Finding nearest neighbors...')
-        getKNN(self[haloID].center_of_mass().tolist(), kd, neighbors, 0.,
-            period.tolist())
-        # convert the data in order to return something less perverse than a
-        # Neighbors object, also root the distances
-        n_points = []
-        for n in neighbors.points:
-            n_points.append([math.sqrt(n[0]), n[1].haloID])
-        return n_points
-
-    def nearest_neighbors_2D(self, haloID, num_neighbors=7, search_radius=.2,
-        proj_dim=0):
-        r"""For a halo its nearest neighbors in 2D using the kd tree.
-
-        This will strip a dimension from consideration in the kD-tree, and then
-        calculate all the nearest projected neighbors of a halo.  Returns a
-        list of the neighbors distances and ID with format [distance,haloID].
-
-        Parameters
-        ----------
-        haloID : int
-            The halo to find neighbors for.
-        num_neighbors : int
-            How many neighbors to search for. Default = 7.
-        search_radius : float
-            How far away to look for neighbors in code units. Default = 0.2.
-        proj_dim : int
-            Which dimension (0, 1, or 2) to project the halos into 2D.
-            Default = 0.
-
-        Examples
-        --------
-        >>> neighbors = halos.nearest_neighbors_2D(0)
-        """
-        # Set up a vector to multiply other
-        # vectors by to project along proj_dim
-        vec = np.array([1., 1., 1.])
-        vec[proj_dim] = 0.
-        period = self.pf.domain_right_edge - self.pf.domain_left_edge
-        period = period * vec
-        # Initialize the dataset of points from all the haloes
-        dataset = []
-        for group in self:
-            p = Point()
-            cm = group.center_of_mass() * vec
-            p.data = cm.tolist()
-            p.haloID = group.id
-            dataset.append(p)
-        mylog.info('Building kd tree...')
-        kd = buildKdHyperRectTree(dataset[:], 2 * num_neighbors)
-        # make the neighbors object
-        neighbors = Neighbors()
-        neighbors.k = num_neighbors
-        neighbors.points = []
-        neighbors.minDistanceSquared = search_radius * search_radius
-        mylog.info('Finding nearest neighbors...')
-        cm = self[haloID].center_of_mass() * vec
-        getKNN(cm.tolist(), kd, neighbors, 0., period.tolist())
-        # convert the data in order to return something less perverse than a
-        # Neighbors object, also root the distances
-        n_points = []
-        for n in neighbors.points:
-            n_points.append([math.sqrt(n[0]), n[1].haloID])
-        return n_points
 
     def write_out(self, filename, ellipsoid_data=False):
         r"""Write out standard halo information to a text file.
@@ -2215,11 +2102,11 @@ class parallelHF(GenericHaloFinder, parallelHOPHaloList):
                 self.comm.mpi_bcast(self.bucket_bounds)
             my_bounds = self.bucket_bounds[self.comm.rank]
             LE, RE = my_bounds[0], my_bounds[1]
-            self._data_source = self.hierarchy.region_strict([0.] * 3, LE, RE)
+            self._data_source = self.hierarchy.region([0.] * 3, LE, RE)
         # If this isn't parallel, define the region as an AMRRegionStrict so
         # particle IO works.
         if self.comm.size == 1:
-            self._data_source = self.hierarchy.periodic_region_strict([0.5] * 3,
+            self._data_source = self.hierarchy.region([0.5] * 3,
                 LE, RE)
         # get the average spacing between particles for this region
         # The except is for the serial case where the full box is what we want.
@@ -2305,8 +2192,7 @@ class parallelHF(GenericHaloFinder, parallelHOPHaloList):
                 np.zeros(3, dtype='float64'))
         # If we're using a subvolume, we now re-divide.
         if subvolume is not None:
-            self._data_source = pf.h.periodic_region_strict([0.] * 3, ds_LE,
-                ds_RE)
+            self._data_source = pf.h.region([0.] * 3, ds_LE, ds_RE)
             # Cut up the volume.
             padded, LE, RE, self._data_source = \
                 self.partition_hierarchy_3d(ds=self._data_source,
@@ -2503,7 +2389,7 @@ class HOPHaloFinder(GenericHaloFinder, HOPHaloList):
         # object representing the entire domain and sum it "lazily" with
         # Derived Quantities.
         if subvolume is not None:
-            self._data_source = pf.h.periodic_region_strict([0.] * 3, ds_LE, ds_RE)
+            self._data_source = pf.h.region([0.] * 3, ds_LE, ds_RE)
         else:
             self._data_source = pf.h.all_data()
         self.padding = padding  # * pf["unitary"] # This should be clevererer
@@ -2599,7 +2485,7 @@ class FOFHaloFinder(GenericHaloFinder, FOFHaloList):
             linking_length = np.abs(link)
         self.padding = padding
         if subvolume is not None:
-            self._data_source = pf.h.periodic_region_strict([0.] * 3, ds_LE,
+            self._data_source = pf.h.region([0.] * 3, ds_LE,
                 ds_RE)
         else:
             self._data_source = pf.h.all_data()

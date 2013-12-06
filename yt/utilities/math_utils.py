@@ -1,34 +1,22 @@
 """
 Commonly used mathematical functions.
 
-Author: Matthew Turk <matthewturk@gmail.com>
-Affiliation: UCSD Physics/CASS
-Author: Stephen Skory <s@skory.us>
-Affiliation: UCSD Physics/CASS
-Author: Geoffrey So <gsiisg@gmail.com>
-Affiliation: UCSD Physics/CASS
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2011 Matthew Turk.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import numpy as np
 import math
+from yt.data_objects.yt_array import \
+    YTArray
 
 prec_accum = {
     np.int:                 np.int64,
@@ -944,9 +932,10 @@ def get_sph_r_component(vectors, theta, phi, normal):
     res_zprime = resize_vector(zprime, vectors)
 
     tile_shape = [1] + list(vectors.shape)[1:]
-    Jx = np.tile(res_xprime,tile_shape)
-    Jy = np.tile(res_yprime,tile_shape)
-    Jz = np.tile(res_zprime,tile_shape)
+
+    Jx, Jy, Jz = (
+        YTArray(np.tile(rprime, tile_shape), "")
+        for rprime in (res_xprime, res_yprime, res_zprime))
 
     rhat = Jx*np.sin(theta)*np.cos(phi) + \
            Jy*np.sin(theta)*np.sin(phi) + \
@@ -963,8 +952,8 @@ def get_sph_phi_component(vectors, phi, normal):
     res_yprime = resize_vector(yprime, vectors)
 
     tile_shape = [1] + list(vectors.shape)[1:]
-    Jx = np.tile(res_xprime,tile_shape)
-    Jy = np.tile(res_yprime,tile_shape)
+    Jx = YTArray(np.tile(res_xprime,tile_shape), "")
+    Jy = YTArray(np.tile(res_yprime,tile_shape), "")
 
     phihat = -Jx*np.sin(phi) + Jy*np.cos(phi)
 
@@ -980,9 +969,10 @@ def get_sph_theta_component(vectors, theta, phi, normal):
     res_zprime = resize_vector(zprime, vectors)
 
     tile_shape = [1] + list(vectors.shape)[1:]
-    Jx = np.tile(res_xprime,tile_shape)
-    Jy = np.tile(res_yprime,tile_shape)
-    Jz = np.tile(res_zprime,tile_shape)
+    Jx, Jy, Jz = (
+        YTArray(np.tile(rprime, tile_shape), "")
+        for rprime in (res_xprime, res_yprime, res_zprime))
+
     
     thetahat = Jx*np.cos(theta)*np.cos(phi) + \
                Jy*np.cos(theta)*np.sin(phi) - \
