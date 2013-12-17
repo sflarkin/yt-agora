@@ -1,27 +1,17 @@
 """
 LightRay class and member functions.
 
-Author: Britton Smith <brittons@origins.colorado.edu>
-Affiliation: CASA/University of CO, Boulder
-Homepage: http://yt-project.org/
-License:
-  Copyright (C) 2008-2012 Britton Smith.  All Rights Reserved.
 
-  This file is part of yt.
 
-  yt is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
+
+#-----------------------------------------------------------------------------
+# Copyright (c) 2013, yt Development Team.
+#
+# Distributed under the terms of the Modified BSD License.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#-----------------------------------------------------------------------------
 
 import copy
 import h5py
@@ -38,6 +28,9 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
     only_on_root, \
     parallel_objects, \
     parallel_root_only
+from yt.utilities.physical_constants import \
+     speed_of_light_cgs, \
+     cm_per_km
 
 class LightRay(CosmologySplice):
     """
@@ -61,7 +54,9 @@ class LightRay(CosmologySplice):
     near_redshift : float
         The near (lowest) redshift for the light ray.
     far_redshift : float
-        The far (highest) redshift for the light ray.
+        The far (highest) redshift for the light ray.  NOTE: in order 
+        to use only a single dataset in a light ray, set the 
+        near_redshift and far_redshift to be the same.
     use_minimum_datasets : bool
         If True, the minimum number of datasets is used to connect the
         initial and final redshift.  If false, the light ray solution
@@ -108,6 +103,7 @@ class LightRay(CosmologySplice):
         self.minimum_coherent_box_fraction = minimum_coherent_box_fraction
 
         self.light_ray_solution = []
+        self.halo_lists = {}
         self._data = {}
 
         # Get list of datasets for light ray solution.
@@ -120,65 +116,92 @@ class LightRay(CosmologySplice):
                                        time_data=time_data,
                                        redshift_data=redshift_data)
 
-    def _calculate_light_ray_solution(self, seed=None, filename=None):
+    def _calculate_light_ray_solution(self, seed=None, 
+                                      start_position=None, end_position=None,
+                                      trajectory=None, filename=None):
         "Create list of datasets to be added together to make the light ray."
 
         # Calculate dataset sizes, and get random dataset axes and centers.
         np.random.seed(seed)
 
-        # For box coherence, keep track of effective depth travelled.
-        box_fraction_used = 0.0
-
-        for q in range(len(self.light_ray_solution)):
-            if (q == len(self.light_ray_solution) - 1):
-                z_next = self.near_redshift
+        # If using only one dataset, set start and stop manually.
+        if start_position is not None:
+            if len(self.light_ray_solution) > 1:
+                raise RuntimeError("LightRay Error: cannot specify start_position if light ray uses more than one dataset.")
+            if not ((end_position is None) ^ (trajectory is None)):
+                raise RuntimeError("LightRay Error: must specify either end_position or trajectory, but not both.")
+            self.light_ray_solution[0]['start'] = np.array(start_position)
+            if end_position is not None:
+                self.light_ray_solution[0]['end'] = np.array(end_position)
             else:
-                z_next = self.light_ray_solution[q+1]['redshift']
+                # assume trajectory given as r, theta, phi
+                if len(trajectory) != 3:
+                    raise RuntimeError("LightRay Error: trajectory must have lenght 3.")
+                r, theta, phi = trajectory
+                self.light_ray_solution[0]['end'] = self.light_ray_solution[0]['start'] + \
+                  r * np.array([np.cos(phi) * np.sin(theta),
+                                np.sin(phi) * np.sin(theta),
+                                np.cos(theta)])
+            self.light_ray_solution[0]['traversal_box_fraction'] = \
+              vector_length(self.light_ray_solution[0]['start'], 
+                            self.light_ray_solution[0]['end'])
 
-            # Calculate fraction of box required for a depth of delta z
-            self.light_ray_solution[q]['traversal_box_fraction'] = \
-                self.cosmology.ComovingRadialDistance(\
-                z_next, self.light_ray_solution[q]['redshift']) * \
-                self.simulation.hubble_constant / \
-                self.simulation.box_size
+        # the normal way (random start positions and trajectories for each dataset)
+        else:
+            
+            # For box coherence, keep track of effective depth travelled.
+            box_fraction_used = 0.0
 
-            # Simple error check to make sure more than 100% of box depth
-            # is never required.
-            if (self.light_ray_solution[q]['traversal_box_fraction'] > 1.0):
-                mylog.error("Warning: box fraction required to go from z = %f to %f is %f" %
-                            (self.light_ray_solution[q]['redshift'], z_next,
-                             self.light_ray_solution[q]['traversal_box_fraction']))
-                mylog.error("Full box delta z is %f, but it is %f to the next data dump." %
-                            (self.light_ray_solution[q]['deltazMax'],
-                             self.light_ray_solution[q]['redshift']-z_next))
+            for q in range(len(self.light_ray_solution)):
+                if (q == len(self.light_ray_solution) - 1):
+                    z_next = self.near_redshift
+                else:
+                    z_next = self.light_ray_solution[q+1]['redshift']
 
-            # Get dataset axis and center.
-            # If using box coherence, only get start point and vector if
-            # enough of the box has been used,
-            # or if box_fraction_used will be greater than 1 after this slice.
-            if (q == 0) or (self.minimum_coherent_box_fraction == 0) or \
-                    (box_fraction_used >
-                     self.minimum_coherent_box_fraction) or \
-                    (box_fraction_used +
-                     self.light_ray_solution[q]['traversal_box_fraction'] > 1.0):
-                # Random start point
-                self.light_ray_solution[q]['start'] = np.random.random(3)
-                theta = np.pi * np.random.random()
-                phi = 2 * np.pi * np.random.random()
-                box_fraction_used = 0.0
-            else:
-                # Use end point of previous segment and same theta and phi.
-                self.light_ray_solution[q]['start'] = \
-                  self.light_ray_solution[q-1]['end'][:]
+                # Calculate fraction of box required for a depth of delta z
+                self.light_ray_solution[q]['traversal_box_fraction'] = \
+                    self.cosmology.ComovingRadialDistance(\
+                    z_next, self.light_ray_solution[q]['redshift']) * \
+                    self.simulation.hubble_constant / \
+                    self.simulation.box_size
 
-            self.light_ray_solution[q]['end'] = \
-              self.light_ray_solution[q]['start'] + \
-                self.light_ray_solution[q]['traversal_box_fraction'] * \
-                np.array([np.cos(phi) * np.sin(theta),
-                          np.sin(phi) * np.sin(theta),
-                          np.cos(theta)])
-            box_fraction_used += \
-              self.light_ray_solution[q]['traversal_box_fraction']
+                # Simple error check to make sure more than 100% of box depth
+                # is never required.
+                if (self.light_ray_solution[q]['traversal_box_fraction'] > 1.0):
+                    mylog.error("Warning: box fraction required to go from z = %f to %f is %f" %
+                                (self.light_ray_solution[q]['redshift'], z_next,
+                                 self.light_ray_solution[q]['traversal_box_fraction']))
+                    mylog.error("Full box delta z is %f, but it is %f to the next data dump." %
+                                (self.light_ray_solution[q]['deltazMax'],
+                                 self.light_ray_solution[q]['redshift']-z_next))
+
+                # Get dataset axis and center.
+                # If using box coherence, only get start point and vector if
+                # enough of the box has been used,
+                # or if box_fraction_used will be greater than 1 after this slice.
+                if (q == 0) or (self.minimum_coherent_box_fraction == 0) or \
+                        (box_fraction_used >
+                         self.minimum_coherent_box_fraction) or \
+                        (box_fraction_used +
+                         self.light_ray_solution[q]['traversal_box_fraction'] > 1.0):
+                    # Random start point
+                    self.light_ray_solution[q]['start'] = np.random.random(3)
+                    theta = np.pi * np.random.random()
+                    phi = 2 * np.pi * np.random.random()
+                    box_fraction_used = 0.0
+                else:
+                    # Use end point of previous segment and same theta and phi.
+                    self.light_ray_solution[q]['start'] = \
+                      self.light_ray_solution[q-1]['end'][:]
+
+                self.light_ray_solution[q]['end'] = \
+                  self.light_ray_solution[q]['start'] + \
+                    self.light_ray_solution[q]['traversal_box_fraction'] * \
+                    np.array([np.cos(phi) * np.sin(theta),
+                              np.sin(phi) * np.sin(theta),
+                              np.cos(theta)])
+                box_fraction_used += \
+                  self.light_ray_solution[q]['traversal_box_fraction']
 
         if filename is not None:
             self._write_light_ray_solution(filename,
@@ -187,11 +210,15 @@ class LightRay(CosmologySplice):
                             'far_redshift':self.far_redshift,
                             'near_redshift':self.near_redshift})
 
-    def make_light_ray(self, seed=None, fields=None,
+    def make_light_ray(self, seed=None,
+                       start_position=None, end_position=None,
+                       trajectory=None,
+                       fields=None,
                        solution_filename=None, data_filename=None,
                        get_los_velocity=False,
                        get_nearest_halo=False,
                        nearest_halo_fields=None,
+                       halo_list_file=None,
                        halo_profiler_parameters=None,
                        njobs=1, dynamic=False):
         """
@@ -204,6 +231,19 @@ class LightRay(CosmologySplice):
         ----------
         seed : int
             Seed for the random number generator.
+            Default: None.
+        start_position : list of floats
+            Used only if creating a light ray from a single dataset.
+            The coordinates of the starting position of the ray.
+            Default: None.
+        end_position : list of floats
+            Used only if creating a light ray from a single dataset.
+            The coordinates of the ending position of the ray.
+            Default: None.
+        trajectory : list of floats
+            Used only if creating a light ray from a single dataset.
+            The (r, theta, phi) direction of the light ray.  Use either 
+        end_position or trajectory, not both.
             Default: None.
         fields : list
             A list of fields for which to get data.
@@ -228,6 +268,10 @@ class LightRay(CosmologySplice):
         nearest_halo_fields : list
             A list of fields to be calculated for the halos nearest to
             every lixel in the ray.
+            Default: None.
+        halo_list_file : str
+            Filename containing a list of halo properties to be used 
+            for getting the nearest halos to absorbers.
             Default: None.
         halo_profiler_parameters: dict
             A dictionary of parameters to be passed to the HaloProfiler
@@ -287,7 +331,7 @@ class LightRay(CosmologySplice):
         >>> # Make the profiles.
         >>> halo_profiler_actions.append({'function': make_profiles,
         ...                           'args': None,
-        ...                           'kwargs': {'filename': 'VirializedHalos.out'}})
+        ...                           'kwargs': {'filename': 'VirializedHalos.h5'}})
         ...
         >>> halo_list = 'filtered'
         >>> halo_profiler_parameters = dict(halo_profiler_kwargs=halo_profiler_kwargs,
@@ -305,6 +349,7 @@ class LightRay(CosmologySplice):
         ...                   get_nearest_halo=True,
         ...                   nearest_halo_fields=['TotalMassMsun_100',
         ...                                        'RadiusMpc_100'],
+        ...                   halo_list_file='VirializedHalos.h5',
         ...                   halo_profiler_parameters=halo_profiler_parameters,
         ...                   get_los_velocity=True)
         
@@ -316,30 +361,44 @@ class LightRay(CosmologySplice):
             nearest_halo_fields = []
 
         # Calculate solution.
-        self._calculate_light_ray_solution(seed=seed, filename=solution_filename)
+        self._calculate_light_ray_solution(seed=seed, 
+                                           start_position=start_position, 
+                                           end_position=end_position,
+                                           trajectory=trajectory,
+                                           filename=solution_filename)
 
         # Initialize data structures.
         self._data = {}
         if fields is None: fields = []
-        all_fields = [field for field in fields]
+        data_fields = fields[:]
+        all_fields = fields[:]
         all_fields.extend(['dl', 'dredshift', 'redshift'])
         if get_nearest_halo:
             all_fields.extend(['x', 'y', 'z', 'nearest_halo'])
             all_fields.extend(['nearest_halo_%s' % field \
                                for field in nearest_halo_fields])
-            fields.extend(['x', 'y', 'z'])
+            data_fields.extend(['x', 'y', 'z'])
         if get_los_velocity:
             all_fields.extend(['x-velocity', 'y-velocity',
                                'z-velocity', 'los_velocity'])
-            fields.extend(['x-velocity', 'y-velocity', 'z-velocity'])
+            data_fields.extend(['x-velocity', 'y-velocity', 'z-velocity'])
 
         all_ray_storage = {}
         for my_storage, my_segment in parallel_objects(self.light_ray_solution,
                                                        storage=all_ray_storage,
                                                        njobs=njobs, dynamic=dynamic):
-            mylog.info("Creating ray segment at z = %f." %
-                       my_segment['redshift'])
-            if my_segment['next'] is None:
+
+            # Load dataset for segment.
+            pf = load(my_segment['filename'])
+
+            if self.near_redshift == self.far_redshift:
+                h_vel = cm_per_km * pf.units['mpc'] * \
+                  vector_length(my_segment['start'], my_segment['end']) * \
+                  self.cosmology.HubbleConstantNow * \
+                  self.cosmology.ExpansionFactor(my_segment['redshift'])
+                next_redshift = np.sqrt((1. + h_vel / speed_of_light_cgs) /
+                                         (1. - h_vel / speed_of_light_cgs)) - 1.
+            elif my_segment['next'] is None:
                 next_redshift = self.near_redshift
             else:
                 next_redshift = my_segment['next']['redshift']
@@ -347,13 +406,6 @@ class LightRay(CosmologySplice):
             mylog.info("Getting segment at z = %s: %s to %s." %
                        (my_segment['redshift'], my_segment['start'],
                         my_segment['end']))
-
-            if get_nearest_halo:
-                halo_list = self._get_halo_list(my_segment['filename'],
-                                                **halo_profiler_parameters)
-
-            # Load dataset for segment.
-            pf = load(my_segment['filename'])
 
             # Break periodic ray into non-periodic segments.
             sub_segments = periodic_ray(my_segment['start'], my_segment['end'])
@@ -373,7 +425,7 @@ class LightRay(CosmologySplice):
                                                  (sub_ray['dts'] *
                                                   vector_length(sub_segment[0],
                                                                 sub_segment[1]))])
-                for field in fields:
+                for field in data_fields:
                     sub_data[field] = np.concatenate([sub_data[field],
                                                       (sub_ray[field])])
 
@@ -400,6 +452,9 @@ class LightRay(CosmologySplice):
 
             # Calculate distance to nearest object on halo list for each lixel.
             if get_nearest_halo:
+                halo_list = self._get_halo_list(pf, fields=nearest_halo_fields,
+                                                filename=halo_list_file,
+                                                **halo_profiler_parameters)
                 sub_data.update(self._get_nearest_halo_properties(sub_data, halo_list,
                                 fields=nearest_halo_fields))
                 sub_data['nearest_halo'] *= pf.units['mpccm']
@@ -434,30 +489,69 @@ class LightRay(CosmologySplice):
         self._data = all_data
         return all_data
 
-    def _get_halo_list(self, dataset, halo_profiler_kwargs=None,
+    def _get_halo_list(self, pf, fields=None, filename=None, 
+                       halo_profiler_kwargs=None,
                        halo_profiler_actions=None, halo_list='all'):
-        "Load a list of halos for the dataset."
+        "Load a list of halos for the pf."
+
+        if str(pf) in self.halo_lists:
+            return self.halo_lists[str(pf)]
+
+        if fields is None: fields = []
+
+        if filename is not None and \
+                os.path.exists(os.path.join(pf.fullpath, filename)):
+
+            my_filename = os.path.join(pf.fullpath, filename)
+            mylog.info("Loading halo list from %s." % my_filename)
+            my_list = {}
+            in_file = h5py.File(my_filename, 'r')
+            for field in fields + ['center']:
+                my_list[field] = in_file[field][:]
+            in_file.close()
+
+        else:
+            my_list = self._halo_profiler_list(pf, fields=fields,
+                                               halo_profiler_kwargs=halo_profiler_kwargs,
+                                               halo_profiler_actions=halo_profiler_actions,
+                                               halo_list=halo_list)
+
+        self.halo_lists[str(pf)] = my_list
+        return self.halo_lists[str(pf)]
+
+    def _halo_profiler_list(self, pf, fields=None, 
+                            halo_profiler_kwargs=None,
+                            halo_profiler_actions=None, halo_list='all'):
+        "Run the HaloProfiler to get the halo list."
 
         if halo_profiler_kwargs is None: halo_profiler_kwargs = {}
         if halo_profiler_actions is None: halo_profiler_actions = []
 
-        hp = HaloProfiler(dataset, **halo_profiler_kwargs)
+        hp = HaloProfiler(pf, **halo_profiler_kwargs)
         for action in halo_profiler_actions:
             if not action.has_key('args'): action['args'] = ()
             if not action.has_key('kwargs'): action['kwargs'] = {}
             action['function'](hp, *action['args'], **action['kwargs'])
 
         if halo_list == 'all':
-            return_list = copy.deepcopy(hp.all_halos)
+            hp_list = copy.deepcopy(hp.all_halos)
         elif halo_list == 'filtered':
-            return_list = copy.deepcopy(hp.filtered_halos)
+            hp_list = copy.deepcopy(hp.filtered_halos)
         else:
             mylog.error("Keyword, halo_list, must be either 'all' or 'filtered'.")
-            return_list = None
+            hp_list = None
 
         del hp
-        return return_list
 
+        # Create position array from halo list.
+        return_list = dict([(field, []) for field in fields + ['center']])
+        for halo in hp_list:
+            for field in fields + ['center']:
+                return_list[field].append(halo[field])
+        for field in fields + ['center']:
+            return_list[field] = np.array(return_list[field])
+        return return_list
+        
     def _get_nearest_halo_properties(self, data, halo_list, fields=None):
         """
         Calculate distance to nearest object in halo list for each lixel in data.
@@ -465,28 +559,22 @@ class LightRay(CosmologySplice):
         """
 
         if fields is None: fields = []
-
-        # Create position array from halo list.
-        halo_centers = np.array(map(lambda halo: halo['center'], halo_list))
-        halo_field_values = dict([(field, np.array(map(lambda halo: halo[field],
-                                                       halo_list))) \
-                                  for field in fields])
-
-        nearest_distance = np.zeros(data['x'].shape)
-        field_data = dict([(field, np.zeros(data['x'].shape)) \
+        field_data = dict([(field, np.zeros_like(data['x'])) \
                            for field in fields])
-        if halo_centers.size > 0:
+        nearest_distance = np.zeros_like(data['x'])
+
+        if halo_list['center'].size > 0:
             for index in xrange(nearest_distance.size):
                 nearest = np.argmin(periodic_distance(np.array([data['x'][index],
                                                                 data['y'][index],
                                                                 data['z'][index]]),
-                                                      halo_centers))
+                                                      halo_list['center']))
                 nearest_distance[index] = periodic_distance(np.array([data['x'][index],
                                                                       data['y'][index],
                                                                       data['z'][index]]),
-                                                            halo_centers[nearest])
+                                                            halo_list['center'][nearest])
                 for field in fields:
-                    field_data[field][index] = halo_field_values[field][nearest]
+                    field_data[field][index] = halo_list[field][nearest]
 
         return_data = {'nearest_halo': nearest_distance}
         for field in fields:
