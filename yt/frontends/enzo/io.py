@@ -280,8 +280,6 @@ class IOHandlerPacked2D(IOHandlerPackedHDF5):
         if size is None:
             size = sum((g.count(selector) for chunk in chunks
                         for g in chunk.objs))
-        if any((ftype != "gas" for ftype, fname in fields)):
-            raise NotImplementedError
         for field in fields:
             ftype, fname = field
             fsize = size
@@ -299,7 +297,7 @@ class IOHandlerPacked2D(IOHandlerPackedHDF5):
                 gds = f.get("/Grid%08i" % g.id)
                 for field in fields:
                     ftype, fname = field
-                    ds = np.atleast_3d(gds.get(fname).value)
+                    ds = np.atleast_3d(gds.get(fname).value.transpose())
                     nd = g.select(selector, ds, rv[field], ind) # caches
                 ind += nd
             f.close()
