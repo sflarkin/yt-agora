@@ -16,8 +16,8 @@ from sympy import Expr, Mul, Number, Pow, Rational, Symbol
 from sympy import nsimplify, posify, sympify, latex
 from sympy.parsing.sympy_parser import parse_expr
 from collections import defaultdict
-from yt.utilities.physical_constants import \
-    cm_per_pc, cm_per_ly, cm_per_au, rsun_per_cm, \
+from yt.utilities.physical_ratios import \
+    cm_per_pc, cm_per_ly, cm_per_au, cm_per_rsun, \
     mass_sun_grams, sec_per_year, sec_per_day, sec_per_hr, \
     sec_per_min, temp_sun_kelvin, luminosity_sun_ergs_per_sec, \
     metallicity_sun, erg_per_eV, amu_grams, mass_electron_grams, \
@@ -91,7 +91,7 @@ default_unit_symbol_lut = {
     "K":  (1.0, temperature),
 
     # "code" units, default to CGS conversion.
-    # These default values are  overriden in the code frontends
+    # These default values are overridden in the code frontends
     "code_length" : (1.0, length),
     "unitary"   : (1.0, length),
     "code_mass" : (1.0, mass),
@@ -111,6 +111,10 @@ default_unit_symbol_lut = {
     "J": (1.0e7, energy),
     "Hz": (1.0, rate),
 
+    # Imperial units
+    "ft": (30.48, length),
+    "mile": (160934, length),
+
     # dimensionless stuff
     "h": (1.0, dimensionless), # needs to be added for rho_crit_now
 
@@ -121,13 +125,13 @@ default_unit_symbol_lut = {
     "yr":  (sec_per_year, time),
 
     # Solar units
-    "Msun": (mass_sun_grams, mass),
-    "msun": (mass_sun_grams, mass),
-    "Rsun": (rsun_per_cm, length),
-    "rsun": (rsun_per_cm, length),
-    "Lsun": (luminosity_sun_ergs_per_sec, power),
-    "Tsun": (temp_sun_kelvin, temperature),
-    "Zsun": (metallicity_sun, metallicity),
+    "Msun": ( mass_sun_grams, mass),
+    "msun": ( mass_sun_grams, mass),
+    "Rsun": ( cm_per_rsun, length),
+    "rsun": ( cm_per_rsun, length),
+    "Lsun": ( luminosity_sun_ergs_per_sec, power),
+    "Tsun": ( temp_sun_kelvin, temperature),
+    "Zsun": ( metallicity_sun, metallicity),
 
     # astro distances
     "AU": (cm_per_au, length),
@@ -194,8 +198,11 @@ unit_prefixes = {
 
 class UnitRegistry:
 
-    def __init__(self, add_default_symbols=True):
-        self.lut = {}
+    def __init__(self, add_default_symbols=True, lut=None):
+        if lut:
+            self.lut = lut
+        else:
+            self.lut = {}
         self.unit_objs = {}
 
         if add_default_symbols:
@@ -261,6 +268,7 @@ class UnitRegistry:
         return self.lut.keys()
 
 default_unit_registry = UnitRegistry()
+SYMPIFY_ONE = sympify(1)
 
 class Unit(Expr):
     """
@@ -277,7 +285,7 @@ class Unit(Expr):
     # Extra attributes
     __slots__ = ["expr", "is_atomic", "cgs_value", "dimensions", "registry"]
 
-    def __new__(cls, unit_expr=sympify(1), cgs_value=None, dimensions=None,
+    def __new__(cls, unit_expr=SYMPIFY_ONE, cgs_value=None, dimensions=None,
                 registry=None, **assumptions):
         """
         Create a new unit. May be an atomic unit (like a gram) or combinations
@@ -298,20 +306,21 @@ class Unit(Expr):
         """
         # Simplest case. If user passes a Unit object, just use the expr.
         unit_key = None
-        if isinstance(unit_expr, str) and registry and \
-                unit_expr in registry.unit_objs:
-            return registry.unit_objs[unit_expr]
+        if isinstance(unit_expr, str):
+            if registry and unit_expr in registry.unit_objs:
+                return registry.unit_objs[unit_expr]
+            elif unit_expr in default_unit_registry.unit_objs:
+                return default_unit_registry.unit_objs[unit_expr]
+            else:
+                unit_key = unit_expr
+                if not unit_expr:
+                    # Bug catch...
+                    # if unit_expr is an empty string, parse_expr fails hard...
+                    unit_expr = "1"
+                unit_expr = parse_expr(unit_expr)
         elif isinstance(unit_expr, Unit):
             # grab the unit object's sympy expression.
             unit_expr = unit_expr.expr
-        # If we have a string, have sympy parse it into an Expr.
-        elif isinstance(unit_expr, str):
-            unit_key = unit_expr
-            if not unit_expr:
-                # Bug catch...
-                # if unit_expr is an empty string, parse_expr fails hard...
-                unit_expr = "1"
-            unit_expr = parse_expr(unit_expr)
         # Make sure we have an Expr at this point.
         if not isinstance(unit_expr, Expr):
             raise UnitParseError("Unit representation must be a string or " \
@@ -325,9 +334,11 @@ class Unit(Expr):
         # done with argument checking...
 
         # sympify, make positive symbols, and nsimplify the expr
-        unit_expr = sympify(unit_expr)
-        unit_expr = _make_symbols_positive(unit_expr)
-        unit_expr = nsimplify(unit_expr)
+        if unit_expr != SYMPIFY_ONE:
+            unit_expr = sympify(unit_expr)
+            unit_expr = _make_symbols_positive(unit_expr)
+            if any([atom.is_Float for atom in unit_expr.atoms()]):
+                unit_expr = nsimplify(unit_expr)
 
         # see if the unit is atomic.
         is_atomic = False
@@ -354,7 +365,9 @@ class Unit(Expr):
             cgs_value, dimensions = _get_unit_data_from_expr(unit_expr, registry.lut)
 
         # Sympy trick to get dimensions powers as Rationals
-        dimensions = nsimplify(dimensions)
+        if not dimensions.is_Atom:
+            if any([atom.is_Float for atom in dimensions.atoms()]):
+                dimensions = nsimplify(dimensions)
 
         # Create obj with superclass construct.
         obj = Expr.__new__(cls, **assumptions)
@@ -469,6 +482,15 @@ class Unit(Expr):
     def is_dimensionless(self):
         return self.dimensions == sympy_one
 
+    @property
+    def is_code_unit(self):
+        for atom in self.expr.atoms():
+            if str(atom).startswith("code") or atom.is_Number:
+                pass
+            else:
+                return False
+        return True
+
     # @todo: might be a simpler/smarter sympy way to do this...
     def get_cgs_equivalent(self):
         """
@@ -565,7 +587,8 @@ def _make_symbols_positive(expr):
     # Replace one at a time
     for s in expr_symbols:
         # replace this symbol with a positive version
-        expr = expr.subs(s, Symbol(s.name, positive=True))
+        if not s.is_positive:
+            expr = expr.subs(s, Symbol(s.name, positive=True))
 
     return expr
 

@@ -46,9 +46,6 @@ def test_no_conflicting_symbols():
             # test if we have seen this symbol
             if new_symbol in full_set:
                 print "Duplicate symbol: %s" % new_symbol
-                # Special case, see: http://lists.spacepope.org/pipermail/yt-dev-spacepope.org/2013-December/003763.html
-                if new_symbol == 'mpc':
-                    pass
                 assert False
 
             full_set.add(new_symbol)
@@ -374,3 +371,18 @@ def test_cgs_equivalent():
     assert u3.dimensions == mass_density
 
     assert_allclose(get_conversion_factor(u1, u3), Msun_cgs / Mpc_cgs**3, 1e-12)
+
+def test_is_code_unit():
+    u1 = Unit('code_mass')
+    u2 = Unit('code_mass/code_length')
+    u3 = Unit('code_velocity*code_mass**2')
+    u4 = Unit('code_time*code_mass**0.5')
+    u5 = Unit('code_mass*g')
+    u6 = Unit('g/cm**3')
+
+    assert u1.is_code_unit
+    assert u2.is_code_unit
+    assert u3.is_code_unit
+    assert u4.is_code_unit
+    assert not u5.is_code_unit
+    assert not u6.is_code_unit

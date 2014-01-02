@@ -62,7 +62,8 @@ from yt.data_objects.api import \
     BinnedProfile1D, BinnedProfile2D, BinnedProfile3D, \
     data_object_registry, \
     TimeSeriesData, AnalysisTask, analysis_task, \
-    ImageArray, particle_filter
+    ImageArray, particle_filter, create_profile, \
+    Profile1D, Profile2D, Profile3D
 
 from yt.data_objects.derived_quantities import \
     add_quantity, quantity_info
@@ -109,8 +110,8 @@ from yt.frontends.halo_catalogs.api import \
 #    MoabHex8StaticOutput, MoabFieldInfo, add_moab_field, \
 #    PyneMoabHex8StaticOutput
 
-#from yt.frontends.athena.api import \
-#    AthenaStaticOutput, AthenaFieldInfo, add_athena_field
+from yt.frontends.athena.api import \
+    AthenaStaticOutput, AthenaFieldInfo
 
 #from yt.frontends.art.api import \
 #    ARTStaticOutput, ARTFieldInfo, add_art_field
@@ -151,7 +152,7 @@ from yt.visualization.api import \
     apply_colormap, scale_image, write_projection, \
     SlicePlot, AxisAlignedSlicePlot, OffAxisSlicePlot, \
     ProjectionPlot, OffAxisProjectionPlot, \
-    show_colormaps
+    show_colormaps, ProfilePlot, PhasePlot
 
 from yt.visualization.volume_rendering.api import \
     ColorTransferFunction, PlanckTransferFunction, ProjectionTransferFunction, \

@@ -27,11 +27,15 @@ from particle_io import \
     particle_handler_registry
 
 from profiles import \
-    EmptyProfileData, \
+    YTEmptyProfileData, \
     BinnedProfile, \
     BinnedProfile1D, \
     BinnedProfile2D, \
-    BinnedProfile3D
+    BinnedProfile3D, \
+    create_profile, \
+    Profile1D, \
+    Profile2D, \
+    Profile3D
 
 from time_series import \
     TimeSeriesData, \

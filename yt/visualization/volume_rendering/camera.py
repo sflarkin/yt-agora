@@ -175,6 +175,8 @@ class Camera(ParallelAnalysisInterface):
             width = (width, width, width) # left/right, top/bottom, front/back 
         if not isinstance(width, YTArray):
             width = self.pf.arr(width, input_units="code_length")
+        if not isinstance(center, YTArray):
+            center = self.pf.arr(center, input_units="code_length")
         self.orienter = Orientation(normal_vector, north_vector=north_vector, steady_north=steady_north)
         if not steady_north:
             self.rotation_vector = self.orienter.unit_vectors[1]
@@ -262,8 +264,11 @@ class Camera(ParallelAnalysisInterface):
         >>> write_bitmap(im, 'render_with_grids.png')
 
         """
-        corners = self.pf.h.grid_corners
-        levels = self.pf.h.grid_levels[:,0]
+        if self.region is None:
+            self.region = self.pf.h.region((self.re + self.le) / 2.0,
+                                           self.le, self.re)
+        corners = self.region.grid_corners
+        levels = self.region.grid_levels[:,0]
 
         if max_level is not None:
             subset = levels <= max_level
@@ -624,13 +629,14 @@ class Camera(ParallelAnalysisInterface):
             del nz
         else:
             nim = im
-        ax = self._pylab.imshow(nim[:,:,:3]/nim[:,:,:3].max(), origin='lower')
+        ax = self._pylab.imshow(nim[:,:,:3]/nim[:,:,:3].max(), origin='upper')
         return ax
 
     def draw(self):
         self._pylab.draw()
     
     def save_annotated(self, fn, image, enhance=True, dpi=100):
+        image = image.swapaxes(0,1) 
         ax = self.show_mpl(image, enhance=enhance)
         self.annotate(ax.axes, enhance)
         self._pylab.savefig(fn, bbox_inches='tight', facecolor='black', dpi=dpi)
@@ -2141,6 +2147,7 @@ class ProjectionCamera(Camera):
                 log_fields=self.log_fields, 
                 north_vector=north_vector,
                 no_ghost=no_ghost)
+        self.center = center
 
     def get_sampler(self, args):
         if self.interpolated:
