@@ -31,7 +31,9 @@ from numpy import \
      ldexp, frexp, fmod, floor, ceil, trunc
 
 
-from yt.utilities.units import Unit, UnitRegistry, dimensionless
+from yt.units.unit_object import Unit
+from yt.units.unit_registry import UnitRegistry
+from yt.units.dimensions import dimensionless
 from yt.utilities.exceptions import YTUnitOperationError, YTUnitConversionError
 from numbers import Number as numeric_type
 
@@ -529,6 +531,15 @@ class YTArray(np.ndarray):
             if not power.units.is_dimensionless:
                 raise YTUnitOperationError('power', power.unit)
 
+        # Work around a sympy issue (I think?)
+        #
+        # If I don't do this, super(YTArray, self).__pow__ returns a YTArray
+        # with a unit attribute set to the sympy expression 1/1 rather than a
+        # dimensionless Unit object.
+        if self.units.is_dimensionless and power == -1:
+            ret = super(YTArray, self).__pow__(power)
+            return YTArray(ret, input_units='')
+
         return YTArray(super(YTArray, self).__pow__(power))
 
     def __abs__(self):
@@ -740,6 +751,9 @@ class YTQuantity(YTArray):
         if ret.size > 1:
             raise RuntimeError
         return ret
+
+    def __repr__(self):
+        return str(self)
 
     @property
     def value(self):

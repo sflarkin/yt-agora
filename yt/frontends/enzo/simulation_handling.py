@@ -19,11 +19,15 @@ import numpy as np
 import glob
 import os
 
+from yt.convenience import \
+    load
 from yt.data_objects.time_series import \
     SimulationTimeSeries, TimeSeriesData
-from yt.data_objects.yt_array import \
-    YTArray, \
-    YTQuantity
+from yt.units import dimensions
+from yt.units.unit_registry import \
+     UnitRegistry
+from yt.units.yt_array import \
+     YTArray, YTQuantity
 from yt.utilities.cosmology import \
     Cosmology
 from yt.utilities.definitions import \
@@ -36,11 +40,6 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
     parallel_objects
 from yt.utilities.physical_constants import \
     gravitational_constant_cgs as G
-from yt.utilities.units import \
-     UnitRegistry
-
-from yt.convenience import \
-    load
 
 class EnzoSimulation(SimulationTimeSeries):
     r"""Initialize an Enzo Simulation object.
@@ -85,15 +84,15 @@ class EnzoSimulation(SimulationTimeSeries):
 
     def _set_units(self):
         self.unit_registry = UnitRegistry()
-        import yt.utilities.units as units
-        self.unit_registry.lut["code_time"] = (1.0, units.time)
+        self.unit_registry.lut["code_time"] = (1.0, dimensions.time)
         if self.cosmological_simulation:
             # Instantiate EnzoCosmology object for units and time conversions.
             self.enzo_cosmology = \
               EnzoCosmology(self.parameters['CosmologyHubbleConstantNow'],
                             self.parameters['CosmologyOmegaMatterNow'],
                             self.parameters['CosmologyOmegaLambdaNow'],
-                            0.0, self.parameters['CosmologyInitialRedshift'])
+                            0.0, self.parameters['CosmologyInitialRedshift'],
+                            unit_registry=self.unit_registry)
 
             self.time_unit = self.enzo_cosmology.time_unit.in_units("s")
         else:
@@ -489,7 +488,9 @@ class EnzoSimulation(SimulationTimeSeries):
         # Convert initial/final redshifts to times.
         if self.cosmological_simulation:
             self.initial_time = self.enzo_cosmology.t_from_z(self.initial_redshift)
+            self.initial_time.units.registry = self.unit_registry
             self.final_time = self.enzo_cosmology.t_from_z(self.final_redshift)
+            self.final_time.units.registry = self.unit_registry
 
         # If not a cosmology simulation, figure out the stopping criteria.
         else:
@@ -689,9 +690,9 @@ class EnzoSimulation(SimulationTimeSeries):
 
         if not isinstance(times, YTArray):
             if isinstance(times, tuple) and len(times) == 2:
-                times = YTArray(*times)
+                times = self.arr(*times)
             else:
-                times = YTArray(times, "code_time")
+                times = self.arr(times, "code_time")
         times = times.in_units("s")
         return self._get_outputs_by_key('time', times, tolerance=tolerance,
                                         outputs=outputs)
@@ -712,14 +713,16 @@ class EnzoSimulation(SimulationTimeSeries):
 
 class EnzoCosmology(Cosmology):
     def __init__(self, hubble_constant, omega_matter, omega_lambda,
-                 omega_curvature, initial_redshift):
+                 omega_curvature, initial_redshift, unit_registry = None):
         Cosmology.__init__(self,
                            hubble_constant=hubble_constant,
                            omega_matter=omega_matter,
                            omega_lambda=omega_lambda,
-                           omega_curvature=omega_curvature)
+                           omega_curvature=omega_curvature,
+                           unit_registry=unit_registry)
         self.initial_redshift = initial_redshift
         # time units = 1 / sqrt(4 * pi * G rho_0 * (1 + z_i)**3),
         # rho_0 = (3 * Omega_m * h**2) / (8 * pi * G)
         self.time_unit = ((1.5 * self.omega_matter * self.hubble_constant**2 * 
                            (1 + self.initial_redshift)**3)**-0.5).in_units("s")
+        self.time_unit.units.registry = self.unit_registry

@@ -22,9 +22,7 @@ from .data_containers import data_object_registry
 from .analyzer_objects import create_quantity_proxy, \
     analysis_task_registry, AnalysisTask
 from .derived_quantities import quantity_info
-from yt.data_objects.yt_array import \
-    YTArray, \
-    YTQuantity
+from yt.units.yt_array import YTArray, YTQuantity
 from yt.utilities.exceptions import YTException
 from yt.utilities.parallel_tools.parallel_analysis_interface \
     import parallel_objects, parallel_root_only
@@ -374,6 +372,14 @@ class SimulationTimeSeries(TimeSeriesData):
 
     def __repr__(self):
         return self.parameter_filename
+
+    _arr = None
+    @property
+    def arr(self):
+        if self._arr is not None:
+            return self._arr
+        self._arr = functools.partial(YTArray, registry = self.unit_registry)
+        return self._arr
     
     _quan = None
     @property

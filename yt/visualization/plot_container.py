@@ -16,7 +16,8 @@ from .plot_window import \
 from .base_plot_types import CallbackWrapper
 
 from yt.funcs import \
-    defaultdict, get_image_suffix, get_ipython_api_version
+    defaultdict, get_image_suffix, \
+    get_ipython_api_version, ensure_list
 from yt.utilities.definitions import axis_names
 from yt.utilities.exceptions import \
     YTNotInsideNotebook
@@ -89,6 +90,14 @@ class FieldTransform(object):
 log_transform = FieldTransform('log10', np.log10, LogLocator())
 linear_transform = FieldTransform('linear', lambda x: x, LinearLocator())
 
+class PlotDictionary(dict):
+    def __getitem__(self, item):
+        item = self.data_source._determine_fields(item)[0]
+        return dict.__getitem__(self, item)
+
+    def __init__(self, data_source, *args):
+        self.data_source = data_source
+        return dict.__init__(self, args)
 
 class ImagePlotContainer(object):
     """A countainer for plots with colorbars.
@@ -101,7 +110,8 @@ class ImagePlotContainer(object):
     def __init__(self, data_source, fields, figure_size, fontsize):
         self.data_source = data_source
         self.figure_size = figure_size
-        self.plots = {}
+        self.plots = PlotDictionary(data_source)
+        self.fields = self.data_source._determine_fields(fields)
         self._callbacks = []
         self._field_transform = {}
         self._colormaps = defaultdict(lambda: 'algae')
@@ -125,7 +135,7 @@ class ImagePlotContainer(object):
             fields = self.plots.keys()
         else:
             fields = [field]
-        for field in self._field_check(fields):
+        for field in self.data_source._determine_fields(fields):
             if log:
                 self._field_transform[field] = log_transform
             else:
@@ -146,7 +156,7 @@ class ImagePlotContainer(object):
             fields = self.plots.keys()
         else:
             fields = [field]
-        for field in self._field_check(fields):
+        for field in self.data_source._determine_fields(fields):
             if self._field_transform[field] == log_transform:
                 log[field] = True
             else:
@@ -155,7 +165,7 @@ class ImagePlotContainer(object):
 
     @invalidate_plot
     def set_transform(self, field, name):
-        field = self._field_check(field)
+        field = self.data_source._determine_fields(field)[0]
         if name not in field_transforms: 
             raise KeyError(name)
         self._field_transform[field] = field_transforms[name]
@@ -179,7 +189,7 @@ class ImagePlotContainer(object):
             fields = self.plots.keys()
         else:
             fields = [field]
-        for field in self._field_check(fields):
+        for field in self.data_source._determine_fields(fields):
             self._colorbar_valid = False
             self._colormaps[field] = cmap_name
         return self
@@ -214,7 +224,7 @@ class ImagePlotContainer(object):
             fields = self.plots.keys()
         else:
             fields = [field]
-        for field in self._field_check(fields):
+        for field in self.data_source._determine_fields(fields):
             myzmin = zmin
             myzmax = zmax
             if zmin == 'min':
@@ -252,10 +262,6 @@ class ImagePlotContainer(object):
 
     def __getitem__(self, item):
         return self.plots[item]
-
-    @property
-    def fields(self):
-        return self._frb.data.keys() + self.override_fields
 
     def run_callbacks(self, f):
         keys = self._frb.keys()
@@ -338,7 +344,7 @@ class ImagePlotContainer(object):
         else:
             fields = [field]
 
-        for field in self._field_check(fields):
+        for field in self.data_source._determine_fields(fields):
             self._colorbar_valid = False
             self._colormaps[field] = cmap
             if isinstance(cmap, types.StringTypes):
@@ -363,6 +369,28 @@ class ImagePlotContainer(object):
             including the margins but not the colorbar.
         """
         self.figure_size = size
+        return self
+
+    @invalidate_plot
+    def set_unit(self, field, new_unit):
+        """Sets a new unit for the requested field
+
+        parameters
+        ----------
+        field : string or field tuple
+           The name of the field that is to be changed.
+
+        new_unit : string or Unit object
+           The name of the new unit.
+        """
+        field = self.data_source._determine_fields(field)[0]
+        new_unit = ensure_list(new_unit)
+        if len(field) > 1 and len(new_unit) != len(field):
+            raise RuntimeError(
+                "Field list {} and unit "
+                "list {} are incompatible".format(field, new_unit))
+        for f, u in zip(field, new_unit):
+            self._frb[f].convert_to_units(u)
         return self
 
     def save(self, name=None, mpl_kwargs=None):
@@ -480,11 +508,3 @@ class ImagePlotContainer(object):
             img = base64.b64encode(self.plots[field]._repr_png_())
             ret += '<img src="data:image/png;base64,%s"><br>' % img
         return ret
-
-    def _field_check(self, field):
-        field = self.data_source._determine_fields(field)
-        if isinstance(field, (list, tuple)):
-            return field
-        else:
-            return field[0]
-
