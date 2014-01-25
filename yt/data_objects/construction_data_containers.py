@@ -46,6 +46,7 @@ from yt.utilities.minimal_representation import \
     MinimalProjectionData
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     parallel_objects, parallel_root_only, ParallelAnalysisInterface
+from yt.units.unit_object import Unit
 import yt.geometry.particle_deposit as particle_deposit
 
 from yt.fields.field_exceptions import \
@@ -236,6 +237,10 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         self.get_data(field)
 
     @property
+    def blocks(self):
+        return self.data_source.blocks
+
+    @property
     def _mrep(self):
         return MinimalProjectionData(self)
 
@@ -255,6 +260,7 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
                         bounds, style = self.proj_style)
 
     def get_data(self, fields = None):
+        fields = fields or []
         fields = self._determine_fields(ensure_list(fields))
         # We need a new tree for every single set of fields we add
         if len(fields) == 0: return
@@ -314,11 +320,23 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
             units = finfo.units
             if self.weight_field is None and str(units) != "":
                 # See _handle_chunk where we mandate cm
-                units = "(%s) * cm" % units
+                if units == '':
+                    input_units = "cm"
+                else:
+                    input_units = "(%s) * cm" % units
+            else:
+                input_units = units
             # Don't forget [non_nan] somewhere here.
             self[field] = YTArray(field_data[fi].ravel(),
-                                  input_units=units,
+                                  input_units=input_units,
                                   registry=self.pf.unit_registry)
+            if self.weight_field is None:
+                if Unit(units).is_code_unit and input_units != units:
+                    if units is '':
+                        final_unit = "code_length"
+                    else:
+                        final_unit = "(%s) * code_length" % units
+                    self[field].convert_to_units(final_unit)
         for i in data.keys(): self[i] = data.pop(i)
         mylog.info("Projection completed")
 
@@ -351,8 +369,7 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         ilevel = chunk.ires * self.pf.ires_factor
         tree.add_chunk_to_tree(i1, i2, ilevel, v, w)
 
-    def to_pw(self, fields=None, center='c', width=None, axes_unit=None, 
-               origin='center-window'):
+    def to_pw(self, fields=None, center='c', width=None, origin='center-window'):
         r"""Create a :class:`~yt.visualization.plot_window.PWViewerMPL` from this
         object.
 
@@ -360,7 +377,7 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         object, which can then be moved around, zoomed, and on and on.  All
         behavior of the plot window is relegated to that routine.
         """
-        pw = self._get_pw(fields, center, width, origin, axes_unit, 'Projection')
+        pw = self._get_pw(fields, center, width, origin, 'Projection')
         return pw
 
 class YTCoveringGridBase(YTSelectionContainer3D):

@@ -27,7 +27,7 @@ from yt.utilities.logger import ytLogger as mylog
 from yt.utilities.definitions import inv_axis_names, axis_names, x_dict, y_dict
 import yt.extern.progressbar as pb
 import yt.utilities.rpdb as rpdb
-from yt.data_objects.yt_array import YTArray
+from yt.units.yt_array import YTArray
 from collections import defaultdict
 from functools import wraps
 
@@ -540,6 +540,16 @@ def get_script_contents():
         contents = None
     return contents
 
+def download_file(url, filename):
+    import urllib
+    class MyURLopener(urllib.FancyURLopener):
+        def http_error_default(self, url, fp, errcode, errmsg, headers):
+            raise RuntimeError, \
+              "Attempt to download file from %s failed with error %s: %s." % \
+              (url, errcode, errmsg)
+    fn, h = MyURLopener().retrieve(url, filename)
+    return fn
+
 # This code snippet is modified from Georg Brandl
 def bb_apicall(endpoint, data, use_pass = True):
     import urllib, urllib2
@@ -599,8 +609,6 @@ def fix_length(length, pf=None):
     length_valid_tuple = isinstance(length, (list, tuple)) and len(length) == 2
     unit_is_string = isinstance(length[1], types.StringTypes)
     if length_valid_tuple and unit_is_string:
-        if length[1] in ('unitary', '1'):
-            length = (length[0], 'code_length')
         return YTArray(*length, registry=registry)
     else:
         raise RuntimeError("Length %s is invalid" % str(length))
@@ -631,7 +639,6 @@ def fix_axis(axis):
 def get_image_suffix(name):
     suffix = os.path.splitext(name)[1]
     return suffix if suffix in ['.png', '.eps', '.ps', '.pdf'] else ''
-
 
 def ensure_dir_exists(path):
     r"""Create all directories in path recursively in a parallel safe manner"""

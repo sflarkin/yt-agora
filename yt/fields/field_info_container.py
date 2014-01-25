@@ -18,8 +18,8 @@ native.
 import numpy as np
 
 from yt.funcs import mylog
-from yt.utilities.units import Unit
-from yt.data_objects.yt_array import YTArray
+from yt.units.unit_object import Unit
+from yt.units.yt_array import YTArray
 from .derived_field import \
     DerivedField, \
     NullFunc, \
@@ -31,7 +31,7 @@ from yt.utilities.exceptions import \
     YTFieldNotFound
 from .field_plugin_registry import \
     field_plugins
-from yt.utilities.units import \
+from yt.units.unit_object import \
     Unit
 from .particle_fields import \
     particle_deposition_functions, \
@@ -172,21 +172,21 @@ class FieldInfoContainer(dict): # Resistance has utility
 
         def _gradx(f, data):
             grad = data[field][sl,1:-1,1:-1] - data[field][sr,1:-1,1:-1]
-            grad /= 2.0*data["dx"].flat[0]
+            grad /= 2.0*data["dx"].flat[0]*data.pf.units["cm"]
             g = np.zeros(data[field].shape, dtype='float64')
             g[1:-1,1:-1,1:-1] = grad
             return g
 
         def _grady(f, data):
             grad = data[field][1:-1,sl,1:-1] - data[field][1:-1,sr,1:-1]
-            grad /= 2.0*data["dy"].flat[0]
+            grad /= 2.0*data["dy"].flat[0]*data.pf.units["cm"]
             g = np.zeros(data[field].shape, dtype='float64')
             g[1:-1,1:-1,1:-1] = grad
             return g
 
         def _gradz(f, data):
             grad = data[field][1:-1,1:-1,sl] - data[field][1:-1,1:-1,sr]
-            grad /= 2.0*data["dz"].flat[0]
+            grad /= 2.0*data["dz"].flat[0]*data.pf.units["cm"]
             g = np.zeros(data[field].shape, dtype='float64')
             g[1:-1,1:-1,1:-1] = grad
             return g

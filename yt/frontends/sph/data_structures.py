@@ -24,24 +24,20 @@ import time
 import os
 
 from yt.utilities.fortran_utils import read_record
-from yt.data_objects.yt_array import \
-    YTArray, \
-    YTQuantity
 from yt.utilities.logger import ytLogger as mylog
 from yt.geometry.particle_geometry_handler import \
     ParticleGeometryHandler
 from yt.data_objects.static_output import \
     StaticOutput, ParticleFile
+from yt.utilities.definitions import \
+    mpc_conversion, sec_conversion
 from yt.utilities.physical_constants import \
     G, \
     cm_per_kpc, \
     mass_sun_cgs
 from yt.utilities.cosmology import Cosmology
 from .fields import \
-    GadgetFieldInfo, \
-    GadgetHDF5FieldInfo, \
-    TipsyFieldInfo, \
-    OWLSFieldInfo
+    SPHFieldInfo
 
 try:
     import requests
@@ -64,13 +60,16 @@ class GadgetBinaryFile(ParticleFile):
             field_list, self.total_particles,
             self._position_offset, self._file_size)
 
+
 class ParticleStaticOutput(StaticOutput):
     _unit_base = None
     over_refine_factor = 1
 
+
 class GadgetStaticOutput(ParticleStaticOutput):
     _hierarchy_class = ParticleGeometryHandler
     _file_class = GadgetBinaryFile
+    _field_info_class = SPHFieldInfo
     _particle_mass_name = "Mass"
     _particle_coordinates_name = "Coordinates"
     _particle_velocity_name = "Velocities"
@@ -173,9 +172,9 @@ class GadgetStaticOutput(ParticleStaticOutput):
             # ComovingIntegration hvals["Time"] will in fact be the expansion
             # factor, not the actual integration time, so we re-calculate
             # global time from our Cosmology.
-            cosmo = Cosmology(self.hubble_constant * 100.0,
+            cosmo = Cosmology(self.hubble_constant,
                               self.omega_matter, self.omega_lambda)
-            self.current_time = cosmo.UniverseAge(self.current_redshift)
+            self.current_time = cosmo.hubble_time(self.current_redshift)
             mylog.info("Calculating time from %0.3e to be %0.3e seconds",
                        hvals["Time"], self.current_time)
         self.parameters = hvals
@@ -190,41 +189,48 @@ class GadgetStaticOutput(ParticleStaticOutput):
         self.file_count = hvals["NumFiles"]
 
     def _set_code_unit_attributes(self):
-        unit_base = self._unit_base or {}
-        length_unit = unit_base.get("length", None)
-        if length_unit is None and self.cosmological_simulation == 1:
+        # Set a sane default for cosmological simulations.
+        if self._unit_base is None and self.cosmological_simulation == 1:
             mylog.info("Assuming length units are in Mpc/h (comoving)")
-            self._unit_base = dict(mpchcm = 1.0)
-            self.length_unit = self.quan(1.0, "Mpccm/h")
-        elif length_unit is not None:
-            self.length_unit = self.quan(length_unit[0], length_unit[1])
+            self._unit_base = dict(length = ("mpchcm", 1.0))
+        # The other same defaults we will use from the standard Gadget
+        # defaults.
+        if "length" in unit_base:
+            length_unit = unit_base["length"]
         else:
             raise RuntimeError
-        # Now we can guess all the other units, or get them from unit_base.
-        # unit_base must be in cgs.
-        velocity_unit = unit_base.get("velocity", None)
-        velocity_unit = unit_base.get("UnitVelocity_in_cm_per_s",
-                                      velocity_unit)
-        if velocity_unit is None:
-            velocity_unit = 1e5
-        velocity_unit = self.quan(velocity_unit, "cm/s")
-        self.time_unit = self.length_unit / velocity_unit
-        # We set hubble_constant = 1.0 for non-cosmology
-        mass_unit = unit_base.get("g", None)
-        mass_unit = unit_base.get("UnitMass_in_g", mass_unit)
-        if mass_unit is None:
-            self.mass_unit = self.quan(1.0, "10**10 * Msun/h")
-        else:
-            self.mass_unit = self.quan(mass_unit, "g")
+        self.length_unit = self.quan(length_unit[1], length_unit[0])
 
+        unit_base = self._unit_base or {}
+        if "velocity" in unit_base:
+            velocity_unit = unit_base["velocity"]
+        elif "UnitVelocity_in_cm_per_s" in unit_base:
+            velocity_unit = ("cm/s", unit_base["UnitVelocity_in_cm_per_s"]
+        else:
+            velocity_unit = ("cm/s", 1e5)
+        self.velocity_unit = self.quan(velocity_unit[1], velocity_unit[0])
+        # We set hubble_constant = 1.0 for non-cosmology, so this is safe.
+        # Default to 1e10 Msun/h if mass is not specified.
+        if "mass" in unit_base:
+            mass_unit = unit_base["mass"]
+        elif "UnitMass_in_g" in unit_base:
+            mass_unit = ("g", unit_base["UnitMass_in_g"])
+        else:
+            # Sane default
+            mass_unit = ("1e10*Msun/h", 1.0)
+        self.mass_unit = self.quan(mass_unit[1], mass_unit[0])
+        self.time_unit = self.length_unit / self.velocity_unit
+        
     @classmethod
     def _is_valid(self, *args, **kwargs):
         # We do not allow load() of these files.
         return False
 
+
 class GadgetHDF5StaticOutput(GadgetStaticOutput):
     _file_class = ParticleFile
-    _field_info_class = GadgetHDF5FieldInfo
+    _fieldinfo_fallback = GadgetHDF5FieldInfo
+    _fieldinfo_known = KnownGadgetHDF5Fields
     _particle_mass_name = "Masses"
     _suffix = ".hdf5"
 
@@ -278,7 +284,7 @@ class OWLSStaticOutput(GadgetHDF5StaticOutput):
             int(os.stat(self.parameter_filename)[stat.ST_CTIME])
 
         # Set standard values
-        self.current_time = hvals["Time_GYR"]
+        self.current_time = hvals["Time_GYR"] * sec_conversion["Gyr"]
         self.domain_left_edge = np.zeros(3, "float64")
         self.domain_right_edge = np.ones(3, "float64") * hvals["BoxSize"]
         nz = 1 << self.over_refine_factor
@@ -301,8 +307,7 @@ class OWLSStaticOutput(GadgetHDF5StaticOutput):
         self._unit_base.update(
             (str(k), v) for k, v in handle["/Units"].attrs.items())
         # Comoving cm is given in the Units
-        self._unit_base['length_unit'] = (1.0 / self._unit_base["UnitLength_in_cm"],
-                                          "cmcm")
+        self._unit_base['cmcm'] = 1.0 / self._unit_base["UnitLength_in_cm"]
 
         handle.close()
 
@@ -335,7 +340,8 @@ class TipsyFile(ParticleFile):
 class TipsyStaticOutput(ParticleStaticOutput):
     _hierarchy_class = ParticleGeometryHandler
     _file_class = TipsyFile
-    _field_info_class = TipsyFieldInfo
+    _fieldinfo_fallback = TipsyFieldInfo
+    _fieldinfo_known = KnownTipsyFields
     _particle_mass_name = "Mass"
     _particle_coordinates_name = "Coordinates"
     _header_spec = (('time',    'd'),
@@ -505,7 +511,8 @@ class HTTPParticleFile(ParticleFile):
 class HTTPStreamStaticOutput(ParticleStaticOutput):
     _hierarchy_class = ParticleGeometryHandler
     _file_class = HTTPParticleFile
-    _field_info_class = GadgetFieldInfo
+    _fieldinfo_fallback = GadgetFieldInfo
+    _fieldinfo_known = KnownGadgetFields
     _particle_mass_name = "Mass"
     _particle_coordinates_name = "Coordinates"
     _particle_velocity_name = "Velocities"

@@ -31,7 +31,9 @@ from numpy import \
      ldexp, frexp, fmod, floor, ceil, trunc
 
 
-from yt.utilities.units import Unit, dimensionless
+from yt.units.unit_object import Unit
+from yt.units.unit_registry import UnitRegistry
+from yt.units.dimensions import dimensionless
 from yt.utilities.exceptions import YTUnitOperationError, YTUnitConversionError
 from numbers import Number as numeric_type
 
@@ -261,7 +263,7 @@ class YTArray(np.ndarray):
         """
 
         """
-        if obj is None:
+        if obj is None and hasattr(self, 'units'):
             return
         self.units = getattr(obj, 'units', None)
 
@@ -486,7 +488,7 @@ class YTArray(np.ndarray):
         """ See __div__. """
         oth = sanitize_units_mul(self, other)
         return np.floor_divide(self, oth, out=self)
-    
+
     #Should these raise errors?  I need to come back and check this.
     def __or__(self, right_object):
         return YTArray(super(YTArray, self).__or__(right_object))
@@ -529,8 +531,17 @@ class YTArray(np.ndarray):
             if not power.units.is_dimensionless:
                 raise YTUnitOperationError('power', power.unit)
 
+        # Work around a sympy issue (I think?)
+        #
+        # If I don't do this, super(YTArray, self).__pow__ returns a YTArray
+        # with a unit attribute set to the sympy expression 1/1 rather than a
+        # dimensionless Unit object.
+        if self.units.is_dimensionless and power == -1:
+            ret = super(YTArray, self).__pow__(power)
+            return YTArray(ret, input_units='')
+
         return YTArray(super(YTArray, self).__pow__(power))
-    
+
     def __abs__(self):
         """ Return a YTArray with the abs of the data. """
         return YTArray(super(YTArray, self).__abs__())
@@ -705,6 +716,33 @@ class YTArray(np.ndarray):
             raise RuntimeError("Operation is not defined.")
         return ret
 
+    def __reduce__(self):
+        """Pickle reduction method
+
+        See the documentation for the standard library pickle module:
+        http://docs.python.org/2/library/pickle.html
+
+        Unit metadata is encoded in the zeroth element of third element of the 
+        returned tuple, itself a tuple used to restore the state of the ndarray.  
+        This is always defined for numpy arrays.
+        """
+        np_ret = super(YTArray, self).__reduce__()
+        obj_state = np_ret[2]
+        unit_state = (((str(self.units), self.units.registry.lut),) + obj_state[:],)
+        new_ret = np_ret[:2] + unit_state + np_ret[3:]
+        return new_ret
+
+    def __setstate__(self, state):
+        """Pickle setstate method
+
+        This is called inside pickle.read() and restores the unit data from the
+        metadata extracted in __reduce__ and then serialized by pickle.
+        """
+        super(YTArray, self).__setstate__(state[1:])
+        unit, lut = state[0]
+        registry = UnitRegistry(lut=lut, add_default_symbols=False)
+        self.units = Unit(unit, registry=registry)
+
 class YTQuantity(YTArray):
     def __new__(cls, input, input_units=None, registry=None, dtype=None):
         if not isinstance(input, (numeric_type, np.number)):
@@ -713,6 +751,9 @@ class YTQuantity(YTArray):
         if ret.size > 1:
             raise RuntimeError
         return ret
+
+    def __repr__(self):
+        return str(self)
 
     @property
     def value(self):

@@ -19,7 +19,7 @@ import os
 from yt.utilities.io_handler import \
     BaseIOHandler, _axis_ids
 from yt.utilities.logger import ytLogger as mylog
-from yt.geometry.selection_routines import mask_fill
+from yt.geometry.selection_routines import mask_fill, AlwaysSelector
 import h5py
 
 import numpy as np
@@ -39,12 +39,13 @@ class IOHandlerPackedHDF5(BaseIOHandler):
         f = h5py.File(grid.filename, "r")
         group = f["/Grid%08i" % grid.id]
         fields = []
+        add_io = "io" in grid.pf.particle_types
         for name, v in group.iteritems():
             # NOTE: This won't work with 1D datasets.
             if not hasattr(v, "shape"):
                 continue
             elif len(v.dims) == 1:
-                fields.append( ("io", str(name)) )
+                if add_io: fields.append( ("io", str(name)) )
             else:
                 fields.append( ("enzo", str(name)) )
         f.close()
@@ -163,6 +164,18 @@ class IOHandlerPackedHDF5(BaseIOHandler):
         fid = fn = None
         rv = {}
         mylog.debug("Preloading fields %s", fields)
+        # Split into particles and non-particles
+        fluid_fields, particle_fields = [], []
+        for ftype, fname in fields:
+            if ftype in self.pf.particle_types:
+                particle_fields.append((ftype, fname))
+            else:
+                fluid_fields.append((ftype, fname))
+        if len(particle_fields) > 0:
+            selector = AlwaysSelector(self.pf)
+            rv.update(self._read_particle_selection(
+              [chunk], selector, particle_fields))
+        if len(fluid_fields) == 0: return rv
         for g in chunk.objs:
             rv[g.id] = gf = {}
             if g.filename is None: continue
@@ -174,7 +187,7 @@ class IOHandlerPackedHDF5(BaseIOHandler):
                 fn = g.filename
             data = np.empty(g.ActiveDimensions[::-1], dtype="float64")
             data_view = data.swapaxes(0,2)
-            for field in fields:
+            for field in fluid_fields:
                 ftype, fname = field
                 dg = h5py.h5d.open(fid, "/Grid%08i/%s" % (g.id, fname))
                 dg.read(h5py.h5s.ALL, h5py.h5s.ALL, data)
@@ -280,8 +293,6 @@ class IOHandlerPacked2D(IOHandlerPackedHDF5):
         if size is None:
             size = sum((g.count(selector) for chunk in chunks
                         for g in chunk.objs))
-        if any((ftype != "gas" for ftype, fname in fields)):
-            raise NotImplementedError
         for field in fields:
             ftype, fname = field
             fsize = size
@@ -299,7 +310,7 @@ class IOHandlerPacked2D(IOHandlerPackedHDF5):
                 gds = f.get("/Grid%08i" % g.id)
                 for field in fields:
                     ftype, fname = field
-                    ds = np.atleast_3d(gds.get(fname).value)
+                    ds = np.atleast_3d(gds.get(fname).value.transpose())
                     nd = g.select(selector, ds, rv[field], ind) # caches
                 ind += nd
             f.close()

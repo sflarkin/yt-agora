@@ -30,7 +30,7 @@ from yt.utilities.lib.misc_utilities import \
     get_box_grids_level
 
 from .fields import AthenaFieldInfo
-from yt.data_objects.yt_array import YTQuantity
+from yt.units.yt_array import YTQuantity
 
 def _get_convert(fname):
     def _conv(data):
@@ -291,7 +291,7 @@ class AthenaHierarchy(GridGeometryHandler):
                   self.parameter_file.domain_left_edge)/self.parameter_file.domain_dimensions
             dx = dx/self.parameter_file.refine_by**(levels[i])
             dxs.append(dx)
-        
+
         dx = self.pf.arr(dxs, "code_length")
         dle = self.parameter_file.domain_left_edge
         dre = self.parameter_file.domain_right_edge
