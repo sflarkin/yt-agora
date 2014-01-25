@@ -22,8 +22,8 @@ import copy
 
 from yt.funcs import *
 
-from yt.data_objects.yt_array import YTArray
-from yt.utilities.lib.misc_utilities import obtain_rvec, obtain_rv_vec
+from yt.units.yt_array import YTArray
+from yt.utilities.lib import obtain_rvec, obtain_rv_vec
 from yt.utilities.math_utils import resize_vector
 from yt.utilities.cosmology import Cosmology
 from yt.fields.derived_field import \
@@ -251,8 +251,8 @@ def get_radius(data, field_prefix):
     if any(data.pf.periodicity):
         rdw = radius.copy()
     for i, ax in enumerate('xyz'):
-        np.subtract(data["%s%s" % (field_prefix, ax)],
-                    data.pf.arr(center[i], center.units), r)
+        np.subtract(data["%s%s" % (field_prefix, ax)].in_units("cm"),
+                    data.pf.arr(center[i], center.units).in_units("cm"), r)
         if data.pf.periodicity[i] == True:
             np.abs(r, r)
             np.subtract(r, DW[i], rdw)

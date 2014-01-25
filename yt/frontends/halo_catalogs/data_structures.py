@@ -33,7 +33,7 @@ from yt.data_objects.static_output import \
     StaticOutput, \
     ParticleFile
 import yt.utilities.fortran_utils as fpu
-from yt.data_objects.yt_array import \
+from yt.units.yt_array import \
     YTArray, \
     YTQuantity
 
@@ -83,10 +83,9 @@ class RockstarStaticOutput(StaticOutput):
         self.hubble_constant = hvals['h0']
         self.omega_lambda = hvals['Ol']
         self.omega_matter = hvals['Om']
-        cosmo = Cosmology(self.hubble_constant * 100.0,
+        cosmo = Cosmology(self.hubble_constant,
                           self.omega_matter, self.omega_lambda)
-        self.current_time = self.quan(cosmo.UniverseAge(
-            self.current_redshift), "s")
+        self.current_time = cosmo.hubble_time(self.current_redshift).in_units("s")
         self.periodicity = (True, True, True)
         self.particle_types = ("halos")
         self.particle_types_raw = ("halos")
@@ -102,8 +101,6 @@ class RockstarStaticOutput(StaticOutput):
         z = self.current_redshift
         self.length_unit = self.quan(1.0 / (1.0+z), "Mpc / h")
         self.mass_unit = self.quan(1.0, "Msun / h")
-        # velocity_unit = length_unit / time_unit
-        # time_unit = length_unit / velocity_unit
         self.velocity_unit = self.quan(1.0, "km / s")
         self.time_unit = self.length_unit / self.velocity_unit
 

@@ -21,7 +21,7 @@ from yt.utilities.definitions import \
     x_dict, y_dict
 from yt.utilities.exceptions import \
     YTNoDataInObjectError
-from yt.utilities.units import Unit
+from yt.units.unit_object import Unit
 
 def setup():
     from yt.config import ytcfg
@@ -68,6 +68,7 @@ def test_slice():
                 fns += pw.save(name=tmpname)
                 frb = slc.to_frb((1.0, 'unitary'), 64)
                 for slc_field in ['ones', 'density']:
+                    fi = pf._get_field_info(slc_field)
                     yield assert_equal, frb[slc_field].info['data_source'], \
                         slc.__str__()
                     yield assert_equal, frb[slc_field].info['axis'], \
@@ -75,7 +76,7 @@ def test_slice():
                     yield assert_equal, frb[slc_field].info['field'], \
                         slc_field
                     yield assert_equal, frb[slc_field].units, \
-                        Unit(pf._get_field_info("unknown", slc_field).units)
+                        Unit(fi.units)
                     yield assert_equal, frb[slc_field].info['xlim'], \
                         frb.bounds[:2]
                     yield assert_equal, frb[slc_field].info['ylim'], \

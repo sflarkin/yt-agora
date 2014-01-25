@@ -18,7 +18,7 @@ import numpy as np
 from yt.funcs import mylog
 from yt.fields.field_info_container import \
     FieldInfoContainer
-from yt.data_objects.yt_array import \
+from yt.units.yt_array import \
     YTArray
 
 from yt.utilities.physical_constants import \
@@ -82,9 +82,13 @@ class EnzoFieldInfo(FieldInfoContainer):
         ("creation_time", ("code_time", [], None)),
         ("dynamical_time", ("code_time", [], None)),
         ("metallicity_fraction", ("code_metallicity", [], None)),
+        ("metallicity", ("", [], None)),
         ("particle_type", ("", [], None)),
         ("particle_index", ("", [], None)),
         ("particle_mass", ("code_mass", [], None)),
+        ("GridID", ("", [], None)),
+        ("identifier", ("", ["particle_index"], None)),
+        ("level", ("", [], None)),
     )
 
     def __init__(self, pf, field_list):
@@ -182,7 +186,7 @@ class EnzoFieldInfo(FieldInfoContainer):
                 ("gas", "thermal_energy"),
                 ("enzo", ge_name),
                 units = "erg/g")
-        elif self.pf.paramters["HydroMethod"] in (4, 6):
+        elif self.pf.parameters["HydroMethod"] in (4, 6):
             self.add_output_field(
                 ("enzo", te_name),
                 units="code_length**2/code_time**2")

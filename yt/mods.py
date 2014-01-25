@@ -62,7 +62,8 @@ from yt.data_objects.api import \
     BinnedProfile1D, BinnedProfile2D, BinnedProfile3D, \
     data_object_registry, \
     TimeSeriesData, AnalysisTask, analysis_task, \
-    ImageArray, particle_filter
+    ImageArray, particle_filter, create_profile, \
+    Profile1D, Profile2D, Profile3D
 
 from yt.data_objects.derived_quantities import \
     add_quantity, quantity_info
@@ -133,8 +134,8 @@ from yt.frontends.sph.api import \
 #    get_available_modules, amods
 #available_analysis_modules = get_available_modules()
 
-#from yt.frontends.fits.api import \
-#    FITSStaticOutput, FITSFieldInfo, add_fits_field
+from yt.frontends.fits.api import \
+    FITSStaticOutput, FITSFieldInfo
 
 # Import our analysis modules
 from yt.analysis_modules.halo_finding.api import \
@@ -151,7 +152,7 @@ from yt.visualization.api import \
     apply_colormap, scale_image, write_projection, \
     SlicePlot, AxisAlignedSlicePlot, OffAxisSlicePlot, \
     ProjectionPlot, OffAxisProjectionPlot, \
-    show_colormaps
+    show_colormaps, ProfilePlot, PhasePlot
 
 from yt.visualization.volume_rendering.api import \
     ColorTransferFunction, PlanckTransferFunction, ProjectionTransferFunction, \

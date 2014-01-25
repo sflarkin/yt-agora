@@ -1,5 +1,5 @@
 """
-Symbolic unit handling.
+A class that represents a unit symbol.
 
 
 """
@@ -12,27 +12,18 @@ Symbolic unit handling.
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
-from sympy import Expr, Mul, Number, Pow, Rational, Symbol
+from sympy import Expr, Mul, Number, Pow, Symbol, Integer, Float
 from sympy import nsimplify, posify, sympify, latex
 from sympy.parsing.sympy_parser import parse_expr
 from collections import defaultdict
-from yt.utilities.physical_ratios import \
-    cm_per_pc, cm_per_ly, cm_per_au, rsun_per_cm, \
-    mass_sun_grams, sec_per_year, sec_per_day, sec_per_hr, \
-    sec_per_min, temp_sun_kelvin, luminosity_sun_ergs_per_sec, \
-    metallicity_sun, erg_per_eV, amu_grams, mass_electron_grams, \
-    hubble_constant_hertz
+from yt.units import dimensions
+from yt.units.unit_lookup_table import \
+    default_unit_symbol_lut, latex_symbol_lut, \
+    unit_prefixes, prefixable_units
+from yt.units.unit_registry import UnitRegistry
+ 
 import string
-
-# Define a sympy one object.
-sympy_one = sympify(1)
-
-#
-# Exceptions
-#
-
-class SymbolNotFoundError(Exception):
-    pass
+import numpy as np
 
 class UnitParseError(Exception):
     pass
@@ -40,227 +31,15 @@ class UnitParseError(Exception):
 class InvalidUnitOperation(Exception):
     pass
 
-#
-# Base dimensions
-#
-
-mass = Symbol("(mass)", positive=True)
-length = Symbol("(length)", positive=True)
-time = Symbol("(time)", positive=True)
-temperature = Symbol("(temperature)", positive=True)
-metallicity = Symbol("(metallicity)", positive=True)
-
-base_dimensions = [mass, length, time, temperature, metallicity]
-
-#
-# Derived dimensions
-#
-
-dimensionless = sympify(1)
-
-rate = 1 / time
-
-velocity     = length / time
-acceleration = length / time**2
-jerk         = length / time**3
-snap         = length / time**4
-crackle      = length / time**5
-pop          = length / time**6
-
-momentum = mass * velocity
-force    = mass * acceleration
-energy   = force * length
-power    = energy / time
-charge   = (energy * length)**Rational(1, 2)  # proper 1/2 power
-
-electric_field = charge / length**2
-magnetic_field = electric_field
-
-#
-# The default/basic unit symbol lookup table.
-#
-# Lookup a unit symbol with the symbol string, and provide a tuple with the
-# conversion factor to cgs and dimensionality.
-#
-
-default_unit_symbol_lut = {
-    # base
-    "g":  (1.0, mass),
-    #"cm": (1.0, length, r"\rm{cm}"),  # duplicate with meter below...
-    "s":  (1.0, time),
-    "K":  (1.0, temperature),
-
-    # "code" units, default to CGS conversion.
-    # These default values are  overriden in the code frontends
-    "code_length" : (1.0, length),
-    "unitary"   : (1.0, length),
-    "code_mass" : (1.0, mass),
-    "code_time" : (1.0, time),
-    "code_velocity" : (1.0, velocity),
-    "code_magnetic" : (1.0, magnetic_field),
-    "code_temperature" : (1.0, temperature),
-    "code_metallicity" : (1.0, metallicity),
-
-    # other cgs
-    "dyne": (1.0, force),
-    "erg":  (1.0, energy),
-    "esu":  (1.0, charge),
-
-    # some SI
-    "m": (1.0e2, length),
-    "J": (1.0e7, energy),
-    "Hz": (1.0, rate),
-
-    # dimensionless stuff
-    "h": (1.0, dimensionless), # needs to be added for rho_crit_now
-
-    # times
-    "min": (sec_per_min, time),
-    "hr":  (sec_per_hr, time),
-    "day": (sec_per_day, time),
-    "yr":  (sec_per_year, time),
-
-    # Solar units
-    "Msun": (mass_sun_grams, mass),
-    "msun": (mass_sun_grams, mass),
-    "Rsun": (rsun_per_cm, length),
-    "rsun": (rsun_per_cm, length),
-    "Lsun": (luminosity_sun_ergs_per_sec, power),
-    "Tsun": (temp_sun_kelvin, temperature),
-    "Zsun": (metallicity_sun, metallicity),
-
-    # astro distances
-    "AU": (cm_per_au, length),
-    "au": (cm_per_au, length),
-    "ly": (cm_per_ly, length),
-    "pc": (cm_per_pc, length),
-
-    # electric stuff
-    "gauss": (1.0, magnetic_field),
-
-    # other astro
-    "H_0": (hubble_constant_hertz, rate),  # check cf
-
-    # misc
-    "eV": (erg_per_eV, energy),
-    "amu": (amu_grams, mass),
-    "me": (mass_electron_grams, mass),
-
-}
-
-# Add LaTeX representations for units with trivial representations.
-latex_symbol_lut = {
-    "unitary" : "",
-    "code_length" : "\\rm{code}\/\\rm{length}",
-    "code_time" : "\\rm{code}\/\\rm{time}",
-    "code_mass" : "\\rm{code}\/\\rm{mass}",
-    "code_temperature" : "\\rm{code}\/\\rm{temperature}",
-    "code_metallicity" : "\\rm{code}\/\\rm{metallicity}",
-    "code_velocity" : "\\rm{code}\/\\rm{velocity}",
-    "Msun" : "\\rm{M}_\\odot",
-    "msun" : "\\rm{M}_\\odot",
-    "Rsun" : "\\rm{R}_\\odot",
-    "rsun" : "\\rm{R}_\\odot",
-    "Lsun" : "\\rm{L}_\\odot",
-    "Tsun" : "\\rm{T}_\\odot",
-    "Zsun" : "\\rm{Z}_\\odot",
-}
-for key in default_unit_symbol_lut:
-    if key not in latex_symbol_lut:
-        latex_symbol_lut[key] = "\\rm{" + key + "}"
-
-# This dictionary formatting from magnitude package, credit to Juan Reyero.
-unit_prefixes = {
-    'Y': 1e24,   # yotta
-    'Z': 1e21,   # zetta
-    'E': 1e18,   # exa
-    'P': 1e15,   # peta
-    'T': 1e12,   # tera
-    'G': 1e9,    # giga
-    'M': 1e6,    # mega
-    'k': 1e3,    # kilo
-    'd': 1e1,    # deci
-    'c': 1e-2,   # centi
-    'm': 1e-3,   # mili
-    'u': 1e-6,   # micro
-    'n': 1e-9,   # nano
-    'p': 1e-12,  # pico
-    'f': 1e-15,  # femto
-    'a': 1e-18,  # atto
-    'z': 1e-21,  # zepto
-    'y': 1e-24,  # yocto
-}
-
-
-class UnitRegistry:
-
-    def __init__(self, add_default_symbols=True):
-        self.lut = {}
-        self.unit_objs = {}
-
-        if add_default_symbols:
-            self.lut.update(default_unit_symbol_lut)
-
-    def __getitem__(self, key):
-        return self.lut[key]
-
-    def add(self, symbol, cgs_value, dimensions, tex_repr=None):
-        """
-        Add a symbol to this registry.
-
-        """
-        # Validate
-        if not isinstance(cgs_value, float):
-            raise UnitParseError("cgs_value must be a float, got a %s." \
-                                 % type(cgs_value))
-
-        _validate_dimensions(dimensions)
-
-        # Add to symbol lut
-        if tex_repr is None:
-            latex_symbol_lut[symbol] = "\\rm{" + symbol + "}"
-        else:
-            latex_symbol_lut[symbol] = tex_repr
-
-        # Add to lut
-        if tex_repr is None: tex_repr = symbol
-        self.lut.update( {symbol: (cgs_value, dimensions)} )
-
-    def remove(self, symbol):
-        """
-        Remove the entry for the unit matching `symbol`.
-
-        """
-        if symbol not in self.lut:
-            raise SymbolNotFoundError(
-                "Tried to remove the symbol '%s', but it does not exist" \
-                "in this registry." % symbol)
-
-        del self.lut[symbol]
-
-    def modify(self, symbol, cgs_value):
-        """
-        Change the cgs value of a dimension.  Useful for adjusting code units
-        after parsing parameters."
-
-        """
-        if symbol not in self.lut:
-            raise SymbolNotFoundError(
-                "Tried to remove the symbol '%s', but it does not exist" \
-                "in this registry." % symbol)
-
-        if hasattr(cgs_value, "in_cgs"):
-            cgs_value = float(cgs_value.in_cgs().value)
-        self.lut[symbol] = (cgs_value, self.lut[symbol][1])
-
-    def keys(self):
-        """
-        Print out the units contained in the lookup table.
-
-        """
-        return self.lut.keys()
-
 default_unit_registry = UnitRegistry()
+
+sympy_one = sympify(1)
+
+global_dict = {
+    'Symbol': Symbol,
+    'Integer': Integer,
+    'Float': Float,
+}
 
 class Unit(Expr):
     """
@@ -277,7 +56,7 @@ class Unit(Expr):
     # Extra attributes
     __slots__ = ["expr", "is_atomic", "cgs_value", "dimensions", "registry"]
 
-    def __new__(cls, unit_expr=sympify(1), cgs_value=None, dimensions=None,
+    def __new__(cls, unit_expr=sympy_one, cgs_value=None, dimensions=None,
                 registry=None, **assumptions):
         """
         Create a new unit. May be an atomic unit (like a gram) or combinations
@@ -298,20 +77,19 @@ class Unit(Expr):
         """
         # Simplest case. If user passes a Unit object, just use the expr.
         unit_key = None
-        if isinstance(unit_expr, str) and registry and \
-                unit_expr in registry.unit_objs:
-            return registry.unit_objs[unit_expr]
+        if isinstance(unit_expr, str):
+            if registry and unit_expr in registry.unit_objs:
+                return registry.unit_objs[unit_expr]
+            else:
+                unit_key = unit_expr
+                if not unit_expr:
+                    # Bug catch...
+                    # if unit_expr is an empty string, parse_expr fails hard...
+                    unit_expr = "1"
+                unit_expr = parse_expr(unit_expr, global_dict=global_dict)
         elif isinstance(unit_expr, Unit):
             # grab the unit object's sympy expression.
             unit_expr = unit_expr.expr
-        # If we have a string, have sympy parse it into an Expr.
-        elif isinstance(unit_expr, str):
-            unit_key = unit_expr
-            if not unit_expr:
-                # Bug catch...
-                # if unit_expr is an empty string, parse_expr fails hard...
-                unit_expr = "1"
-            unit_expr = parse_expr(unit_expr)
         # Make sure we have an Expr at this point.
         if not isinstance(unit_expr, Expr):
             raise UnitParseError("Unit representation must be a string or " \
@@ -325,9 +103,11 @@ class Unit(Expr):
         # done with argument checking...
 
         # sympify, make positive symbols, and nsimplify the expr
-        unit_expr = sympify(unit_expr)
-        unit_expr = _make_symbols_positive(unit_expr)
-        unit_expr = nsimplify(unit_expr)
+        if unit_expr != sympy_one:
+            unit_expr = sympify(unit_expr)
+            unit_expr = _make_symbols_positive(unit_expr)
+            if any([atom.is_Float for atom in unit_expr.atoms()]):
+                unit_expr = nsimplify(unit_expr)
 
         # see if the unit is atomic.
         is_atomic = False
@@ -348,13 +128,15 @@ class Unit(Expr):
                                      % (cgs_value, type(cgs_value)) )
 
             # check that dimensions is valid
-            _validate_dimensions( sympify(dimensions) )
+            validate_dimensions( sympify(dimensions) )
         else:
             # lookup the unit symbols
             cgs_value, dimensions = _get_unit_data_from_expr(unit_expr, registry.lut)
 
         # Sympy trick to get dimensions powers as Rationals
-        dimensions = nsimplify(dimensions)
+        if not dimensions.is_Atom:
+            if any([atom.is_Float for atom in dimensions.atoms()]):
+                dimensions = nsimplify(dimensions)
 
         # Create obj with superclass construct.
         obj = Expr.__new__(cls, **assumptions)
@@ -469,6 +251,15 @@ class Unit(Expr):
     def is_dimensionless(self):
         return self.dimensions == sympy_one
 
+    @property
+    def is_code_unit(self):
+        for atom in self.expr.atoms():
+            if str(atom).startswith("code") or atom.is_Number:
+                pass
+            else:
+                return False
+        return True
+
     # @todo: might be a simpler/smarter sympy way to do this...
     def get_cgs_equivalent(self):
         """
@@ -476,10 +267,10 @@ class Unit(Expr):
 
         """
         cgs_units_string = "g**(%s) * cm**(%s) * s**(%s) * K**(%s)" % \
-            (self.dimensions.expand().as_coeff_exponent(mass)[1],
-             self.dimensions.expand().as_coeff_exponent(length)[1],
-             self.dimensions.expand().as_coeff_exponent(time)[1],
-             self.dimensions.expand().as_coeff_exponent(temperature)[1])
+            (self.dimensions.expand().as_coeff_exponent(dimensions.mass)[1],
+             self.dimensions.expand().as_coeff_exponent(dimensions.length)[1],
+             self.dimensions.expand().as_coeff_exponent(dimensions.time)[1],
+             self.dimensions.expand().as_coeff_exponent(dimensions.temperature)[1])
 
         return Unit(cgs_units_string, cgs_value=1.0,
                     dimensions=self.dimensions, registry=self.registry)
@@ -565,43 +356,10 @@ def _make_symbols_positive(expr):
     # Replace one at a time
     for s in expr_symbols:
         # replace this symbol with a positive version
-        expr = expr.subs(s, Symbol(s.name, positive=True))
+        if not s.is_positive:
+            expr = expr.subs(s, Symbol(s.name, positive=True))
 
     return expr
-
-# @todo: simpler method that doesn't use recursion would be better...
-# We could check if dimensions.atoms are all numbers or symbols, but we should
-# check the functions also...
-def _validate_dimensions(d):
-    """
-    Make sure that `d` is a valid dimension expression. It must consist of only
-    the base dimension symbols, to powers, multiplied together. If valid, return
-    the simplified expression. If not, raise an Exception.
-
-    """
-    # in the case of a Number of Symbol, we can just return
-    if isinstance(d, Number):
-        return d
-    elif isinstance(d, Symbol):
-        if d in base_dimensions:
-            return d
-        else:
-            raise UnitParseError("dimensionality expression contains an "
-                                 "unknown symbol '%s'." % d)
-
-    # validate args of a Pow or Mul separately
-    elif isinstance(d, Pow):
-        return _validate_dimensions(d.args[0])**_validate_dimensions(d.args[1])
-
-    elif isinstance(d, Mul):
-        total_mul = 1
-        for arg in d.args:
-            total_mul *= _validate_dimensions(arg)
-        return total_mul
-
-    # should never get here
-    raise UnitParseError("Bad dimensionality expression '%s'." % d)
-
 
 def _get_unit_data_from_expr(unit_expr, unit_symbol_lut):
     """
@@ -671,7 +429,7 @@ def _lookup_unit_symbol(symbol_str, unit_symbol_lut):
         # the first character could be a prefix, check the rest of the symbol
         symbol_wo_prefix = symbol_str[1:]
 
-        if symbol_wo_prefix in unit_symbol_lut:
+        if symbol_wo_prefix in unit_symbol_lut and symbol_wo_prefix in prefixable_units:
             # lookup successful, it's a symbol with a prefix
             unit_data = unit_symbol_lut[symbol_wo_prefix]
             prefix_value = unit_prefixes[possible_prefix]
@@ -687,3 +445,36 @@ def _lookup_unit_symbol(symbol_str, unit_symbol_lut):
     # no dice
     raise UnitParseError("Could not find unit symbol '%s' in the provided " \
                          "symbols." % symbol_str)
+
+# @todo: simpler method that doesn't use recursion would be better...
+# We could check if dimensions.atoms are all numbers or symbols, but we should
+# check the functions also...
+def validate_dimensions(d):
+    """
+    Make sure that `d` is a valid dimension expression. It must consist of only
+    the base dimension symbols, to powers, multiplied together. If valid, return
+    the simplified expression. If not, raise an Exception.
+
+    """
+    # in the case of a Number of Symbol, we can just return
+    if isinstance(d, Number):
+        return d
+    elif isinstance(d, Symbol):
+        if d in dimensions.base_dimensions:
+            return d
+        else:
+            raise UnitParseError("dimensionality expression contains an "
+                                 "unknown symbol '%s'." % d)
+
+    # validate args of a Pow or Mul separately
+    elif isinstance(d, Pow):
+        return validate_dimensions(d.args[0])**validate_dimensions(d.args[1])
+
+    elif isinstance(d, Mul):
+        total_mul = 1
+        for arg in d.args:
+            total_mul *= validate_dimensions(arg)
+        return total_mul
+
+    # should never get here
+    raise UnitParseError("Bad dimensionality expression '%s'." % d)

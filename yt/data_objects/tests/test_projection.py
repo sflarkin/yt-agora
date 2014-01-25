@@ -1,5 +1,5 @@
 from yt.testing import *
-from yt.utilities.units import Unit
+from yt.units.unit_object import Unit
 import os
 import tempfile
 
@@ -47,14 +47,24 @@ def test_projection():
                 fns += pw.save(name=tmpname)
                 frb = proj.to_frb((1.0,'unitary'), 64)
                 for proj_field in ['ones', 'density']:
+                    fi = pf._get_field_info(proj_field)
                     yield assert_equal, frb[proj_field].info['data_source'], \
                             proj.__str__()
                     yield assert_equal, frb[proj_field].info['axis'], \
                             ax
                     yield assert_equal, frb[proj_field].info['field'], \
                             proj_field
-                    yield assert_equal, frb[proj_field].units, \
-                            Unit(pf._get_field_info("unkown", proj_field).units)
+                    field_unit = Unit(fi.units)
+                    if wf is not None:
+                        yield assert_equal, frb[proj_field].units, Unit(field_unit)
+                    else:
+                        if frb[proj_field].units.is_code_unit:
+                            proj_unit = "code_length"
+                        else:
+                            proj_unit = "cm"
+                        if field_unit != '':
+                            proj_unit = "({0}) * {1}".format(field_unit, proj_unit)
+                        yield assert_equal, frb[proj_field].units, Unit(proj_unit)
                     yield assert_equal, frb[proj_field].info['xlim'], \
                             frb.bounds[:2]
                     yield assert_equal, frb[proj_field].info['ylim'], \
