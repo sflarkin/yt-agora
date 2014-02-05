@@ -810,8 +810,7 @@ class ProfileND(ParallelAnalysisInterface):
         return arr, weight_data, bin_fields
 
     def __getitem__(self, key):
-        field = self.data_source._determine_fields(key)[0]
-        return array_like_field(self.pf, self.field_data[field], field)
+        return array_like_field(self.pf, self.field_data[key], key)
 
     def __iter__(self):
         return sorted(self.field_data.items())
@@ -1032,7 +1031,7 @@ def create_profile(data_source, bin_fields, fields, n = 64,
     setattr(obj, "accumulation", accumulation)
     setattr(obj, "fractional", fractional)
     if fields is not None:
-        obj.add_fields(fields)
+        obj.add_fields([field[-1] for field in fields])
     for field in fields:
         if fractional:
             obj.field_data[field] /= obj.field_data[field].sum()
