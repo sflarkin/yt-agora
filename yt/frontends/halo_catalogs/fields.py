@@ -19,14 +19,12 @@ import numpy as np
 from yt.funcs import mylog
 from yt.fields.field_info_container import \
     FieldInfoContainer
-from yt.data_objects.yt_array import \
+from yt.units.yt_array import \
     YTArray
 
 from yt.utilities.physical_constants import \
     mh, \
     mass_sun_cgs
-
-import yt.utilities.lib as amr_utils
 
 m_units = "Msun / h"                # Msun / h
 p_units = "Mpccm / h"               # Mpc / h comoving

@@ -21,13 +21,13 @@ from yt.config import ytcfg
 from .data_containers import data_object_registry
 from .analyzer_objects import create_quantity_proxy, \
     analysis_task_registry, AnalysisTask
-from .derived_quantities import quantity_info
+from yt.units.yt_array import YTArray, YTQuantity
 from yt.utilities.exceptions import YTException
 from yt.utilities.parallel_tools.parallel_analysis_interface \
     import parallel_objects, parallel_root_only
 from yt.utilities.parameter_file_storage import \
     simulation_time_series_registry
-
+     
 class AnalysisTaskProxy(object):
     def __init__(self, time_series):
         self.time_series = time_series
@@ -360,13 +360,11 @@ class SimulationTimeSeries(TimeSeriesData):
         self._set_parameter_defaults()
         # Read the simulation parameter file.
         self._parse_parameter_file()
-        # Set up time units dictionary.
-        self._set_time_units()
-
+        # Set units
+        self._set_units()
         # Figure out the starting and stopping times and redshift.
         self._calculate_simulation_bounds()
         # Get all possible datasets.
-        self.all_time_outputs = []
         self._get_all_outputs(find_outputs=find_outputs)
         
         self.print_key_parameters()
@@ -374,6 +372,23 @@ class SimulationTimeSeries(TimeSeriesData):
     def __repr__(self):
         return self.parameter_filename
 
+    _arr = None
+    @property
+    def arr(self):
+        if self._arr is not None:
+            return self._arr
+        self._arr = functools.partial(YTArray, registry = self.unit_registry)
+        return self._arr
+    
+    _quan = None
+    @property
+    def quan(self):
+        if self._quan is not None:
+            return self._quan
+        self._quan = functools.partial(YTQuantity,
+                registry = self.unit_registry)
+        return self._quan
+    
     @parallel_root_only
     def print_key_parameters(self):
         """

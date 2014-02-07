@@ -23,6 +23,7 @@ from yt.fields.particle_fields import \
 class StreamFieldInfo(FieldInfoContainer):
     known_other_fields = (
         ("density", ("code_mass/code_length**3", [], None)),
+        ("dark_matter_density", ("code_mass/code_length**3", [], None)),
         ("number_density", ("1/code_length**3", [], None)),
         ("pressure", ("dyne/code_length**2", [], None)),
         ("thermal_energy", ("erg / g", [], None)),
@@ -36,6 +37,20 @@ class StreamFieldInfo(FieldInfoContainer):
         ("radiation_acceleration_x", ("code_length/code_time**2", [], None)),
         ("radiation_acceleration_y", ("code_length/code_time**2", [], None)),
         ("radiation_acceleration_z", ("code_length/code_time**2", [], None)),
+
+        # We need to have a bunch of species fields here, too
+        ("metal_density",   ("code_mass/code_length**3", [], None)),
+        ("hi_density",      ("code_mass/code_length**3", [], None)),
+        ("hii_density",     ("code_mass/code_length**3", [], None)),
+        ("h2i_density",     ("code_mass/code_length**3", [], None)),
+        ("h2ii_density",    ("code_mass/code_length**3", [], None)),
+        ("h2m_density",     ("code_mass/code_length**3", [], None)),
+        ("hei_density",     ("code_mass/code_length**3", [], None)),
+        ("heii_density",    ("code_mass/code_length**3", [], None)),
+        ("heiii_density",   ("code_mass/code_length**3", [], None)),
+        ("hdi_density",     ("code_mass/code_length**3", [], None)),
+        ("di_density",      ("code_mass/code_length**3", [], None)),
+        ("dii_density",     ("code_mass/code_length**3", [], None)),
     )
 
     known_particle_fields = (

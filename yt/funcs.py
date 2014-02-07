@@ -27,7 +27,7 @@ from yt.utilities.logger import ytLogger as mylog
 from yt.utilities.definitions import inv_axis_names, axis_names, x_dict, y_dict
 import yt.extern.progressbar as pb
 import yt.utilities.rpdb as rpdb
-from yt.data_objects.yt_array import YTArray
+from yt.units.yt_array import YTArray, YTQuantity
 from collections import defaultdict
 from functools import wraps
 
@@ -89,6 +89,8 @@ def read_struct(f, fmt):
 def just_one(obj):
     # If we have an iterable, sometimes we only want one item
     if hasattr(obj,'flat'):
+        if isinstance(obj, YTArray):
+            return YTQuantity(obj.flat[0], obj.units, registry=obj.units.registry)
         return obj.flat[0]
     elif iterable(obj):
         return obj[0]
@@ -609,8 +611,6 @@ def fix_length(length, pf=None):
     length_valid_tuple = isinstance(length, (list, tuple)) and len(length) == 2
     unit_is_string = isinstance(length[1], types.StringTypes)
     if length_valid_tuple and unit_is_string:
-        if length[1] in ('unitary', '1'):
-            length = (length[0], 'code_length')
         return YTArray(*length, registry=registry)
     else:
         raise RuntimeError("Length %s is invalid" % str(length))
@@ -641,7 +641,6 @@ def fix_axis(axis):
 def get_image_suffix(name):
     suffix = os.path.splitext(name)[1]
     return suffix if suffix in ['.png', '.eps', '.ps', '.pdf'] else ''
-
 
 def ensure_dir_exists(path):
     r"""Create all directories in path recursively in a parallel safe manner"""
