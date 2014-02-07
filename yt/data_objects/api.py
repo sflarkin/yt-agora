@@ -32,7 +32,10 @@ from profiles import \
     BinnedProfile1D, \
     BinnedProfile2D, \
     BinnedProfile3D, \
-    create_profile
+    create_profile, \
+    Profile1D, \
+    Profile2D, \
+    Profile3D
 
 from time_series import \
     TimeSeriesData, \
@@ -46,10 +49,6 @@ from data_containers import \
 
 import construction_data_containers as __cdc
 import selection_data_containers as __sdc
-
-from derived_quantities import \
-    quantity_info, \
-    add_quantity
 
 from image_array import \
     ImageArray

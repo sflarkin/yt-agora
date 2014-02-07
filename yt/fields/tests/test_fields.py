@@ -1,11 +1,12 @@
 from yt.testing import *
 import numpy as np
-import yt.fields.universal_fields
+from yt.utilities.cosmology import \
+     Cosmology
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
 from yt.frontends.stream.fields import \
     StreamFieldInfo
-from yt.data_objects.yt_array import YTArray
+from yt.units.yt_array import YTArray
 
 def setup():
     global base_pf
@@ -17,6 +18,8 @@ def setup():
         units.append(code_units)
     base_pf = fake_random_pf(4, fields = fields, units = units)
     base_pf.h
+    base_pf.cosmological_simulation = 1
+    base_pf.cosmology = Cosmology()
     from yt.config import ytcfg
     ytcfg["yt","__withintesting"] = "True"
     np.seterr(all = 'ignore')
@@ -36,6 +39,9 @@ def get_params(pf):
             "", registry = pf.unit_registry),
         cp_z_vec = YTArray((0.0, 0.0, 1.0),
             "", registry = pf.unit_registry),
+        omega_baryon = 0.04,
+        observer_redshift = 0.0,
+        source_redshift = 3.0,
     )
 
 _base_fields = (("gas", "density"),
@@ -56,8 +62,14 @@ def realistic_pf(fields, nprocs):
     pf.conversion_factors.update( dict((f, 1.0) for f in fields) )
     pf.gamma = 5.0/3.0
     pf.current_redshift = 0.0001
+    pf.cosmological_simulation = 1
     pf.hubble_constant = 0.7
     pf.omega_matter = 0.27
+    pf.omega_lambda = 0.73
+    pf.cosmology = Cosmology(hubble_constant=pf.hubble_constant,
+                             omega_matter=pf.omega_matter,
+                             omega_lambda=pf.omega_lambda,
+                             unit_registry=pf.unit_registry)
     return pf
 
 def _strip_ftype(field):

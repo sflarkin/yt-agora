@@ -18,14 +18,12 @@ import numpy as np
 from yt.funcs import mylog
 from yt.fields.field_info_container import \
     FieldInfoContainer
-from yt.data_objects.yt_array import \
+from yt.units.yt_array import \
     YTArray
 
 from yt.utilities.physical_constants import \
     mh, \
     mass_sun_cgs
-
-import yt.utilities.lib as amr_utils
 
 b_units = "code_magnetic"
 ra_units = "code_length / code_time**2"
@@ -62,7 +60,7 @@ class EnzoFieldInfo(FieldInfoContainer):
         ("RadAccel1", (ra_units, ["radiation_acceleration_x"], None)),
         ("RadAccel2", (ra_units, ["radiation_acceleration_y"], None)),
         ("RadAccel3", (ra_units, ["radiation_acceleration_z"], None)),
-        ("Dark_Matter_Mass", (rho_units, ["dark_matter_mass"], None)),
+        ("Dark_Matter_Density", (rho_units, ["dark_matter_density"], None)),
         ("Temperature", ("K", ["temperature"], None)),
         ("Dust_Temperature", ("K", ["dust_temperature"], None)),
         ("x-velocity", (vel_units, ["velocity_x"], None)),
@@ -84,9 +82,13 @@ class EnzoFieldInfo(FieldInfoContainer):
         ("creation_time", ("code_time", [], None)),
         ("dynamical_time", ("code_time", [], None)),
         ("metallicity_fraction", ("code_metallicity", [], None)),
+        ("metallicity", ("", [], None)),
         ("particle_type", ("", [], None)),
         ("particle_index", ("", [], None)),
         ("particle_mass", ("code_mass", [], None)),
+        ("GridID", ("", [], None)),
+        ("identifier", ("", ["particle_index"], None)),
+        ("level", ("", [], None)),
     )
 
     def __init__(self, pf, field_list):
@@ -143,9 +145,11 @@ class EnzoFieldInfo(FieldInfoContainer):
             self.add_species_field(sp)
         def _number_density(_sp_list, masses):
             def _num_dens_func(field, data):
-                num = YTArray(np.zeros(data["density"].shape, "float64"))
+                num = data.pf.arr(np.zeros_like(data["density"], np.float64),
+                                  "1/cm**3")
                 for sp in _sp_list:
                     num += data["%s_density" % sp] / masses[sp]
+                return num
             return _num_dens_func
         func = _number_density(species_names, known_species_masses)
         self.add_field(("gas", "number_density"),

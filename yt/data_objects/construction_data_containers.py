@@ -31,8 +31,13 @@ from yt.utilities.logger import ytLogger
 from .data_containers import \
     YTSelectionContainer1D, YTSelectionContainer2D, YTSelectionContainer3D, \
     restore_field_information_state, YTFieldData
-from yt.utilities.lib import \
-    QuadTree, ghost_zone_interpolate, fill_region, \
+from yt.utilities.lib.QuadTree import \
+    QuadTree
+from yt.utilities.lib.Interpolators import \
+    ghost_zone_interpolate
+from yt.utilities.lib.misc_utilities import \
+    fill_region
+from yt.utilities.lib.marching_cubes import \
     march_cubes_grid, march_cubes_grid_flux
 from yt.utilities.data_point_utilities import CombineGrids,\
     DataCubeRefine, DataCubeReplace, FillRegion, FillBuffer
@@ -41,7 +46,7 @@ from yt.utilities.minimal_representation import \
     MinimalProjectionData
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     parallel_objects, parallel_root_only, ParallelAnalysisInterface
-from yt.utilities.units import Unit
+from yt.units.unit_object import Unit
 import yt.geometry.particle_deposit as particle_deposit
 
 from yt.fields.field_exceptions import \
@@ -232,6 +237,10 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         self.get_data(field)
 
     @property
+    def blocks(self):
+        return self.data_source.blocks
+
+    @property
     def _mrep(self):
         return MinimalProjectionData(self)
 
@@ -251,6 +260,7 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
                         bounds, style = self.proj_style)
 
     def get_data(self, fields = None):
+        fields = fields or []
         fields = self._determine_fields(ensure_list(fields))
         # We need a new tree for every single set of fields we add
         if len(fields) == 0: return
@@ -295,11 +305,12 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         # We now convert to half-widths and center-points
         data = {}
         #non_nan = ~np.any(np.isnan(nvals), axis=-1)
-        data['px'] = px
-        data['py'] = py
+        code_length = self.pf.domain_width.units
+        data['px'] = self.pf.arr(px, code_length)
+        data['py'] = self.pf.arr(py, code_length)
         data['weight_field'] = nwvals
-        data['pdx'] = pdx
-        data['pdy'] = pdy
+        data['pdx'] = self.pf.arr(pdx, code_length)
+        data['pdy'] = self.pf.arr(pdy, code_length)
         data['fields'] = nvals
         # Now we run the finalizer, which is ignored if we don't need it
         fd = data['fields']
@@ -310,13 +321,23 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
             units = finfo.units
             if self.weight_field is None:
                 # See _handle_chunk where we mandate cm
-                input_units = "(%s) * cm" % units
+                if units == '':
+                    input_units = "cm"
+                else:
+                    input_units = "(%s) * cm" % units
+            else:
+                input_units = units
             # Don't forget [non_nan] somewhere here.
             self[field] = YTArray(field_data[fi].ravel(),
                                   input_units=input_units,
                                   registry=self.pf.unit_registry)
-            if Unit(units).is_code_unit:
-                self[field].convert_to_units("(%s) * code_length" % units)
+            if self.weight_field is None:
+                if Unit(units).is_code_unit and input_units != units:
+                    if units is '':
+                        final_unit = "code_length"
+                    else:
+                        final_unit = "(%s) * code_length" % units
+                    self[field].convert_to_units(final_unit)
         for i in data.keys(): self[i] = data.pop(i)
         mylog.info("Projection completed")
 
@@ -349,8 +370,7 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         ilevel = chunk.ires * self.pf.ires_factor
         tree.add_chunk_to_tree(i1, i2, ilevel, v, w)
 
-    def to_pw(self, fields=None, center='c', width=None, axes_unit=None, 
-               origin='center-window'):
+    def to_pw(self, fields=None, center='c', width=None, origin='center-window'):
         r"""Create a :class:`~yt.visualization.plot_window.PWViewerMPL` from this
         object.
 
@@ -358,7 +378,7 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         object, which can then be moved around, zoomed, and on and on.  All
         behavior of the plot window is relegated to that routine.
         """
-        pw = self._get_pw(fields, center, width, origin, axes_unit, 'Projection')
+        pw = self._get_pw(fields, center, width, origin, 'Projection')
         return pw
 
 class YTCoveringGridBase(YTSelectionContainer3D):
@@ -405,6 +425,7 @@ class YTCoveringGridBase(YTSelectionContainer3D):
 
         rdx = self.pf.domain_dimensions*self.pf.relative_refinement(0, level)
         rdx[np.where(dims - 2 * num_ghost_zones <= 1)] = 1   # issue 602
+        self.base_dds = self.pf.domain_width / self.pf.domain_dimensions
         self.dds = self.pf.domain_width / rdx.astype("float64")
         self.ActiveDimensions = np.array(dims, dtype='int32')
         self.right_edge = self.left_edge + self.ActiveDimensions*self.dds
@@ -452,8 +473,9 @@ class YTCoveringGridBase(YTSelectionContainer3D):
         return tuple(self.ActiveDimensions.tolist())
 
     def _setup_data_source(self):
-        self._data_source = self.pf.h.region(
-            self.center, self.left_edge, self.right_edge)
+        self._data_source = self.pf.h.region(self.center,
+            self.left_edge - self.base_dds,
+            self.right_edge + self.base_dds)
         self._data_source.min_level = 0
         self._data_source.max_level = self.level
 

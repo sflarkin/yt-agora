@@ -20,14 +20,16 @@ import functools
 from yt.funcs import *
 
 from yt.config import ytcfg
+from yt.utilities.cosmology import \
+     Cosmology
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     parallel_root_only
 from yt.utilities.parameter_file_storage import \
     ParameterFileStore, \
     NoParameterShelf, \
     output_type_registry
-from yt.utilities.units import \
-     Unit, UnitRegistry, dimensionless, length
+from yt.units.unit_object import Unit
+from yt.units.unit_registry import UnitRegistry
 from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc
 from yt.data_objects.particle_filters import \
@@ -36,7 +38,7 @@ from yt.data_objects.particle_unions import \
     ParticleUnion
 from yt.utilities.minimal_representation import \
     MinimalStaticOutput
-from yt.data_objects.yt_array import \
+from yt.units.yt_array import \
     YTArray, \
     YTQuantity
 
@@ -147,6 +149,10 @@ class StaticOutput(object):
         self.domain_width = self.domain_right_edge - self.domain_left_edge
         if not isinstance(self.current_time, YTQuantity):
             self.current_time = self.quan(self.current_time, "code_time")
+        # need to do this if current_time was set before units were set
+        elif self.current_time.units.registry.lut["code_time"] != \
+          self.unit_registry.lut["code_time"]:
+            self.current_time.units.registry = self.unit_registry
         for attr in ("center", "width", "left_edge", "right_edge"):
             n = "domain_%s" % attr
             v = getattr(self, n)
@@ -305,9 +311,8 @@ class StaticOutput(object):
         self.h.field_list.extend(fields)
         # Give ourselves a chance to add them here, first, then...
         # ...if we can't find them, we set them up as defaults.
-        self.h._setup_particle_types([union.name])
-        #self.h._setup_unknown_fields(fields, self.field_info,
-        #                             skip_removal = True)
+        new_fields = self.h._setup_particle_types([union.name])
+        rv = self.field_info.find_dependencies(new_fields)
 
     def add_particle_filter(self, filter):
         # This is a dummy, which we set up to enable passthrough of "all"
@@ -374,8 +379,9 @@ class StaticOutput(object):
         raise YTFieldNotFound((ftype, fname), self)
 
     def _setup_particle_type(self, ptype):
-        mylog.debug("Don't know what to do with %s", ptype)
-        return []
+        orig = set(self.field_info.items())
+        self.field_info.setup_particle_fields(ptype)
+        return [n for n, v in set(self.field_info.items()).difference(orig)]
 
     @property
     def particle_fields_by_type(self):
@@ -397,19 +403,20 @@ class StaticOutput(object):
 
     def _create_unit_registry(self):
         self.unit_registry = UnitRegistry()
-        import yt.utilities.units as units
-        self.unit_registry.lut["code_length"] = (1.0, units.length)
-        self.unit_registry.lut["code_mass"] = (1.0, units.mass)
-        self.unit_registry.lut["code_time"] = (1.0, units.time)
-        self.unit_registry.lut["code_magnetic"] = (1.0, units.magnetic_field)
-        self.unit_registry.lut["code_temperature"] = (1.0, units.temperature)
-        self.unit_registry.lut["code_velocity"] = (1.0, units.velocity)
+        import yt.units.dimensions as dimensions
+        self.unit_registry.lut["code_length"] = (1.0, dimensions.length)
+        self.unit_registry.lut["code_mass"] = (1.0, dimensions.mass)
+        self.unit_registry.lut["code_time"] = (1.0, dimensions.time)
+        self.unit_registry.lut["code_magnetic"] = (1.0, dimensions.magnetic_field)
+        self.unit_registry.lut["code_temperature"] = (1.0, dimensions.temperature)
+        self.unit_registry.lut["code_velocity"] = (1.0, dimensions.velocity)
 
     def set_units(self):
         """
         Creates the unit registry for this dataset.
 
         """
+        from yt.units.dimensions import length
         if hasattr(self, "cosmological_simulation") \
            and getattr(self, "cosmological_simulation"):
             # this dataset is cosmological, so add cosmological units.
@@ -423,6 +430,16 @@ class StaticOutput(object):
 
         self.set_code_units()
 
+        if hasattr(self, "cosmological_simulation") \
+           and getattr(self, "cosmological_simulation"):
+            # this dataset is cosmological, add a cosmology object
+            setattr(self, "cosmology",
+                    Cosmology(hubble_constant=self.hubble_constant,
+                              omega_matter=self.omega_matter,
+                              omega_lambda=self.omega_lambda,
+                              unit_registry=self.unit_registry))
+            setattr(self, "critical_density",
+                    self.cosmology.critical_density(self.current_redshift))
 
     def get_unit_from_registry(self, unit_str):
         """
@@ -439,14 +456,15 @@ class StaticOutput(object):
         return new_unit
 
     def set_code_units(self):
-        from yt.utilities.units import length, mass, time
         # domain_width does not yet exist
         DW = self.domain_right_edge - self.domain_left_edge
         self._set_code_unit_attributes()
         self.unit_registry.modify("code_length", self.length_unit)
         self.unit_registry.modify("code_mass", self.mass_unit)
         self.unit_registry.modify("code_time", self.time_unit)
-        self.unit_registry.modify("code_velocity", self.velocity_unit)
+        vel_unit = getattr(self, "code_velocity",
+                    self.length_unit / self.time_unit)
+        self.unit_registry.modify("code_velocity", vel_unit)
         self.unit_registry.modify("unitary", DW.max())
 
     _arr = None

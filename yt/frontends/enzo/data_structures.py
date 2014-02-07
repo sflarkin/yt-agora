@@ -594,20 +594,6 @@ class EnzoHierarchyInMemory(EnzoHierarchy):
     _cached_field_list = None
     _cached_derived_field_list = None
 
-    def _detect_output_fields(self):
-        if self.__class__._cached_field_list is None:
-            EnzoHierarchy._detect_fields(self)
-            self.__class__._cached_field_list = self.field_list
-        else:
-            self.field_list = self.__class__._cached_field_list
-
-    def _setup_derived_fields(self):
-        if self.__class__._cached_derived_field_list is None:
-            EnzoHierarchy._setup_derived_fields(self)
-            self.__class__._cached_derived_field_list = self.derived_field_list
-        else:
-            self.derived_field_list = self.__class__._cached_derived_field_list
-
     def _generate_random_grids(self):
         my_rank = self.comm.rank
         my_grids = self.grids[self.grid_procs.ravel() == my_rank]
@@ -907,11 +893,6 @@ class EnzoStaticOutput(StaticOutput):
         if ("%s" % (args[0])).endswith(".hierarchy"):
             return True
         return os.path.exists("%s.hierarchy" % args[0])
-
-    def _setup_particle_type(self, ptype):
-        orig = set(self.field_info.items())
-        self.field_info.setup_particle_fields(ptype)
-        return [n for n, v in set(self.field_info.items()).difference(orig)]
 
 class EnzoStaticOutputInMemory(EnzoStaticOutput):
     _hierarchy_class = EnzoHierarchyInMemory

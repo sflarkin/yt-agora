@@ -18,19 +18,21 @@ import numpy as np
 
 from yt.funcs import *
 from yt.utilities.math_utils import *
-from yt.data_objects.yt_array import YTArray
+from yt.units.yt_array import YTArray
 from copy import deepcopy
 
 from .grid_partitioner import HomogenizedVolume
 from .transfer_functions import ProjectionTransferFunction
 
-from yt.utilities.lib import \
+from yt.utilities.lib.grid_traversal import \
     arr_vec2pix_nest, arr_pix2vec_nest, \
-    arr_ang2pix_nest, arr_fisheye_vectors, lines, \
+    arr_ang2pix_nest, arr_fisheye_vectors, \
     PartitionedGrid, ProjectionSampler, VolumeRenderSampler, \
     LightSourceRenderSampler, InterpolatedProjectionSampler, \
     arr_vec2pix_nest, arr_pix2vec_nest, arr_ang2pix_nest, \
-    pixelize_healpix, arr_fisheye_vectors, rotate_vectors
+    pixelize_healpix, arr_fisheye_vectors
+from yt.utilities.lib.misc_utilities import \
+    lines, rotate_vectors
 
 from yt.utilities.math_utils import get_rotation_matrix
 from yt.utilities.orientation import Orientation
@@ -175,6 +177,8 @@ class Camera(ParallelAnalysisInterface):
             width = (width, width, width) # left/right, top/bottom, front/back 
         if not isinstance(width, YTArray):
             width = self.pf.arr(width, input_units="code_length")
+        if not isinstance(center, YTArray):
+            center = self.pf.arr(center, input_units="code_length")
         self.orienter = Orientation(normal_vector, north_vector=north_vector, steady_north=steady_north)
         if not steady_north:
             self.rotation_vector = self.orienter.unit_vectors[1]
@@ -262,11 +266,10 @@ class Camera(ParallelAnalysisInterface):
         >>> write_bitmap(im, 'render_with_grids.png')
 
         """
-        if self.region is None:
-            self.region = self.pf.h.region((self.re + self.le) / 2.0,
-                                           self.le, self.re)
-        corners = self.region.grid_corners
-        levels = self.region.grid_levels[:,0]
+        region = self.pf.h.region((self.re + self.le) / 2.0,
+                                  self.le, self.re)
+        corners = region.grid_corners
+        levels = region.grid_levels[:,0]
 
         if max_level is not None:
             subset = levels <= max_level
@@ -606,7 +609,7 @@ class Camera(ParallelAnalysisInterface):
         ax.get_yaxis().set_visible(False)
         ax.get_yaxis().set_ticks([])
         cb = self._pylab.colorbar(ax.images[0], pad=0.0, fraction=0.05, drawedges=True, shrink=0.9)
-        label = self.pf.field_info[self.fields[0]].get_label()
+        label = self.pf._get_field_info(self.fields[0]).get_label()
         if self.log_fields[0]:
             label = '$\\rm{log}\\/ $' + label
         self.transfer_function.vert_cbar(ax=cb.ax, label=label)
@@ -2038,13 +2041,15 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
         def _make_wf(f, w):
             def temp_weightfield(a, b):
                 tr = b[f].astype("float64") * b[w]
+                return b.apply_units(tr, a.units)
                 return tr
             return temp_weightfield
         pf.field_info.add_field("temp_weightfield",
             function=_make_wf(field, weight))
-        # Now we have to tell the parameter file to add it and to calculate its
-        # dependencies..
-        pf.h._derived_fields_add(["temp_weightfield"])
+        # Now we have to tell the parameter file to add it and to calculate
+        # its dependencies..
+        deps, _ = pf.field_info.check_derived_fields(["temp_weightfield"])
+        pf.field_dependencies.update(deps)
         fields = ["temp_weightfield", weight]
     nv = 12*nside**2
     image = np.zeros((nv,1,4), dtype='float64', order='C')
@@ -2081,11 +2086,9 @@ def allsky_projection(pf, center, radius, nside, field, weight = None,
         image *= dl
     else:
         image[:,:,0] /= image[:,:,1]
+        image = pf.arr(image, finfo.units)
         pf.field_info.pop("temp_weightfield")
         pf.field_dependencies.pop("temp_weightfield")
-        for g in pf.h.grids:
-            if "temp_weightfield" in g.keys():
-                del g["temp_weightfield"]
     return image[:,0,0]
 
 def plot_allsky_healpix(image, nside, fn, label = "", rotation = None,
@@ -2129,13 +2132,15 @@ class ProjectionCamera(Camera):
             def _make_wf(f, w):
                 def temp_weightfield(a, b):
                     tr = b[f].astype("float64") * b[w]
+                    return b.apply_units(tr, a.units)
                     return tr
                 return temp_weightfield
             pf.field_info.add_field("temp_weightfield",
                 function=_make_wf(self.field, self.weight))
             # Now we have to tell the parameter file to add it and to calculate
             # its dependencies..
-            pf.h._derived_fields_add(["temp_weightfield"])
+            deps, _ = pf.field_info.check_derived_fields(["temp_weightfield"])
+            pf.field_dependencies.update(deps)
             fields = ["temp_weightfield", self.weight]
         
         self.fields = fields
@@ -2145,7 +2150,6 @@ class ProjectionCamera(Camera):
                 log_fields=self.log_fields, 
                 north_vector=north_vector,
                 no_ghost=no_ghost)
-        self.center = center
 
     def get_sampler(self, args):
         if self.interpolated:
