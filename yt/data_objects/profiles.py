@@ -18,13 +18,12 @@ import numpy as np
 
 from yt.funcs import *
 
-from yt.units.yt_array import uconcatenate
-from yt.units.yt_array import \
-     YTArray, YTQuantity
+from yt.units.yt_array import uconcatenate, array_like_field
 from yt.data_objects.data_containers import YTFieldData
-from yt.utilities.lib import bin_profile1d, bin_profile2d, bin_profile3d
-from yt.utilities.lib import new_bin_profile1d, new_bin_profile2d, \
-                             new_bin_profile3d
+from yt.utilities.lib.misc_utilities import \
+    bin_profile1d, bin_profile2d, bin_profile3d, \
+    new_bin_profile1d, new_bin_profile2d, \
+    new_bin_profile3d
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelAnalysisInterface, parallel_objects
 
@@ -61,7 +60,7 @@ class BinnedProfile(ParallelAnalysisInterface):
         return ParallelAnalysisInterface._get_dependencies(
                     self, fields + self._get_bin_fields())
 
-    def add_fields(self, fields, weight = "CellMassMsun", accumulation = False, fractional=False):
+    def add_fields(self, fields, weight = "cell_mass", accumulation = False, fractional=False):
         """
         We accept a list of *fields* which will be binned if *weight* is not
         None and otherwise summed.  *accumulation* determines whether or not
@@ -132,8 +131,7 @@ class BinnedProfile(ParallelAnalysisInterface):
         # which is how we will implement hybrid particle/cell fields
         # but...  we default to just the field.
         data = []
-        for field in _field_mapping.get(this_field, (this_field,)):
-            data.append(source[field].astype('float64'))
+        data.append(source[field].astype('float64'))
         return uconcatenate(data, axis=0)
 
     def _fix_pickle(self):
@@ -815,7 +813,13 @@ class ProfileND(ParallelAnalysisInterface):
         return arr, weight_data, bin_fields
 
     def __getitem__(self, key):
-        return self.field_data[key]
+        field = self.data_source._determine_fields(key)[0]
+        fd = self.field_data.get(field, None)
+        if fd is None and isinstance(field, tuple):
+            fd = self.field_data.get(field[1], None)
+        if fd is None:
+            raise KeyError(key)
+        return array_like_field(self.data_source, fd, key)
 
     def __iter__(self):
         return sorted(self.field_data.items())
@@ -832,14 +836,13 @@ class Profile1D(ProfileND):
         super(Profile1D, self).__init__(data_source, weight_field)
         self.x_field = x_field
         self.x_log = x_log
-        self.x_bins = data_source.pf.arr(self._get_bins(x_min.to_ndarray(), 
-                                                        x_max.to_ndarray(), x_n, x_log),
-                                         x_min.units)
-
+        self.x_bins = array_like_field(data_source,
+                                       self._get_bins(x_min, x_max, x_n, x_log),
+                                       self.x_field)
         self.size = (self.x_bins.size - 1,)
         self.bin_fields = (self.x_field,)
         self.bounds = ((self.x_bins[0], self.x_bins[-1]),)
-        self.x = self.x_bins
+        self.x = 0.5*(self.x_bins[1:]+self.x_bins[:-1])
 
     def _bin_chunk(self, chunk, fields, storage):
         rv = self._get_data(chunk, fields)
@@ -858,20 +861,26 @@ class Profile2D(ProfileND):
                  y_field, y_n, y_min, y_max, y_log,
                  weight_field = None):
         super(Profile2D, self).__init__(data_source, weight_field)
+        # X
         self.x_field = x_field
         self.x_log = x_log
-        self.x_bins = self._get_bins(x_min, x_max, x_n, x_log)
+        self.x_bins = array_like_field(data_source,
+                                       self._get_bins(x_min, x_max, x_n, x_log),
+                                       self.x_field)
+        # Y
         self.y_field = y_field
         self.y_log = y_log
-        self.y_bins = self._get_bins(y_min, y_max, y_n, y_log)
+        self.y_bins = array_like_field(data_source,
+                                       self._get_bins(y_min, y_max, y_n, y_log),
+                                       self.y_field)
 
         self.size = (self.x_bins.size - 1, self.y_bins.size - 1)
 
         self.bin_fields = (self.x_field, self.y_field)
         self.bounds = ((self.x_bins[0], self.x_bins[-1]),
                        (self.y_bins[0], self.y_bins[-1]))
-        self.x = self.x_bins
-        self.y = self.y_bins
+        self.x = 0.5*(self.x_bins[1:]+self.x_bins[:-1])
+        self.y = 0.5*(self.y_bins[1:]+self.y_bins[:-1])
 
     def _bin_chunk(self, chunk, fields, storage):
         rv = self._get_data(chunk, fields)
@@ -895,15 +904,21 @@ class Profile3D(ProfileND):
         # X
         self.x_field = x_field
         self.x_log = x_log
-        self.x_bins = self._get_bins(x_min, x_max, x_n, x_log)
+        self.x_bins = array_like_field(data_source,
+                                       self._get_bins(x_min, x_max, x_n, x_log),
+                                       self.x_field)
         # Y
         self.y_field = y_field
         self.y_log = y_log
-        self.y_bins = self._get_bins(y_min, y_max, y_n, y_log)
+        self.y_bins = array_like_field(data_source,
+                                       self._get_bins(y_min, y_max, y_n, y_log),
+                                       self.y_field)
         # Z
         self.z_field = z_field
         self.z_log = z_log
-        self.z_bins = self._get_bins(z_min, z_max, z_n, z_log)
+        self.z_bins = array_like_field(data_source,
+                                       self._get_bins(z_min, z_max, z_n, z_log),
+                                       self.z_field)
 
         self.size = (self.x_bins.size - 1,
                      self.y_bins.size - 1,
@@ -913,10 +928,9 @@ class Profile3D(ProfileND):
         self.bounds = ((self.x_bins[0], self.x_bins[-1]),
                        (self.y_bins[0], self.y_bins[-1]),
                        (self.z_bins[0], self.z_bins[-1]))
-
-        self.x = self.x_bins
-        self.y = self.y_bins
-        self.z = self.z_bins
+        self.x = 0.5*(self.x_bins[1:]+self.x_bins[:-1])
+        self.y = 0.5*(self.y_bins[1:]+self.y_bins[:-1])
+        self.z = 0.5*(self.z_bins[1:]+self.z_bins[:-1])
 
     def _bin_chunk(self, chunk, fields, storage):
         rv = self._get_data(chunk, fields)
@@ -931,8 +945,9 @@ class Profile3D(ProfileND):
                       storage.used)
         # We've binned it!
 
-def create_profile(data_source, bin_fields, n = 64, 
-                   weight_field = "CellMass", fields = None,
+def create_profile(data_source, bin_fields, fields, n = 64,
+                   extrema = None, logs = None,
+                   weight_field = "cell_mass",
                    accumulation = False, fractional = False):
     r"""
     Create a 1, 2, or 3D profile object.
@@ -950,6 +965,14 @@ def create_profile(data_source, bin_fields, n = 64,
         The number of bins in each dimension.  If None, 64 bins for 
         each bin are used for each bin field.
         Default: 64.
+    extrema : dict of min, max tuples
+        Minimum and maximum values of the bin_fields for the profiles.
+        The keys correspond to the field names. Defaults to the extrema
+        of the bin_fields of the dataset.
+    logs : dict of boolean values
+        Whether or not to log the bin_fields for the profiles.
+        The keys correspond to the field names. Defaults to the take_log
+        attribute of the field. 
     weight_field : str
         The weight field for computing weighted average for the profile 
         values.  If None, the profile values are sums of the data in 
@@ -975,12 +998,15 @@ def create_profile(data_source, bin_fields, n = 64,
 
     >>> pf = load("DD0046/DD0046")
     >>> ad = pf.h.all_data()
-    >>> profile = create_profile(ad, ["Density"],
-    ...                          fields=["Temperature", "x-velocity"]))
+    >>> extrema = {"density": (1.0e-30, 1.0e-25)}
+    >>> profile = create_profile(ad, ["density"], extrema=extrema,
+    ...                          fields=["temperature", "velocity_x"]))
     >>> print profile.x
-    >>> print profile.field_data["Temperature"]
+    >>> print profile.field_data["temperature"]
     
     """
+    bin_fields = ensure_list(bin_fields)
+    fields = ensure_list(fields)
     if len(bin_fields) == 1:
         cls = Profile1D
     elif len(bin_fields) == 2:
@@ -997,9 +1023,15 @@ def create_profile(data_source, bin_fields, n = 64,
         n = [n] * len(bin_fields)
     if not iterable(accumulation):
         accumulation = [accumulation] * len(bin_fields)
-    logs = [data_source.pf._get_field_info(f).take_log for f in bin_fields]
-    ex = [data_source.quantities["Extrema"](f, non_zero=l)[0] \
-          for f, l in zip(bin_fields, logs)]
+    if logs is None:
+        logs = [data_source.pf._get_field_info(f).take_log for f in bin_fields]
+    else:
+        logs = [logs[bin_field[-1]] for bin_field in bin_fields]
+    if extrema is None:
+        ex = [data_source.quantities["Extrema"](f, non_zero=l)[0] \
+              for f, l in zip(bin_fields, logs)]
+    else:
+        ex = [extrema[bin_field[-1]] for bin_field in bin_fields]
     args = [data_source]
     for f, n, (mi, ma), l in zip(bin_fields, n, ex, logs):
         args += [f, n, mi, ma, l] 
@@ -1007,7 +1039,7 @@ def create_profile(data_source, bin_fields, n = 64,
     setattr(obj, "accumulation", accumulation)
     setattr(obj, "fractional", fractional)
     if fields is not None:
-        obj.add_fields(fields)
+        obj.add_fields([field[-1] for field in fields])
     for field in fields:
         if fractional:
             obj.field_data[field] /= obj.field_data[field].sum()
