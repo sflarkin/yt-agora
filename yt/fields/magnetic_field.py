@@ -16,7 +16,8 @@ Magnetic field ... er, fields.
 import numpy as np
 
 from yt.units.yt_array import YTArray
-from yt.utilities.lib import obtain_rvec, obtain_rv_vec
+from yt.utilities.lib.misc_utilities import \
+    obtain_rvec, obtain_rv_vec
 from yt.utilities.math_utils import resize_vector
 from yt.utilities.cosmology import Cosmology
 from yt.fields.derived_field import \
@@ -66,6 +67,12 @@ def setup_magnetic_field_fields(registry, ftype = "gas", slice_info = None):
     registry.add_field((ftype, "magnetic_pressure"),
              function=_magnetic_pressure,
              units="erg / cm**3")
+
+    def _magnetic_field_strength(field,data):
+        return np.sqrt(8.*np.pi*data[ftype,"magnetic_energy"])
+    registry.add_field((ftype,"magnetic_field_strength"),
+                       function=_magnetic_field_strength,
+                       units = "gauss")
 
     def _magnetic_field_poloidal(field,data):
         normal = data.get_field_parameter("normal")
