@@ -20,7 +20,7 @@ import numpy as np
 from yt.funcs import *
 
 from yt.config import ytcfg
-from yt.units.yt_array import YTArray, uconcatenate
+from yt.units.yt_array import YTArray, uconcatenate, array_like_field
 from yt.fields.field_info_container import \
     FieldDetector
 from yt.utilities.data_point_utilities import FindBindingEnergy
@@ -93,7 +93,7 @@ class DerivedQuantityCollection(object):
     def keys(self):
         return derived_quantity_registry.keys()
 
-class WeightedAverage(DerivedQuantity):
+class WeightedAverageQuantity(DerivedQuantity):
 
     def count_values(self, fields, weight):
         # This is a list now
@@ -101,7 +101,7 @@ class WeightedAverage(DerivedQuantity):
 
     def __call__(self, fields, weight):
         fields = ensure_list(fields)
-        rv = super(WeightedAverage, self).__call__(fields, weight)
+        rv = super(WeightedAverageQuantity, self).__call__(fields, weight)
         if len(rv) == 1: rv = rv[0]
         return rv
 
@@ -115,7 +115,7 @@ class WeightedAverage(DerivedQuantity):
         w = values.pop(-1).sum(dtype=np.float64)
         return [v.sum(dtype=np.float64)/w for v in values]
 
-class TotalValue(DerivedQuantity):
+class TotalQuantity(DerivedQuantity):
 
     def count_values(self, fields):
         # This is a list now
@@ -123,7 +123,7 @@ class TotalValue(DerivedQuantity):
 
     def __call__(self, fields):
         fields = ensure_list(fields)
-        rv = super(WeightedAverage, self).__call__(fields)
+        rv = super(TotalQuantity, self).__call__(fields)
         if len(rv) == 1: rv = rv[0]
         return rv
 
@@ -135,9 +135,10 @@ class TotalValue(DerivedQuantity):
     def reduce_intermediate(self, values):
         return [v.sum(dtype=np.float64) for v in values]
 
-class TotalMass(TotalValue):
+class TotalMass(TotalQuantity):
     def __call__(self):
         fi = self.data_source.pf.field_info
+        fields = []
         if ("gas", "cell_mass") in fi:
             fields.append(("gas", "cell_mass"))
         if ("all", "particle_mass") in fi:
@@ -146,7 +147,7 @@ class TotalMass(TotalValue):
         return rv
 
 class CenterOfMass(DerivedQuantity):
-    def count_values(self, use_cells, use_particles):
+    def count_values(self, use_cells = True, use_particles = False):
         # This is a list now
         self.num_vals = 0
         if use_cells:
@@ -183,6 +184,44 @@ class CenterOfMass(DerivedQuantity):
             w += values.pop(0).sum(dtype=np.float64)
         return [v/w for v in [x, y, z]]
 
+class BulkVelocity(DerivedQuantity):
+    def count_values(self, use_cells = True, use_particles = False):
+        # This is a list now
+        self.num_vals = 0
+        if use_cells:
+            self.num_vals += 4
+        if use_particles:
+            self.num_vals += 4
+
+    def process_chunk(self, data, use_cells = True, use_particles = False):
+        vals = []
+        if use_cells:
+            vals += [(data["velocity_%s" % ax] * data["cell_mass"]).sum(dtype=np.float64)
+                     for ax in 'xyz']
+            vals.append(data["cell_mass"].sum(dtype=np.float64))
+        if use_particles:
+            vals += [(data["particle_velocity_%s" % ax] *
+                      data["particle_mass"]).sum(dtype=np.float64)
+                     for ax in 'xyz']
+            vals.append(data["particle_mass"].sum(dtype=np.float64))
+        return vals
+
+    def reduce_intermediate(self, values):
+        if len(values) not in (4, 8):
+            raise RuntimeError
+        x = values.pop(0).sum(dtype=np.float64)
+        y = values.pop(0).sum(dtype=np.float64)
+        z = values.pop(0).sum(dtype=np.float64)
+        w = values.pop(0).sum(dtype=np.float64)
+        if len(values) > 0:
+            # Note that this could be shorter if we pre-initialized our x,y,z,w
+            # values as YTQuantity objects.
+            x += values.pop(0).sum(dtype=np.float64)
+            y += values.pop(0).sum(dtype=np.float64)
+            z += values.pop(0).sum(dtype=np.float64)
+            w += values.pop(0).sum(dtype=np.float64)
+        return [v/w for v in [x, y, z]]
+    
 def _WeightedVariance(data, field, weight):
     """
     This function returns the variance of a field.
@@ -204,25 +243,19 @@ def _combWeightedVariance(data, my_weight, my_mean, my_var2):
     return [np.sqrt((my_weight * (my_var2 + (my_mean - all_mean)**2)).sum() / 
                     all_weight), all_mean]
 
-class BulkVelocity(WeightedAverage):
-    def __call__(self, ftype = "gas"):
-        fields = [(ftype, "velocity_%s" % ax) for ax in 'xyz']
-        weight = (ftype, "cell_mass")
-        return super(BulkVelocity, self).__call__(fields, weight)
-
-class AngularMomentumVector(WeightedAverage):
+class AngularMomentumVector(WeightedAverageQuantity):
     def __call__(self, ftype = "gas"):
         fields = [(ftype, "specific_angular_momentum_%s" % ax)
                   for ax in 'xyz']
         weight = (ftype, "cell_mass")
         return super(AngularMomentumVector, self).__call__(fields, weight)
 
-class ParticleAngularMomentumVector(WeightedAverage):
+class ParticleAngularMomentumVector(WeightedAverageQuantity):
     def __call__(self, ptype = "all"):
         fields = [(ptype, "particle_specific_angular_momentum_%s" % ax)
                   for ax in 'xyz']
         weight = (ptype, "particle_mass")
-        return super(AngularMomentumVector, self).__call__(fields, weight)
+        return super(ParticleAngularMomentumVector, self).__call__(fields, weight)
 
 class Extrema(DerivedQuantity):
     def count_values(self, fields, non_zero):
@@ -237,15 +270,72 @@ class Extrema(DerivedQuantity):
     def process_chunk(self, data, fields, non_zero):
         vals = []
         for field in fields:
+            field = data._determine_fields(field)[0]
             fd = data[field]
             if non_zero: fd = fd[fd > 0.0]
-            vals += [fd.min(), fd.max()]
+            if fd.size > 0:
+                vals += [fd.min(), fd.max()]
+            else:
+                vals += [array_like_field(data, HUGE, field),
+                         array_like_field(data, -HUGE, field)]
         return vals
 
     def reduce_intermediate(self, values):
         # The values get turned into arrays here.
         return [(mis.min(), mas.max() )
                 for mis, mas in zip(values[::2], values[1::2])]
+
+class MaxLocation(DerivedQuantity):
+    def count_values(self, *args, **kwargs):
+        self.num_vals = 5
+
+    def __call__(self, field):
+        rv = super(MaxLocation, self).__call__(field)
+        if len(rv) == 1: rv = rv[0]
+        return rv
+
+    def process_chunk(self, data, field):
+        field = data._determine_fields(field)[0]
+        ma = array_like_field(data, -HUGE, field)
+        mx = array_like_field(data, -1, "x")
+        my = array_like_field(data, -1, "y")
+        mz = array_like_field(data, -1, "z")
+        maxi = -1
+        if data[field].size > 0:
+            maxi = np.argmax(data[field])
+            ma = data[field][maxi]
+            mx, my, mz = [data[ax][maxi] for ax in 'xyz']
+        return (ma, maxi, mx, my, mz)
+
+    def reduce_intermediate(self, values):
+        i = np.argmax(values[0]) # ma is values[0]
+        return [val[i] for val in values]
+
+class MinLocation(DerivedQuantity):
+    def count_values(self, *args, **kwargs):
+        self.num_vals = 5
+
+    def __call__(self, field):
+        rv = super(MinLocation, self).__call__(field)
+        if len(rv) == 1: rv = rv[0]
+        return rv
+
+    def process_chunk(self, data, field):
+        field = data._determine_fields(field)[0]
+        ma = array_like_field(data, HUGE, field)
+        mx = array_like_field(data, -1, "x")
+        my = array_like_field(data, -1, "y")
+        mz = array_like_field(data, -1, "z")
+        mini = -1
+        if data[field].size > 0:
+            mini = np.argmin(data[field])
+            ma = data[field][mini]
+            mx, my, mz = [data[ax][mini] for ax in 'xyz']
+        return (ma, mini, mx, my, mz)
+
+    def reduce_intermediate(self, values):
+        i = np.argmin(values[0]) # ma is values[0]
+        return [val[i] for val in values]
 
 def _BaryonSpinParameter(data):
     """
@@ -285,35 +375,3 @@ def _ParticleSpinParameter(data):
                        *data["particle_velocity_magnitude"]**2.0,dtype=np.float64)
     weight=data["particle_mass"].sum(dtype=np.float64)
     return j_mag, m_enc, e_term_pre, weight
-
-def _MaxLocation(data, field):
-    """
-    This function returns the location of the maximum of a set
-    of fields.
-    """
-    ma, maxi, mx, my, mz = -HUGE, -1, -1, -1, -1
-    if data[field].size > 0:
-        maxi = np.argmax(data[field])
-        ma = data[field][maxi]
-        mx, my, mz = [data[ax][maxi] for ax in 'xyz']
-    return (ma, maxi, mx, my, mz)
-def _combMaxLocation(data, *args):
-    args = [np.atleast_1d(arg) for arg in args]
-    i = np.argmax(args[0]) # ma is arg[0]
-    return [arg[i] for arg in args]
-
-def _MinLocation(data, field):
-    """
-    This function returns the location of the minimum of a set
-    of fields.
-    """
-    ma, mini, mx, my, mz = HUGE, -1, -1, -1, -1
-    if data[field].size > 0:
-        mini = np.argmin(data[field])
-        ma = data[field][mini]
-        mx, my, mz = [data[ax][mini] for ax in 'xyz']
-    return (ma, mini, mx, my, mz)
-def _combMinLocation(data, *args):
-    args = [np.atleast_1d(arg) for arg in args]
-    i = np.argmin(args[0]) # ma is arg[0]
-    return [arg[i] for arg in args]

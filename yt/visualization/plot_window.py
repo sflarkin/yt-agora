@@ -241,8 +241,8 @@ class PlotWindow(ImagePlotContainer):
         else:
             fields = ensure_list(fields)
         self.override_fields = list(set(fields).intersection(set(skip)))
-        super(PlotWindow, self).__init__(data_source, fields,
-                                         window_size, fontsize)
+        self.fields = fields
+        super(PlotWindow, self).__init__(data_source, window_size, fontsize)
         self._set_window(bounds) # this automatically updates the data and plot
         self.origin = origin
         if self.data_source.center is not None and oblique == False:
@@ -354,6 +354,29 @@ class PlotWindow(ImagePlotContainer):
         Wx, Wy = self.width
         self.xlim = (self.xlim[0] + Wx*deltas[0], self.xlim[1] + Wx*deltas[0])
         self.ylim = (self.ylim[0] + Wy*deltas[1], self.ylim[1] + Wy*deltas[1])
+        return self
+
+    @invalidate_plot
+    def set_unit(self, field, new_unit):
+        """Sets a new unit for the requested field
+
+        parameters
+        ----------
+        field : string or field tuple
+           The name of the field that is to be changed.
+
+        new_unit : string or Unit object
+           The name of the new unit.
+        """
+        field = self.data_source._determine_fields(field)[0]
+        field = ensure_list(field)
+        new_unit = ensure_list(new_unit)
+        if len(field) > 1 and len(new_unit) != len(field):
+            raise RuntimeError(
+                "Field list {} and unit "
+                "list {} are incompatible".format(field, new_unit))
+        for f, u in zip(field, new_unit):
+            self._frb[f].convert_to_units(u)
         return self
 
     @invalidate_data
@@ -588,7 +611,8 @@ class PWViewerMPL(PlotWindow):
             yllim = self.pf.domain_left_edge[y_dict[axis_index]]
             yrlim = self.pf.domain_right_edge[y_dict[axis_index]]
         elif origin[2] == 'native':
-            return 0.0, 0.0
+            return (self.pf.quan(0.0, 'code_length'),
+                    self.pf.quan(0.0, 'code_length'))
         else:
             mylog.warn("origin = {0}".format(origin))
             msg = \
@@ -1182,7 +1206,7 @@ class OffAxisProjectionPlot(PWViewerMPL):
          x width of 0.2 and a y width of 0.3 in code units.  If units are
          provided the resulting plot axis labels will use the supplied units.
     depth : A tuple or a float
-         A tuple containing the depth to project thourhg and the string
+         A tuple containing the depth to project through and the string
          key of the unit: (width, 'unit').  If set to a float, code units
          are assumed
     weight_field : string
