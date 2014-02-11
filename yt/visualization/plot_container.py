@@ -41,7 +41,7 @@ def invalidate_figure(f):
     @wraps(f)
     def newfunc(*args, **kwargs):
         rv = f(*args, **kwargs)
-        for field in args[0].fields:
+        for field in args[0].plots.keys():
             args[0].plots[field].figure = None
             args[0].plots[field].axes = None
             args[0].plots[field].cax = None
@@ -107,11 +107,10 @@ class ImagePlotContainer(object):
     _plot_valid = False
     _colorbar_valid = False
 
-    def __init__(self, data_source, fields, figure_size, fontsize):
+    def __init__(self, data_source, figure_size, fontsize):
         self.data_source = data_source
         self.figure_size = figure_size
         self.plots = PlotDictionary(data_source)
-        self.fields = self.data_source._determine_fields(fields)
         self._callbacks = []
         self._field_transform = {}
         self._colormaps = defaultdict(lambda: 'algae')
@@ -369,29 +368,6 @@ class ImagePlotContainer(object):
             including the margins but not the colorbar.
         """
         self.figure_size = size
-        return self
-
-    @invalidate_plot
-    def set_unit(self, field, new_unit):
-        """Sets a new unit for the requested field
-
-        parameters
-        ----------
-        field : string or field tuple
-           The name of the field that is to be changed.
-
-        new_unit : string or Unit object
-           The name of the new unit.
-        """
-        field = self.data_source._determine_fields(field)[0]
-        field = ensure_list(field)
-        new_unit = ensure_list(new_unit)
-        if len(field) > 1 and len(new_unit) != len(field):
-            raise RuntimeError(
-                "Field list {} and unit "
-                "list {} are incompatible".format(field, new_unit))
-        for f, u in zip(field, new_unit):
-            self._frb[f].convert_to_units(u)
         return self
 
     def save(self, name=None, mpl_kwargs=None):

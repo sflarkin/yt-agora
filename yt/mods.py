@@ -56,7 +56,9 @@ from yt.fields.api import \
     ValidateDataField, \
     ValidateProperty, \
     ValidateSpatial, \
-    ValidateGridType
+    ValidateGridType, \
+    add_field, \
+    derived_field
 
 from yt.data_objects.api import \
     BinnedProfile1D, BinnedProfile2D, BinnedProfile3D, \
@@ -103,9 +105,9 @@ from yt.frontends.halo_catalogs.api import \
 #from yt.frontends.gdf.api import \
 #    GDFStaticOutput, GDFFieldInfo, add_gdf_field
 
-#from yt.frontends.moab.api import \
-#    MoabHex8StaticOutput, MoabFieldInfo, add_moab_field, \
-#    PyneMoabHex8StaticOutput
+from yt.frontends.moab.api import \
+    MoabHex8StaticOutput, MoabFieldInfo, \
+    PyneMoabHex8StaticOutput, PyneFieldInfo
 
 from yt.frontends.athena.api import \
     AthenaStaticOutput, AthenaFieldInfo
