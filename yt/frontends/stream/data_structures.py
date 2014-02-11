@@ -56,8 +56,9 @@ from yt.data_objects.static_output import \
 from yt.utilities.logger import ytLogger as mylog
 from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc
-from yt.utilities.lib import \
-    get_box_grids_level, \
+from yt.utilities.lib.misc_utilities import \
+    get_box_grids_level
+from yt.utilities.lib.GridTree import \
     GridTree, \
     MatchPointsToGrids
 from yt.utilities.decompose import \
@@ -311,10 +312,8 @@ class StreamStaticOutput(StaticOutput):
         self.basename = self.stream_handler.name
         self.parameters['CurrentTimeIdentifier'] = time.time()
         self.unique_identifier = self.parameters["CurrentTimeIdentifier"]
-        self.domain_left_edge = self.arr(self.stream_handler.domain_left_edge,
-                                        'code_length')
-        self.domain_right_edge = self.arr(self.stream_handler.domain_right_edge,
-                                         'code_length')
+        self.domain_left_edge = self.stream_handler.domain_left_edge.copy()
+        self.domain_right_edge = self.stream_handler.domain_right_edge.copy()
         self.refine_by = self.stream_handler.refine_by
         self.dimensionality = self.stream_handler.dimensionality
         self.periodicity = self.stream_handler.periodicity
@@ -352,6 +351,8 @@ class StreamStaticOutput(StaticOutput):
             else:
                 raise RuntimeError("%s (%s) is invalid." % (attr, unit))
             setattr(self, attr, uq)
+        DW = self.arr(self.domain_right_edge-self.domain_left_edge, "code_length")
+        self.unit_registry.modify("unitary", DW.max())
 
     @classmethod
     def _is_valid(cls, *args, **kwargs):
@@ -477,7 +478,7 @@ def unitify_data(data):
                 assert isinstance(data[field][0], np.ndarray), \
                   "Field data is not an ndarray!"
                 assert isinstance(data[field][1], basestring), \
-                  "Unit specification is not a sring!"
+                  "Unit specification is not a string!"
                 field_units[field] = data[field][1]
                 new_data[field] = data[field][0]
             except AssertionError, e:
@@ -500,6 +501,7 @@ def unitify_data(data):
         else:
             raise RuntimeError
         new_data[new_field] = data[field]
+        field_units[new_field] = field_units.pop(field)
     data = new_data
     return field_units, data
 
