@@ -20,11 +20,11 @@ What Types of Fields are There?
 With the 2.3 release of ``yt``, the distinction between these has become more
 clear.  This enables much better specification of which fields are expected to
 exist, and to provide fallbacks for calculating them.  For instance you can now
-say, "Temperature" might exist, but if it doesn't, here's how you calculate it.
+say, "temperature" might exist, but if it doesn't, here's how you calculate it.
 This also provides easier means of translating fields between different
 frontends.  For instance, FLASH may refer to the temperature field as "temp"
-while Enzo calls it "Temperature".  Translator functions ensure that any
-derived field relying on "temp" or "Temperature" works with both output types.
+while Enzo calls it "temperature".  Translator functions ensure that any
+derived field relying on "temp" or "temperature" works with both output types.
 
 When a field is requested, the parameter file first looks to see if that field
 exists on disk.  If it does not, it then queries the list of code-specific
@@ -49,7 +49,7 @@ construction:
 
 .. code-block:: python
 
-   add_field("ThermalEnergy", function=_ThermalEnergy,
+   add_field("thermal_energy", function=_ThermalEnergy,
              units=r"\rm{ergs}/\rm{g}")
 
 To add a translation from one field to another, use the ``TranslationFunc`` as
@@ -58,7 +58,7 @@ frontend:
 
 .. code-block:: python
 
-   add_field("Density", function=TranslationFunc("density"), take_log=True,
+   add_field("density", function=TranslationFunc("density"), take_log=True,
              units=r"\rm{g} / \rm{cm}^3",
              projected_units =r"\rm{g} / \rm{cm}^2")
 
@@ -73,9 +73,9 @@ protocol for accessing data:
 
 .. code-block:: python
 
-   my_object["Density"]
+   my_object["density"]
 
-where ``"Density"`` can be any field name and ``"my_object"`` any one of
+where ``"density"`` can be any field name and ``"my_object"`` any one of
 the possible data containers listed at :ref:`available-objects`. For
 example, if we wanted to look at the temperature of cells within a
 spherical region of radius 10 kpc, centered at [0.5, 0.5, 0.5] in our
@@ -89,7 +89,7 @@ and then look at the temperature of its cells within it via:
 
 .. code-block:: python
 
-   print sp["Temperature"]
+   print sp["temperature"]
 
 Information about how to create a new type of object can be found in
 :ref:`creating-objects`. The field is returned as a single, flattened
@@ -117,14 +117,14 @@ parameter file, as well.  All of the field creation options
 .. code-block:: python
 
    pf = load("my_data")
-   print pf.field_info["Pressure"].get_units()
+   print pf.field_info["pressure"].get_units()
 
 This is a fast way to examine the units of a given field, and additionally you
 can use :meth:`yt.utilities.pydot.get_source` to get the source code:
 
 .. code-block:: python
 
-   field = pf.field_info["Pressure"]
+   field = pf.field_info["pressure"]
    print field.get_source()
 
 .. _available-objects:
@@ -217,7 +217,7 @@ single arrays, and returns the final values.  For an example, we look at the
 .. code-block:: python
 
    def _TotalMass(data):
-       baryon_mass = data["CellMassMsun"].sum()
+       baryon_mass = data["cell_mass"].sum()
        particle_mass = data["ParticleMassMsun"].sum()
        return baryon_mass, particle_mass
    def _combTotalMass(data, baryon_mass, particle_mass):
@@ -245,11 +245,11 @@ a certain temperature range, as in the following example.
    from yt.mods import *
    pf = load("enzo_tiny_cosmology/DD0046/DD0046")
    ad = pf.h.all_data()
-   total_mass = ad.quantities["TotalQuantity"]("CellMassMsun")
+   total_mass = ad.quantities["TotalQuantity"]("cell_mass")
    # now select only gas with 1e5 K < T < 1e7 K.
-   new_region = ad.cut_region(['grid["Temperature"] > 1e5',
-                               'grid["Temperature"] < 1e7'])
-   cut_mass = new_region.quantities["TotalQuantity"]("CellMassMsun")
+   new_region = ad.cut_region(['grid["temperature"] > 1e5',
+                               'grid["temperature"] < 1e7'])
+   cut_mass = new_region.quantities["TotalQuantity"]("cell_mass")
    print "The fraction of mass in this temperature range is %f." % \
      (cut_mass[0] / total_mass[0])
 
@@ -267,8 +267,8 @@ it as a data_source to a projection.
    from yt.mods import *
    pf = load("enzo_tiny_cosmology/DD0046/DD0046")
    ad = pf.h.all_data()
-   new_region = ad.cut_region(['grid["Density"] > 1e-29'])
-   plot = ProjectionPlot(pf, "x", "Density", weight_field="Density",
+   new_region = ad.cut_region(['grid["density"] > 1e-29'])
+   plot = ProjectionPlot(pf, "x", "density", weight_field="density",
                          data_source=new_region)
    plot.save()
 
@@ -294,7 +294,7 @@ whether or not to conduct it in log space.
 
    sp = pf.h.sphere("max", (1.0, 'pc'))
    contour_values, connected_sets = sp.extract_connected_sets(
-        "Density", 3, 1e-30, 1e-20)
+        "density", 3, 1e-30, 1e-20)
 
 The first item, ``contour_values``, will be an array of the min value for each
 set of level sets.  The second (``connected_sets``) will be a dict of dicts.

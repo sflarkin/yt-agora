@@ -22,9 +22,9 @@ storage = {}
 # times and entrs.
 for sto, pf in ts.piter(storage=storage):
     sphere = pf.h.sphere("c", (100., "kpc"))
-    temp = sphere["Temperature"]/keV
-    dens = sphere["Density"]/(m_p*mue)
-    mgas = sphere["CellMass"]
+    temp = sphere["temperature"]/keV
+    dens = sphere["density"]/(m_p*mue)
+    mgas = sphere["cell_mass"]
     entr = (temp*(dens**mtt)*mgas).sum()/mgas.sum() 
     sto.result = (pf.current_time, entr)
 

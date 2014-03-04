@@ -40,6 +40,8 @@ from yt.utilities.logger import ytLogger as mylog
 from yt.utilities.performance_counters import yt_counters, time_function
 from yt.config import ytcfg, ytcfg_defaults
 import yt.utilities.physical_constants as physical_constants
+import yt.units as units
+from yt.units.yt_array import YTArray, YTQuantity
 
 from yt.utilities.logger import level as __level
 if __level >= int(ytcfg_defaults["loglevel"]):
@@ -105,9 +107,9 @@ from yt.frontends.halo_catalogs.api import \
 #from yt.frontends.gdf.api import \
 #    GDFStaticOutput, GDFFieldInfo, add_gdf_field
 
-#from yt.frontends.moab.api import \
-#    MoabHex8StaticOutput, MoabFieldInfo, add_moab_field, \
-#    PyneMoabHex8StaticOutput
+from yt.frontends.moab.api import \
+    MoabHex8StaticOutput, MoabFieldInfo, \
+    PyneMoabHex8StaticOutput, PyneFieldInfo
 
 from yt.frontends.athena.api import \
     AthenaStaticOutput, AthenaFieldInfo

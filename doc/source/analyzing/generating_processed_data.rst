@@ -45,7 +45,7 @@ accessing the desired field.
 
    sl = pf.h.slice(0, 0.5)
    frb = FixedResolutionBuffer(sl, (0.3, 0.5, 0.6, 0.8), (512, 512))
-   my_image = frb["Density"]
+   my_image = frb["density"]
 
 This resultant array can be saved out to disk or visualized using a
 hand-constructed Matplotlib image, for instance using
@@ -99,17 +99,17 @@ of the bounds of density in advance to set up the profile.
 .. code-block:: python
 
    source = pf.h.sphere( (0.3, 0.6, 0.4), 1.0/pf['pc'])
-   profile = BinnedProfile1D(source, 128, "Density", 1e-24, 1e-10)
-   profile.add_fields("CellMassMsun", weight = None)
-   profile.add_fields("Temperature")
+   profile = BinnedProfile1D(source, 128, "density", 1e-24, 1e-10)
+   profile.add_fields("cell_mass", weight = None)
+   profile.add_fields("temperature")
 
 At this point, we can access the fields ``CellMassMsun`` and ``Temperature``
 from the ``profile`` object, which are returned as 1D arrays.
 
 .. code-block:: python
 
-   print profile["CellMassMsun"]
-   print profile["Temperature"]
+   print profile["cell_mass"]
+   print profile["temperature"]
 
 The field ``UsedBins`` is also included, which is ``True`` wherever values have
 been added.  This is primarily used for 2D profiles, where many of the bins may
@@ -129,13 +129,13 @@ calculating the mass in each (2D) bin.
 .. code-block:: python
 
    source = pf.h.sphere( (0.3, 0.6, 0.4), 1.0/pf['pc'])
-   prof2d = BinnedProfile2D(source, 128, "Density", 1e-24, 1e-10, True,
-                                    128, "Temperature", 10, 10000, True)
-   prof2d.add_fields("CellMassMsun", weight = None)
+   prof2d = BinnedProfile2D(source, 128, "density", 1e-24, 1e-10, True,
+                                    128, "temperature", 10, 10000, True)
+   prof2d.add_fields("cell_mass", weight = None)
 
 Note that at this point we can use :func:`~matplotlib.pyplot.pcolormesh` to
-plot the ``prof2d["CellMassMsun"]`` value, and even overplot the value of
-``profile["Temperature"]`` to show the average value in every density bin.
+plot the ``prof2d["cell_mass"]`` value, and even overplot the value of
+``profile["temperature"]`` to show the average value in every density bin.
 Note that you will likely have to mask out the zero values using the
 ``prof2d["UsedBins"]`` field.  Profiles can also be calculated in
 three-dimensions, with a similar extension of the calling function.
@@ -172,7 +172,7 @@ along that ray:
 .. code-block:: python
 
    ray = pf.h.ray(  (0.3, 0.5, 0.9), (0.1, 0.8, 0.5) )
-   print ray["Density"]
+   print ray["density"]
 
 The points are ordered, but the ray is also traversing cells of varying length,
 as well as taking a varying distance to cross each cell.  To determine the

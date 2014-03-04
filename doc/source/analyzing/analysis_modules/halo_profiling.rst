@@ -113,10 +113,10 @@ profiling with the :meth:`add_profile` method:
 
 .. code-block:: python
 
-  hp.add_profile('CellVolume', weight_field=None, accumulation=True)
+  hp.add_profile('cell_volume', weight_field=None, accumulation=True)
   hp.add_profile('TotalMassMsun', weight_field=None, accumulation=True)
-  hp.add_profile('Density', weight_field=None, accumulation=False)
-  hp.add_profile('Temperature', weight_field='CellMassMsun', accumulation=False)
+  hp.add_profile('density', weight_field=None, accumulation=False)
+  hp.add_profile('temperature', weight_field='cell_mass', accumulation=False)
   hp.make_profiles(njobs=-1, prefilters=["halo['mass'] > 1e13"],
                    filename='VirialQuantities.h5')
 
@@ -159,9 +159,9 @@ The process of making projections is similar to that of profiles:
 
 .. code-block:: python
 
-  hp.add_projection('Density', weight_field=None)
-  hp.add_projection('Temperature', weight_field='Density')
-  hp.add_projection('Metallicity', weight_field='Density')
+  hp.add_projection('density', weight_field=None)
+  hp.add_projection('temperature', weight_field='density')
+  hp.add_projection('metallicity', weight_field='density')
   hp.make_projections(axes=[0, 1, 2], save_cube=True, save_images=True, 
                       halo_list="filtered", njobs=-1)
 
@@ -374,7 +374,7 @@ mass weighted.
    from yt.mods import *
    
    def find_min_temp(sphere):
-       ma, mini, mx, my, mz, mg = sphere.quantities['MinLocation']('Temperature')
+       ma, mini, mx, my, mz, mg = sphere.quantities['MinLocation']('temperature')
        return [mx,my,mz]
    
    hp = HaloProfiler("enzo_tiny_cosmology/DD0046/DD0046", recenter=find_min_temp)
@@ -394,7 +394,7 @@ skipped.
    
    def find_min_temp_dist(sphere):
        old = sphere.center
-       ma, mini, mx, my, mz, mg = sphere.quantities['MinLocation']('Temperature')
+       ma, mini, mx, my, mz, mg = sphere.quantities['MinLocation']('temperature')
        d = sphere.pf['kpc'] * periodic_dist(old, [mx, my, mz],
            sphere.pf.domain_right_edge - sphere.pf.domain_left_edge)
        # If new center farther than 5 kpc away, don't recenter
@@ -422,10 +422,10 @@ temperature for a given halo.
    def halo_2D_profile(halo, sphere):
        "Make a 2D profile for a halo."
        my_profile = BinnedProfile2D(sphere,
-             128, 'Density', 1e-30, 1e-24, True,
-             128, 'Temperature', 1e2, 1e7, True,
-             lazy_reader=True, end_collect=False)
-       my_profile.add_fields('CellMassMsun', weight=None, fractional=False)
+             128, 'density', 1e-30, 1e-24, True,
+             128, 'temperature', 1e2, 1e7, True,
+             end_collect=False)
+       my_profile.add_fields('cell_mass', weight=None, fractional=False)
        my_filename = os.path.join(sphere.pf.fullpath, '2D_profiles', 
              'Halo_%04d.h5' % halo['id'])
        my_profile.write_out_h5(my_filename)

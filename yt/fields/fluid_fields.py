@@ -114,7 +114,7 @@ def setup_fluid_fields(registry, ftype = "gas", slice_info = None):
         t3 = data["index", "dz"] / (data[ftype, "sound_speed"]
                         + np.abs(data[ftype, "velocity_z"]))
         tr = np.minimum(np.minimum(t1, t2), t3)
-        return data.apply_units(tr, field.units)
+        return tr
 
     registry.add_field((ftype, "courant_time_step"),
              function=_courant_time_step,
@@ -130,19 +130,23 @@ def setup_fluid_fields(registry, ftype = "gas", slice_info = None):
              function=_pressure,
              units="dyne/cm**2")
 
+    def _kT(field, data):
+        return (kboltz*data[ftype, "temperature"]).in_units("keV")
+    registry.add_field((ftype, "kT"),
+                       function=_kT,
+                       units="keV",
+                       display_name="Temperature")
+
     def _entropy(field, data):
         mw = data.get_field_parameter("mu")
         if mw is None:
             mw = 1.0
         mw *= mh
-        gammam1 = data.pf.gamma - 1.0
-        tr = kboltz * data[ftype, "temperature"] / \
-               ((data[ftype, "density"]/mw)**gammam1)
-        # Gamma here needs some fancy units.
-        # TODO: Add fancy units for Gamma!
+        gammam1 = 2./3.
+        tr = data[ftype,"kT"] / ((data[ftype, "density"]/mw)**gammam1)
         return data.apply_units(tr, field.units)
     registry.add_field((ftype, "entropy"),
-             units="erg/K",
+             units="keV*cm**2",
              function=_entropy)
 
     def _metallicity(field, data):
@@ -152,6 +156,12 @@ def setup_fluid_fields(registry, ftype = "gas", slice_info = None):
     registry.add_field((ftype, "metallicity"),
              function=_metallicity,
              units="Zsun")
+
+    def _metal_mass(field, data):
+        return data[ftype, "metal_density"] * data["index", "cell_volume"]
+    registry.add_field((ftype, "metal_mass"),
+                       function=_metal_mass,
+                       units="g")
     
     def _mean_molecular_weight(field, data):
         return (data[ftype, "density"] / (mh * data[ftype, "number_density"]))

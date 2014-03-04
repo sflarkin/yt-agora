@@ -33,7 +33,7 @@ a constant dust-to-gas mass ratio of 0.01:
 
     dust_to_gas = 0.01
     def _DustDensity(field, data):
-        return dust_to_gas*data["Density"]
+        return dust_to_gas*data["density"]
     add_field("DustDensity", function=_DustDensity)
 
 Now load up a dataset and call the
@@ -84,7 +84,7 @@ to include doppler broadening.
     x_co = 1.0e-4
     mu_h = 2.34e-24
     def _NumberDensityCO(field, data):
-        return (x_co/mu_h)*data["Density"]
+        return (x_co/mu_h)*data["density"]
     add_field("NumberDensityCO", function=_NumberDensityCO)
     
     pf = load("galaxy0030/galaxy0030")
@@ -92,5 +92,5 @@ to include doppler broadening.
     
     writer.write_amr_grid()
     writer.write_line_file("NumberDensityCO", "numberdens_co.inp")
-    velocity_fields = ["x-velocity", "y-velocity", "z-velocity"]
+    velocity_fields = ["velocity_x", "velocity_y", "velocity_z"]
     writer.write_line_file(velocity_fields, "gas_velocity.inp") 

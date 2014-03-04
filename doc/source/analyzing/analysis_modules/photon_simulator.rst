@@ -56,7 +56,7 @@ temperature and metallicity.
 .. code:: python
 
     def _density_squared(field, data):
-        return data["Density"]**2
+        return data["density"]**2
     add_field("DensitySquared", function=_density_squared)
 
 Then we'll project this field along the z-axis.
@@ -428,11 +428,11 @@ Now, we create a parameter file out of this dataset:
 .. code:: python
 
    data = {}
-   data["Density"] = dens
-   data["Temperature"] = temp
-   data["x-velocity"] = np.zeros(ddims)
-   data["y-velocity"] = np.zeros(ddims)
-   data["z-velocity"] = np.zeros(ddims)
+   data["density"] = dens
+   data["temperature"] = temp
+   data["velocity_x"] = np.zeros(ddims)
+   data["velocity_y"] = np.zeros(ddims)
+   data["velocity_z"] = np.zeros(ddims)
 
    bbox = np.array([[-0.5,0.5],[-0.5,0.5],[-0.5,0.5]])
 

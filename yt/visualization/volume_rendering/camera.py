@@ -173,6 +173,10 @@ class Camera(ParallelAnalysisInterface):
         self.resolution = resolution
         self.sub_samples = sub_samples
         self.rotation_vector = north_vector
+        if iterable(width) and len(width) > 1 and isinstance(width[1], str):
+            width = self.pf.quan(width[0], input_units=width[1])
+            # Now convert back to code length for subsequent manipulation
+            width = width.in_units("code_length").value
         if not iterable(width):
             width = (width, width, width) # left/right, top/bottom, front/back 
         if not isinstance(width, YTArray):
@@ -897,6 +901,7 @@ class Camera(ParallelAnalysisInterface):
         R = get_rotation_matrix(theta, rot_vector)
 
         normal_vector = self.front_center-self.center
+        normal_vector = normal_vector/np.sqrt((normal_vector**2).sum())
 
         if rotate_all:
             self.switch_view(

@@ -79,10 +79,10 @@ This code is how Sunrise calculates the pressure, so we can add our own derived 
 	def _Pk(field,data):
 	    #calculate pressure over Boltzmann's constant: P/k=(n/V)T
 	    #Local stellar ISM values are ~16500 Kcm^-3
-	    vol = data['CellVolumeCode'].astype('float64')*data.pf['cm']**3.0 #volume in cm
-	    m_g = data["CellMassMsun"]*1.988435e33 #mass of H in g
+	    vol = data['cell_volume'].astype('float64')*data.pf['cm']**3.0 #volume in cm
+	    m_g = data["cell_mass"]*1.988435e33 #mass of H in g
 	    n_g = m_g*5.97e23 #number of H atoms
-	    teff = data["Temperature"]
+	    teff = data["temperature"]
 	    val = (n_g/vol)*teff #should be of order 1e2-1e5
 	    return  val
 	add_field("Pk", function=_Pk,units=r"Kcm^{-3}")
@@ -118,7 +118,7 @@ If you add your star particles separately from the gas cell hierarchy, then it i
 
 .. code-block:: python
 
-	pc.add_projection("Density", 0, "Density")  
+	pc.add_projection("density", 0, "density")  
 
 
 Convergence: High Resolution
