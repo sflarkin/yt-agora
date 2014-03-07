@@ -57,9 +57,9 @@ class AMRGridPatch(YTSelectionContainer):
         self.field_data = YTFieldData()
         self.field_parameters = {}
         self.id = id
-        if index: self.index = weakref.proxy(index)
-        self.pf = self.index.parameter_file  # weakref already
         self._child_mask = self._child_indices = self._child_index_mask = None
+        self.pf = index.parameter_file
+        self._index = index
         self.start_index = None
         self.filename = filename
         self._last_mask = None
@@ -250,12 +250,12 @@ class AMRGridPatch(YTSelectionContainer):
         field_parameters = {}
         field_parameters.update(self.field_parameters)
         if smoothed:
-            cube = self.index.smoothed_covering_grid(
+            cube = self.pf.smoothed_covering_grid(
                 level, new_left_edge, 
                 field_parameters = field_parameters,
                 **kwargs)
         else:
-            cube = self.index.covering_grid(level, new_left_edge,
+            cube = self.pf.covering_grid(level, new_left_edge,
                 field_parameters = field_parameters,
                 **kwargs)
         cube._base_grid = self

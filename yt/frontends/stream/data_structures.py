@@ -838,20 +838,20 @@ def refine_amr(base_pf, refinement_criteria, fluid_operators, max_level,
     # If we have particle data, set it aside for now
 
     number_of_particles = np.sum([grid.NumberOfParticles
-                                  for grid in base_pf.h.grids])
+                                  for grid in base_pf.index.grids])
 
     if number_of_particles > 0 :
         pdata = {}
-        for field in base_pf.h.field_list :
+        for field in base_pf.field_list :
             if not isinstance(field, tuple):
                 field = ("unknown", field)
             fi = base_pf._get_field_info(*field)
             if fi.particle_type :
                 pdata[field] = uconcatenate([grid[field]
-                                               for grid in base_pf.h.grids])
+                                               for grid in base_pf.index.grids])
         pdata["number_of_particles"] = number_of_particles
         
-    last_gc = base_pf.h.num_grids
+    last_gc = base_pf.index.num_grids
     cur_gc = -1
     pf = base_pf    
     bbox = np.array( [ (pf.domain_left_edge[i], pf.domain_right_edge[i])
@@ -859,16 +859,16 @@ def refine_amr(base_pf, refinement_criteria, fluid_operators, max_level,
     while pf.h.max_level < max_level and last_gc != cur_gc:
         mylog.info("Refining another level.  Current max level: %s",
                   pf.h.max_level)
-        last_gc = pf.h.grids.size
+        last_gc = pf.index.grids.size
         for m in fluid_operators: m.apply(pf)
         if callback is not None: callback(pf)
         grid_data = []
-        for g in pf.h.grids:
+        for g in pf.index.grids:
             gd = dict( left_edge = g.LeftEdge,
                        right_edge = g.RightEdge,
                        level = g.Level,
                        dimensions = g.ActiveDimensions )
-            for field in pf.h.field_list:
+            for field in pf.field_list:
                 if not isinstance(field, tuple):
                     field = ("unknown", field)
                 fi = pf._get_field_info(*field)
@@ -881,10 +881,10 @@ def refine_amr(base_pf, refinement_criteria, fluid_operators, max_level,
             for sg in nsg:
                 LE = sg.left_index * g.dds + pf.domain_left_edge
                 dims = sg.dimensions * pf.refine_by
-                grid = pf.h.smoothed_covering_grid(g.Level + 1, LE, dims)
+                grid = pf.smoothed_covering_grid(g.Level + 1, LE, dims)
                 gd = dict(left_edge = LE, right_edge = grid.right_edge,
                           level = g.Level + 1, dimensions = dims)
-                for field in pf.h.field_list:
+                for field in pf.field_list:
                     if not isinstance(field, tuple):
                         field = ("unknown", field)
                     fi = pf._get_field_info(*field)
@@ -905,7 +905,7 @@ def refine_amr(base_pf, refinement_criteria, fluid_operators, max_level,
                 pdata = pdata_ftype
             assign_particle_data(pf, pdata)
             # We need to reassign the field list here.
-        cur_gc = pf.h.num_grids
+        cur_gc = pf.index.num_grids
 
     # Now reassign particle data to grids
     

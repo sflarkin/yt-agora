@@ -36,6 +36,8 @@ from yt.data_objects.particle_filters import \
     filter_registry
 from yt.data_objects.particle_unions import \
     ParticleUnion
+from yt.data_objects.data_containers import \
+    data_object_registry
 from yt.utilities.minimal_representation import \
     MinimalDataset
 from yt.units.yt_array import \
@@ -55,6 +57,11 @@ from yt.geometry.cylindrical_coordinates import \
 
 _cached_pfs = weakref.WeakValueDictionary()
 _pf_store = ParameterFileStore()
+
+def _unsupported_object(pf, obj_name):
+    def _raise_unsupp(*args, **kwargs):
+        raise YTObjectNotImplemented(pf, obj_name)
+    return _raise_unsupp
 
 class Dataset(object):
 
@@ -143,6 +150,7 @@ class Dataset(object):
 
         self.set_units()
         self._set_derived_attrs()
+        self._setup_classes()
 
     def _set_derived_attrs(self):
         self.domain_center = 0.5 * (self.domain_right_edge + self.domain_left_edge)
@@ -240,7 +248,11 @@ class Dataset(object):
             # ...first off, we create our field_info now.
             self.create_field_info()
         return self._instantiated_index
-    h = index  # alias
+    
+    @property
+    def h(self):
+        self.index
+        return self
 
     @parallel_root_only
     def print_key_parameters(self):
@@ -261,10 +273,15 @@ class Dataset(object):
                 v = getattr(self, a)
                 mylog.info("Parameters: %-25s = %s", a, v)
 
+    @property
+    def field_list(self):
+        return self.index.field_list
+
     def create_field_info(self):
         self.field_dependencies = {}
-        self.h.derived_field_list = []
-        self.field_info = self._field_info_class(self, self.h.field_list)
+        self.derived_field_list = []
+        self.filtered_particle_types = []
+        self.field_info = self._field_info_class(self, self.field_list)
         self.coordinates.setup_fields(self.field_info)
         self.field_info.setup_fluid_fields()
         for ptype in self.particle_types:
@@ -308,10 +325,10 @@ class Dataset(object):
         self.particle_types += (union.name,)
         self.particle_unions[union.name] = union
         fields = [ (union.name, field) for field in fields]
-        self.h.field_list.extend(fields)
+        self.field_list.extend(fields)
         # Give ourselves a chance to add them here, first, then...
         # ...if we can't find them, we set them up as defaults.
-        new_fields = self.h._setup_particle_types([union.name])
+        new_fields = self._setup_particle_types([union.name])
         rv = self.field_info.find_dependencies(new_fields)
 
     def add_particle_filter(self, filter):
@@ -322,21 +339,50 @@ class Dataset(object):
         if isinstance(filter, types.StringTypes):
             used = False
             for f in filter_registry[filter]:
-                used = self.h._setup_filtered_type(f)
+                used = self._setup_filtered_type(f)
                 if used:
                     filter = f
                     break
         else:
-            used = self.h._setup_filtered_type(filter)
+            used = self._setup_filtered_type(filter)
         if not used:
             self.known_filters.pop(n, None)
             return False
         self.known_filters[filter.name] = filter
         return True
 
+    def _setup_filtered_type(self, filter):
+        if not filter.available(self.derived_field_list):
+            return False
+        fi = self.field_info
+        fd = self.field_dependencies
+        available = False
+        for fn in self.derived_field_list:
+            if fn[0] == filter.filtered_type:
+                # Now we can add this
+                available = True
+                self.derived_field_list.append(
+                    (filter.name, fn[1]))
+                fi[filter.name, fn[1]] = filter.wrap_func(fn, fi[fn])
+                # Now we append the dependencies
+                fd[filter.name, fn[1]] = fd[fn]
+        if available:
+            self.particle_types += (filter.name,)
+            self.filtered_particle_types.append(filter.name)
+            self._setup_particle_types([filter.name])
+        return available
+
+    def _setup_particle_types(self, ptypes = None):
+        df = []
+        if ptypes is None: ptypes = self.pf.particle_types_raw
+        for ptype in set(ptypes):
+            df += self._setup_particle_type(ptype)
+        return df
+
     _last_freq = (None, None)
     _last_finfo = None
     def _get_field_info(self, ftype, fname = None):
+        self.index
         if fname is None:
             ftype, fname = "unknown", ftype
         guessing_type = False
@@ -378,6 +424,56 @@ class Dataset(object):
                     return self._last_finfo
         raise YTFieldNotFound((ftype, fname), self)
 
+    def _setup_classes(self):
+        # Called by subclass
+        self.object_types = []
+        self.objects = []
+        self.plots = []
+        for name, cls in sorted(data_object_registry.items()):
+            if name in self._index_class._unsupported_objects:
+                setattr(self, name,
+                    _unsupported_object(self, name))
+                continue
+            cname = cls.__name__
+            if cname.endswith("Base"): cname = cname[:-4]
+            self._add_object_class(name, cname, cls, {'pf':self})
+        if self.refine_by != 2 and hasattr(self, 'proj') and \
+            hasattr(self, 'overlap_proj'):
+            mylog.warning("Refine by something other than two: reverting to"
+                        + " overlap_proj")
+            self.proj = self.overlap_proj
+        if self.dimensionality < 3 and hasattr(self, 'proj') and \
+            hasattr(self, 'overlap_proj'):
+            mylog.warning("Dimensionality less than 3: reverting to"
+                        + " overlap_proj")
+            self.proj = self.overlap_proj
+        self.object_types.sort()
+
+    def _add_object_class(self, name, class_name, base, dd):
+        self.object_types.append(name)
+        dd.update({'__doc__': base.__doc__})
+        obj = type(class_name, (base,), dd)
+        setattr(self, name, obj)
+
+    def find_max(self, field):
+        """
+        Returns (value, center) of location of maximum for a given field.
+        """
+        mylog.debug("Searching for maximum value of %s", field)
+        source = self.all_data()
+        max_val, maxi, mx, my, mz = \
+            source.quantities["MaxLocation"](field)
+        mylog.info("Max Value is %0.5e at %0.16f %0.16f %0.16f", 
+              max_val, mx, my, mz)
+        return max_val, np.array([mx, my, mz], dtype="float64")
+
+    # Now all the object related stuff
+    def all_data(self, find_max=False):
+        if find_max: c = self.find_max("Density")[1]
+        else: c = (self.domain_right_edge + self.domain_left_edge)/2.0
+        return self.region(c,
+            self.domain_left_edge, self.domain_right_edge)
+
     def _setup_particle_type(self, ptype):
         orig = set(self.field_info.items())
         self.field_info.setup_particle_fields(ptype)
@@ -386,7 +482,7 @@ class Dataset(object):
     @property
     def particle_fields_by_type(self):
         fields = defaultdict(list)
-        for field in self.h.field_list:
+        for field in self.field_list:
             if field[0] in self.particle_types_raw:
                 fields[field[0]].append(field[1])
         return fields

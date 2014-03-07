@@ -146,7 +146,7 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
         the width of the smallest grid element in the simulation from the
         last data snapshot (i.e. the one where time has evolved the
         longest) in the time series:
-        ``pf_last.h.get_smallest_dx().in_units("Mpc/h")``.
+        ``pf_last.index.get_smallest_dx().in_units("Mpc/h")``.
     total_particles : int
         If supplied, this is a pre-calculated total number of particles present
         in the simulation. For example, this is useful when analyzing a series
@@ -222,7 +222,7 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
         self.outbase = outbase
         if force_res is None:
             tpf = ts[-1] # Cache a reference
-            self.force_res = tpf.h.get_smallest_dx().in_units("Mpc/h")
+            self.force_res = tpf.index.get_smallest_dx().in_units("Mpc/h")
             # We have to delete now to wipe the index
             del tpf
         else:
@@ -244,7 +244,7 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
 
         dd = tpf.h.all_data()
         # Get DM particle mass.
-        all_fields = set(tpf.h.derived_field_list + tpf.h.field_list)
+        all_fields = set(tpf.derived_field_list + tpf.field_list)
         has_particle_type = ("particle_type" in all_fields)
 
         particle_mass = self.particle_mass
