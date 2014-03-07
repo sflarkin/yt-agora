@@ -39,13 +39,13 @@ class IOCommunicator(BaseIOHandler):
         # We read our grids here
         self.grids = []
         storage = {}
-        grids = pf.h.grids.tolist()
+        grids = pf.index.grids.tolist()
         grids.sort(key=lambda a:a.filename)
         for sto, g in parallel_objects(grids, storage = storage):
             sto.result = self.comm.rank
             sto.result_id = g.id
             self.grids.append(g)
-        self._id_offset = pf.h.grids[0]._id_offset
+        self._id_offset = pf.index.grids[0]._id_offset
         mylog.info("Reading from disk ...")
         self.initialize_data()
         mylog.info("Broadcasting ...")
@@ -55,9 +55,9 @@ class IOCommunicator(BaseIOHandler):
 
     def initialize_data(self):
         pf = self.pf
-        fields = [f for f in pf.h.field_list
+        fields = [f for f in pf.field_list
                   if not pf.field_info[f].particle_type]
-        pfields = [f for f in pf.h.field_list
+        pfields = [f for f in pf.field_list
                    if pf.field_info[f].particle_type]
         # Preload is only defined for Enzo ...
         if pf.h.io._dataset_type == "enzo_packed_3d":

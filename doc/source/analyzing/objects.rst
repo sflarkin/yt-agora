@@ -83,7 +83,7 @@ simulation box, we would create a sphere object with:
 
 .. code-block:: python
 
-   sp = pf.h.sphere([0.5, 0.5, 0.5], 10.0/pf['kpc'])
+   sp = pf.sphere([0.5, 0.5, 0.5], 10.0/pf['kpc'])
 
 and then look at the temperature of its cells within it via:
 
@@ -107,8 +107,8 @@ potentially-accessible derived fields is available in the property
 .. code-block:: python
 
    pf = load("my_data")
-   print pf.h.field_list
-   print pf.h.derived_field_list
+   print pf.field_list
+   print pf.derived_field_list
 
 When a field is added, it is added to a container that hangs off of the
 parameter file, as well.  All of the field creation options
@@ -144,7 +144,7 @@ object.  To access them, you would do something like this (as for a
 
    from yt.mods import *
    pf = load("RedshiftOutput0005")
-   reg = pf.h.region([0.5, 0.5, 0.5], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
+   reg = pf.region([0.5, 0.5, 0.5], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
 
 .. include:: _obj_docstrings.inc
 
@@ -292,7 +292,7 @@ whether or not to conduct it in log space.
 
 .. code-block:: python
 
-   sp = pf.h.sphere("max", (1.0, 'pc'))
+   sp = pf.sphere("max", (1.0, 'pc'))
    contour_values, connected_sets = sp.extract_connected_sets(
         "density", 3, 1e-30, 1e-20)
 
@@ -376,7 +376,7 @@ the index or as a standalone file.  For instance, using
 
    from yt.mods import *
    pf = load("my_data")
-   sp = pf.h.sphere([0.5, 0.5, 0.5], 10.0/pf['kpc'])
+   sp = pf.sphere([0.5, 0.5, 0.5], 10.0/pf['kpc'])
 
    pf.h.save_object(sp, "sphere_to_analyze_later")
 
@@ -399,7 +399,7 @@ we can save the object directly:
    from yt.mods import *
 
    pf = load("my_data")
-   sp = pf.h.sphere([0.5, 0.5, 0.5], 10.0/pf['kpc'])
+   sp = pf.sphere([0.5, 0.5, 0.5], 10.0/pf['kpc'])
 
    sp.save_object("my_sphere", "my_storage_file.cpkl")
 
