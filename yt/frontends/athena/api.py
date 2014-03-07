@@ -15,12 +15,10 @@ API for yt.frontends.athena
 from .data_structures import \
       AthenaGrid, \
       AthenaHierarchy, \
-      AthenaDataset
+      AthenaStaticOutput
 
 from .fields import \
-      AthenaFieldInfo, \
-      KnownAthenaFields, \
-      add_athena_field
+      AthenaFieldInfo
 
 from .io import \
       IOHandlerAthena

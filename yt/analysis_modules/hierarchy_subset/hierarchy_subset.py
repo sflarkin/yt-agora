@@ -20,10 +20,10 @@ from yt.funcs import *
 from yt.data_objects.data_containers import YTFieldData
 from yt.data_objects.grid_patch import \
     AMRGridPatch
-from yt.data_objects.dataset import \
-    Dataset
+from yt.data_objects.static_output import \
+    StaticOutput
 from yt.geometry.grid_geometry_handler import \
-    GridIndex
+    GridGeometryHandler
 
 class DummyHierarchy(object):
     pass
@@ -162,9 +162,9 @@ class OldExtractedHierarchy(object):
         grid_node.attrs['ghostzoneFlags'] = np.zeros(6, dtype='int32')
         grid_node.attrs['numGhostzones'] = np.zeros(3, dtype='int32')
         grid_node.attrs['dims'] = grid.ActiveDimensions[::-1].astype('int32')
-        if not self.always_copy and self.pf.h.dataset_type == 6 \
+        if not self.always_copy and self.pf.h.data_style == 6 \
            and field in self.pf.h.field_list:
-            if grid.hierarchy.dataset_type == -1: # constructed grid
+            if grid.hierarchy.data_style == -1: # constructed grid
                 # if we can get conversion in amira we won't need to do this
                 ff = grid[field].astype('float32')
                 ff /= self.pf.conversion_factors.get(field, 1.0)
@@ -185,13 +185,13 @@ class OldExtractedHierarchy(object):
     def _convert_coords(self, val):
         return (val - self.left_edge_offset)*self.mult_factor
 
-class ExtractedHierarchy(GridIndex):
+class ExtractedHierarchy(GridGeometryHandler):
 
     grid = AMRExtractedGridProxy
 
-    def __init__(self, pf, dataset_type):
+    def __init__(self, pf, data_style):
         # First we set up our translation between original and extracted
-        self.dataset_type = dataset_type
+        self.data_style = data_style
         self.min_level = pf.min_level
         self.int_offset = np.min([grid.get_global_startindex() for grid in
                            pf.base_pf.h.select_grids(pf.min_level)], axis=0).astype('float64')
@@ -218,7 +218,7 @@ class ExtractedHierarchy(GridIndex):
         # Now we utilize the existing machinery for generating the appropriate
         # arrays of grids, etc etc.
         self.base_pf = pf.base_pf
-        GridIndex.__init__(self, pf, dataset_type)
+        GridGeometryHandler.__init__(self, pf, data_style)
 
         # Now a few cleanups
         self.pf.override["DomainRightEdge"] = self.max_right_edge
@@ -299,7 +299,7 @@ class ExtractedHierarchy(GridIndex):
     def _convert_coords(self, val):
         return (val - self.left_edge_offset)*self.mult_factor
 
-    def _detect_fields(self):
+    def _detect_output_fields(self):
         self.field_list = self.base_pf.h.field_list[:]
 
     def _setup_unknown_fields(self):
@@ -313,12 +313,12 @@ class ExtractedHierarchy(GridIndex):
 
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        GridIndex._setup_classes(self, dd)
+        GridGeometryHandler._setup_classes(self, dd)
         self.object_types.sort()
 
-class ExtractedParameterFile(Dataset):
-    _index_class = ExtractedHierarchy
-    dataset_type = "extracted"
+class ExtractedParameterFile(StaticOutput):
+    _hierarchy_class = ExtractedHierarchy
+    data_style = "extracted"
     
     def __init__(self, base_pf, min_level, max_level = -1, offset = None):
         self.base_pf = base_pf
@@ -334,7 +334,7 @@ class ExtractedParameterFile(Dataset):
         # This won't get called if 'name' is found already
         # and we'd like it to raise AttributeError if it's not anywhere
         if name in ['h', 'hierarchy']:
-            return Dataset._get_hierarchy(self)
+            return StaticOutput._get_hierarchy(self)
         return getattr(self.base_pf, name)
 
     def __getitem__(self, key):

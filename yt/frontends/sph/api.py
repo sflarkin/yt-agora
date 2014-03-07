@@ -15,19 +15,14 @@ API for yt.frontends.sph
 #-----------------------------------------------------------------------------
 
 from .data_structures import \
-      OWLSDataset, \
-      GadgetDataset, \
-      GadgetHDF5Dataset, \
-      TipsyDataset
+      OWLSStaticOutput, \
+      GadgetStaticOutput, \
+      GadgetHDF5StaticOutput, \
+      TipsyStaticOutput
 
 from .io import \
       IOHandlerOWLS, \
       IOHandlerGadgetBinary
 
 from .fields import \
-      add_owls_field, \
-      OWLSFieldInfo, \
-      add_gadget_field, \
-      GadgetFieldInfo, \
-      add_tipsy_field, \
-      TipsyFieldInfo
+      SPHFieldInfo

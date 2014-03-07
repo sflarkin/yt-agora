@@ -36,9 +36,9 @@ from yt.funcs import *
 from yt.data_objects.grid_patch import \
      AMRGridPatch
 from yt.geometry.grid_geometry_handler import \
-     GridIndex
-from yt.data_objects.dataset import \
-     Dataset
+     GridGeometryHandler
+from yt.data_objects.static_output import \
+     StaticOutput
 from yt.utilities.definitions import \
      mpc_conversion, sec_conversion
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
@@ -46,7 +46,7 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
 from yt.utilities.io_handler import \
     io_registry
 
-from yt.data_objects.field_info_container import \
+from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc
 from .fields import PlutoFieldInfo, KnownPlutoFields
 
@@ -84,14 +84,14 @@ class PlutoGrid(AMRGridPatch):
         self.dds = self.hierarchy.dds_list[self.Level]
         self.field_data['dx'], self.field_data['dy'], self.field_data['dz'] = self.dds
 
-class PlutoHierarchy(GridIndex):
+class PlutoHierarchy(GridGeometryHandler):
 
     grid = PlutoGrid
 
-    def __init__(self,pf,dataset_type='pluto_hdf5'):
+    def __init__(self,pf,data_style='pluto_hdf5'):
         self.domain_left_edge = pf.domain_left_edge
         self.domain_right_edge = pf.domain_right_edge
-        self.dataset_type = dataset_type
+        self.data_style = data_style
         self.field_indexes = {}
         self.parameter_file = weakref.proxy(pf)
         # for now, the hierarchy file is the parameter file!
@@ -102,12 +102,17 @@ class PlutoHierarchy(GridIndex):
 
         self.float_type = self._handle['/level_0']['data:datatype=0'].dtype.name
         self._levels = self._handle.keys()[2:]
-        GridIndex.__init__(self,pf,dataset_type)
+        GridGeometryHandler.__init__(self,pf,data_style)
 
-    def _detect_fields(self):
+    def _detect_output_fields(self):
         ncomp = int(self._handle['/'].attrs['num_components'])
         self.field_list = [c[1] for c in self._handle['/'].attrs.items()[-ncomp:]]
           
+    def _setup_classes(self):
+        dd = self._get_data_reader_dict()
+        GridGeometryHandler._setup_classes(self, dd)
+        self.object_types.sort()
+
     def _count_grids(self):
         self.num_grids = 0
         for lev in self._levels:
@@ -163,18 +168,18 @@ class PlutoHierarchy(GridIndex):
         mask[grid_ind] = True
         return [g for g in self.grids[mask] if g.Level == grid.Level + 1]
 
-class PlutoDataset(Dataset):
-    _index_class = PlutoHierarchy
+class PlutoStaticOutput(StaticOutput):
+    _hierarchy_class = PlutoHierarchy
     _fieldinfo_fallback = PlutoFieldInfo
     _fieldinfo_known = KnownPlutoFields
 
-    def __init__(self, filename, dataset_type='pluto_hdf5',
+    def __init__(self, filename, data_style='pluto_hdf5',
                  storage_filename = None, ini_filename = None):
         self._handle = h5py.File(filename,'r')
         self.current_time = self._handle.attrs['time']
         self.ini_filename = ini_filename
         self.fullplotdir = os.path.abspath(filename)
-        Dataset.__init__(self,filename,dataset_type)
+        StaticOutput.__init__(self,filename,data_style)
         self.storage_filename = storage_filename
         self.cosmological_simulation = False
 

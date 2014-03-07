@@ -1,7 +1,7 @@
 import numpy as na
 
 from yt.utilities.answer_testing.output_tests import \
-    DatasetTest, RegressionTestException
+    YTStaticOutputTest, RegressionTestException
 from yt.funcs import ensure_list
 
 
@@ -9,7 +9,7 @@ class HierarchyInconsistent(RegressionTestException):
     pass
 
 
-class HierarchyConsistency(DatasetTest):
+class HierarchyConsistency(YTStaticOutputTest):
     name = "hierarchy_consistency"
 
     def run(self):
@@ -21,7 +21,7 @@ class HierarchyConsistency(DatasetTest):
         if not(old_result and self.result): raise HierarchyInconsistent()
 
 
-class GridLocationsProperties(DatasetTest):
+class GridLocationsProperties(YTStaticOutputTest):
     name = "level_consistency"
 
     def run(self):
@@ -40,7 +40,7 @@ class GridRelationshipsChanged(RegressionTestException):
     pass
 
 
-class GridRelationships(DatasetTest):
+class GridRelationships(YTStaticOutputTest):
 
     name = "grid_relationships"
 
@@ -58,7 +58,7 @@ class GridRelationships(DatasetTest):
                 raise GridRelationshipsChanged()
 
 
-class GridGlobalIndices(DatasetTest):
+class GridGlobalIndices(YTStaticOutputTest):
     name = "global_startindex"
 
     def run(self):

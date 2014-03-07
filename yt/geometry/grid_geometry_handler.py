@@ -24,19 +24,19 @@ from yt.funcs import *
 from yt.utilities.logger import ytLogger as mylog
 from yt.arraytypes import blankRecordArray
 from yt.config import ytcfg
-from yt.data_objects.field_info_container import NullFunc
+from yt.fields.field_info_container import NullFunc
 from yt.geometry.geometry_handler import \
-    Index, YTDataChunk, ChunkDataCache
+    GeometryHandler, YTDataChunk, ChunkDataCache
 from yt.utilities.definitions import MAXLEVEL
 from yt.utilities.physical_constants import sec_per_year
 from yt.utilities.io_handler import io_registry
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelAnalysisInterface, parallel_splitter
-from yt.utilities.lib import GridTree, MatchPointsToGrids
+from yt.utilities.lib.GridTree import GridTree, MatchPointsToGrids
 
 from yt.data_objects.data_containers import data_object_registry
 
-class GridIndex(Index):
+class GridGeometryHandler(GeometryHandler):
     float_type = 'float64'
     _preload_implemented = False
 
@@ -56,6 +56,27 @@ class GridIndex(Index):
         mylog.debug("Re-examining hierarchy")
         self._initialize_level_stats()
 
+    @property
+    def parameters(self):
+        return self.parameter_file.parameters
+
+    def _detect_output_fields_backup(self):
+        # grab fields from backup file as well, if present
+        return
+        try:
+            backup_filename = self.parameter_file.backup_filename
+            f = h5py.File(backup_filename, 'r')
+            g = f["data"]
+            grid = self.grids[0] # simply check one of the grids
+            grid_group = g["grid_%010i" % (grid.id - grid._id_offset)]
+            for field_name in grid_group:
+                if field_name != 'particles':
+                    self.field_list.append(field_name)
+        except KeyError:
+            return
+        except IOError:
+            return
+
     def select_grids(self, level):
         """
         Returns an array of grids at *level*.
@@ -69,8 +90,10 @@ class GridIndex(Index):
     def _initialize_grid_arrays(self):
         mylog.debug("Allocating arrays for %s grids", self.num_grids)
         self.grid_dimensions = np.ones((self.num_grids,3), 'int32')
-        self.grid_left_edge = np.zeros((self.num_grids,3), self.float_type)
-        self.grid_right_edge = np.ones((self.num_grids,3), self.float_type)
+        self.grid_left_edge = self.pf.arr(np.zeros((self.num_grids,3),
+                                    self.float_type), 'code_length')
+        self.grid_right_edge = self.pf.arr(np.ones((self.num_grids,3),
+                                    self.float_type), 'code_length')
         self.grid_levels = np.zeros((self.num_grids,1), 'int32')
         self.grid_particle_count = np.zeros((self.num_grids,1), 'int32')
 
@@ -157,17 +180,14 @@ class GridIndex(Index):
             print "z = %0.8f" % (self["CosmologyCurrentRedshift"])
         except:
             pass
-        t_s = self.pf.current_time * self.pf["Time"]
         print "t = %0.8e = %0.8e s = %0.8e years" % \
-            (self.pf.current_time, \
-             t_s, t_s / sec_per_year )
+            (self.pf.current_time.in_units("code_time"),
+             self.pf.current_time.in_units("s"),
+             self.pf.current_time.in_units("yr"))
         print "\nSmallest Cell:"
         u=[]
-        for item in self.parameter_file.units.items():
-            u.append((item[1],item[0]))
-        u.sort()
-        for unit in u:
-            print "\tWidth: %0.3e %s" % (dx*unit[0], unit[1])
+        for item in ("Mpc", "pc", "AU", "cm"):
+            print "\tWidth: %0.3e %s" % (dx.in_units(item), item)
 
     def find_max(self, field, finest_levels = 3):
         """
@@ -182,9 +202,9 @@ class GridIndex(Index):
     def find_max_cell_location(self, field, finest_levels = 3):
         if finest_levels is not False:
             gi = (self.grid_levels >= self.max_level - finest_levels).ravel()
-            source = self.pf.data_collection([0.0]*3, self.grids[gi])
+            source = self.data_collection([0.0]*3, self.grids[gi])
         else:
-            source = self.pf.all_data()
+            source = self.all_data()
         mylog.debug("Searching for maximum value of %s", field)
         max_val, maxi, mx, my, mz = \
             source.quantities["MaxLocation"](field)
@@ -211,8 +231,10 @@ class GridIndex(Index):
 
     def get_grid_tree(self) :
 
-        left_edge = np.zeros((self.num_grids, 3))
-        right_edge = np.zeros((self.num_grids, 3))
+        left_edge = self.pf.arr(np.zeros((self.num_grids, 3)),
+                               'code_length')
+        right_edge = self.pf.arr(np.zeros((self.num_grids, 3)),
+                                'code_length')
         level = np.zeros((self.num_grids), dtype='int64')
         parent_ind = np.zeros((self.num_grids), dtype='int64')
         num_children = np.zeros((self.num_grids), dtype='int64')
@@ -230,6 +252,9 @@ class GridIndex(Index):
 
         return GridTree(self.num_grids, left_edge, right_edge, parent_ind,
                         level, num_children)
+
+    def convert(self, unit):
+        return self.parameter_file.conversion_factors[unit]
 
     def _identify_base_chunk(self, dobj):
         if dobj._type_name == "grid":

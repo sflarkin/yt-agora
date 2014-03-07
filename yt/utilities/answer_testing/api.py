@@ -20,7 +20,7 @@ from .runner import \
     registry_entries
 
 from .output_tests import \
-    DatasetTest, \
+    YTStaticOutputTest, \
     create_test
 
 from .default_tests import \
@@ -47,4 +47,3 @@ try:
     from .framework import AnswerTesting
 except ImportError:
     raise
-

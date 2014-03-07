@@ -30,9 +30,9 @@ def load(*args ,**kwargs):
     """
     This function attempts to determine the base data type of a filename or
     other set of arguments by calling
-    :meth:`yt.data_objects.api.Dataset._is_valid` until it finds a
+    :meth:`yt.data_objects.api.StaticOutput._is_valid` until it finds a
     match, at which point it returns an instance of the appropriate
-    :class:`yt.data_objects.api.Dataset` subclass.
+    :class:`yt.data_objects.api.StaticOutput` subclass.
     """
     if len(args) == 0:
         try:
@@ -65,8 +65,8 @@ def load(*args ,**kwargs):
             valid_file.append(False)
     if not any(valid_file):
         try:
-            from yt.data_objects.time_series import DatasetSeries
-            ts = DatasetSeries.from_filenames(*args, **kwargs)
+            from yt.data_objects.time_series import TimeSeriesData
+            ts = TimeSeriesData.from_filenames(*args, **kwargs)
             return ts
         except YTOutputNotIdentified:
             pass
@@ -84,7 +84,7 @@ def load(*args ,**kwargs):
            and isinstance(args[0], types.StringTypes):
             erdb = EnzoRunDatabase()
             fn = erdb.find_uuid(args[0])
-            n = "EnzoDataset"
+            n = "EnzoStaticOutput"
             if n in output_type_registry \
                and output_type_registry[n]._is_valid(fn):
                 return output_type_registry[n](fn)
@@ -130,6 +130,20 @@ def simulation(parameter_filename, simulation_type, find_outputs=False):
     if simulation_type not in simulation_time_series_registry:
         raise YTSimulationNotIdentified(simulation_type)
 
+    if os.path.exists(parameter_filename):
+        valid_file = True
+    elif os.path.exists(os.path.join(ytcfg.get("yt", "test_data_dir"),
+                                     parameter_filename)):
+        parameter_filename = os.path.join(ytcfg.get("yt", "test_data_dir"),
+                                          parameter_filename)
+        valid_file = True
+    else:
+        valid_file = False
+        
+    if not valid_file:
+        raise YTOutputNotIdentified((parameter_filename, simulation_type), 
+                                    dict(find_outputs=find_outputs))
+    
     return simulation_time_series_registry[simulation_type](parameter_filename, 
                                                             find_outputs=find_outputs)
 

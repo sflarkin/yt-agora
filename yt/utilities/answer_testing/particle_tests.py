@@ -1,9 +1,9 @@
 import matplotlib
 from yt.mods import *
 import pylab
-from output_tests import SingleOutputTest, DatasetTest, create_test
+from output_tests import SingleOutputTest, YTStaticOutputTest, create_test
 
-class TestParticleUniqueIDs(DatasetTest):
+class TestParticleUniqueIDs(YTStaticOutputTest):
 
     def run(self):
         # Test to make sure that all the particles have unique IDs.
@@ -26,7 +26,7 @@ class TestParticleUniqueIDs(DatasetTest):
 
 create_test(TestParticleUniqueIDs, "particle_unique_ids_test")
 
-class TestParticleExtrema(DatasetTest):
+class TestParticleExtrema(YTStaticOutputTest):
 
     def run(self):
         # Tests to make sure there are no particle positions aren't changing

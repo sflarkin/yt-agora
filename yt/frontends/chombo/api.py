@@ -16,7 +16,7 @@ API for yt.frontends.chombo
 from .data_structures import \
       ChomboGrid, \
       ChomboHierarchy, \
-      ChomboDataset
+      ChomboStaticOutput
 
 from .fields import \
       ChomboFieldInfo, \

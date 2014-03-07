@@ -21,7 +21,7 @@ from yt.utilities.answer_testing.framework import \
     PixelizedProjectionValuesTest, \
     FieldValuesTest, \
     create_obj
-from yt.frontends.artio.api import ARTIODataset
+from yt.frontends.artio.api import ARTIOStaticOutput
 
 _fields = ("Temperature", "Density", "VelocityMagnitude",
            ("deposit", "all_density"), ("deposit", "all_count")) 

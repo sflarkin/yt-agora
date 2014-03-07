@@ -21,11 +21,10 @@ except ImportError:
 import time
 import numpy as np
 from yt.funcs import *
-import yt.utilities.lib as amr_utils
+import yt.utilities.lib.api as amr_utils
 from yt.utilities.physical_constants import \
     kpc_per_cm, \
     sec_per_year
-from yt.fields.universal_fields import add_field
 from yt.mods import *
 
 def export_to_sunrise(pf, fn, star_particle_type, fc, fwidth, ncells_wide=None,
@@ -42,7 +41,7 @@ def export_to_sunrise(pf, fn, star_particle_type, fc, fwidth, ncells_wide=None,
 
     Parameters
     ----------
-    pf : `Dataset`
+    pf : `StaticOutput`
        The parameter file to convert.
     fn : string
        The filename of the output FITS file.
@@ -107,7 +106,7 @@ def export_to_sunrise_from_halolist(pf,fni,star_particle_type,
 
     Parameters
     ----------
-    pf : `Dataset`
+    pf : `StaticOutput`
         The parameter file to convert. We use the root grid to specify the domain.
     fni : string
         The filename of the output FITS file, but depends on the domain. The
@@ -500,7 +499,7 @@ def prepare_star_particles(pf,star_type,pos=None,vel=None, age=None,
     idxst = dd["particle_type"] == star_type
 
     #make sure we select more than a single particle
-    assert np.sum(idxst)>0
+    assert na.sum(idxst)>0
     if pos is None:
         pos = np.array([dd["particle_position_%s" % ax]
                         for ax in 'xyz']).transpose()
@@ -551,7 +550,7 @@ def prepare_star_particles(pf,star_type,pos=None,vel=None, age=None,
     
     #make sure we have nonzero particle number
     assert pd_table.data.shape[0]>0
-    return pd_table,np.sum(idx)
+    return pd_table,na.sum(idx)
 
 
 def add_fields():

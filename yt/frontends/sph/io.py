@@ -48,7 +48,7 @@ def _get_h5_handle(fn):
     return f
 
 class IOHandlerOWLS(BaseIOHandler):
-    _dataset_type = "OWLS"
+    _data_style = "OWLS"
     _vector_fields = ("Coordinates", "Velocity", "Velocities")
     _known_ptypes = ghdf5_ptypes
     _var_mass = None
@@ -165,21 +165,15 @@ class IOHandlerOWLS(BaseIOHandler):
         return fields
 
 class IOHandlerGadgetHDF5(IOHandlerOWLS):
-    _dataset_type = "gadget_hdf5"
+    _data_style = "gadget_hdf5"
 
 ZeroMass = object()
 
 class IOHandlerGadgetBinary(BaseIOHandler):
-    _dataset_type = "gadget_binary"
+    _data_style = "gadget_binary"
     _vector_fields = ("Coordinates", "Velocity", "Velocities")
 
     # Particle types (Table 3 in GADGET-2 user guide)
-    _ptypes = ( "Gas",
-                "Halo",
-                "Disk",
-                "Bulge",
-                "Stars",
-                "Bndry" )
     #
     # Blocks in the file:
     #   HEAD
@@ -195,16 +189,12 @@ class IOHandlerGadgetBinary(BaseIOHandler):
     #   ENDT    (only if enabled in makefile)
     #   TSTP    (only if enabled in makefile)
 
-    _fields = ( "Coordinates",
-                "Velocities",
-                "ParticleIDs",
-                "Mass",
-                ("InternalEnergy", "Gas"),
-                ("Density", "Gas"),
-                ("SmoothingLength", "Gas"),
-    )
-
     _var_mass = None
+
+    def __init__(self, pf, *args, **kwargs):
+        self._fields = pf._field_spec
+        self._ptypes = pf._ptype_spec
+        super(IOHandlerGadgetBinary, self).__init__(pf, *args, **kwargs)
 
     @property
     def var_mass(self):
@@ -352,13 +342,13 @@ class IOHandlerGadgetBinary(BaseIOHandler):
                     field, req = field
                     if req is ZeroMass:
                         if m > 0.0 : continue
-                    elif req != field:
+                    elif req != ptype:
                         continue
                 field_list.append((ptype, field))
         return field_list
 
 class IOHandlerTipsyBinary(BaseIOHandler):
-    _dataset_type = "tipsy"
+    _data_style = "tipsy"
     _vector_fields = ("Coordinates", "Velocity", "Velocities")
 
     _pdtypes = None # dtypes, to be filled in later
@@ -465,8 +455,8 @@ class IOHandlerTipsyBinary(BaseIOHandler):
         ind = 0
         DLE, DRE = pf.domain_left_edge, pf.domain_right_edge
         dx = (DRE - DLE) / (2**_ORDER_MAX)
-        self.domain_left_edge = DLE
-        self.domain_right_edge = DRE
+        self.domain_left_edge = DLE.in_units("code_length").ndarray_view()
+        self.domain_right_edge = DRE.in_units("code_length").ndarray_view()
         with open(data_file.filename, "rb") as f:
             f.seek(pf._header_offset)
             for iptype, ptype in enumerate(self._ptypes):
@@ -495,8 +485,8 @@ class IOHandlerTipsyBinary(BaseIOHandler):
                     for i, ax in enumerate("xyz"):
                         eps = np.finfo(pp["Coordinates"][ax].dtype).eps
                         pos[:,i] = np.clip(pp["Coordinates"][ax],
-                                    pf.domain_left_edge[i] + eps,
-                                    pf.domain_right_edge[i] - eps)
+                                    self.domain_left_edge[i] + eps,
+                                    self.domain_right_edge[i] - eps)
                     regions.add_data_file(pos, data_file.file_id)
                     morton[ind:ind+c] = compute_morton(
                         pos[:,0], pos[:,1], pos[:,2],

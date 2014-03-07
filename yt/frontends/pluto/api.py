@@ -16,7 +16,7 @@ API for yt.frontends.pluto
 from .data_structures import \
       PlutoGrid, \
       PlutoHierarchy, \
-      PlutoDataset
+      PlutoStaticOutput
 
 from .fields import \
       PlutoFieldInfo, \

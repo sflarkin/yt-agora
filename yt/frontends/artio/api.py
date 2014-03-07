@@ -15,11 +15,10 @@ API for yt.frontends.artio
 #-----------------------------------------------------------------------------
 
 from .data_structures import \
-    ARTIODataset
+    ARTIOStaticOutput
 
 from .fields import \
-    ARTIOFieldInfo, \
-    add_artio_field
+    ARTIOFieldInfo
 
 from .io import \
     IOHandlerARTIO

@@ -23,7 +23,7 @@ import yt.utilities.fortran_utils as fpu
 import cStringIO
 
 class IOHandlerRAMSES(BaseIOHandler):
-    _dataset_type = "ramses"
+    _data_style = "ramses"
 
     def _read_fluid_selection(self, chunks, selector, fields, size):
         # Chunks in this case will have affiliated domain subset objects

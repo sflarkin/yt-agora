@@ -138,7 +138,7 @@ class FilteredRepresentation(MinimalRepresentation):
     def _generate_post(self):
         raise RuntimeError
 
-class MinimalDataset(MinimalRepresentation):
+class MinimalStaticOutput(MinimalRepresentation):
     _attr_list = ("dimensionality", "refine_by", "domain_dimensions",
                   "current_time", "domain_left_edge", "domain_right_edge",
                   "unique_identifier", "current_redshift", "output_hash",
@@ -147,7 +147,7 @@ class MinimalDataset(MinimalRepresentation):
     type = 'simulation_output'
 
     def __init__(self, obj):
-        super(MinimalDataset, self).__init__(obj)
+        super(MinimalStaticOutput, self).__init__(obj)
         self.output_hash = obj._hash()
         self.name = str(obj)
 

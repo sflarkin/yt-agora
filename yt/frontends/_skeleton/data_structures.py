@@ -23,15 +23,15 @@ from yt.data_objects.grid_patch import \
     AMRGridPatch
 from yt.data_objects.hierarchy import \
     AMRHierarchy
-from yt.data_objects.dataset import \
-    Dataset
+from yt.data_objects.static_output import \
+    StaticOutput
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
 from yt.utilities.io_handler import \
     io_registry
 from yt.utilities.physical_constants import cm_per_mpc
 from .fields import SkeletonFieldInfo, add_flash_field, KnownSkeletonFields
-from yt.data_objects.field_info_container import \
+from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc, ValidateDataField, TranslationFunc
 
 class SkeletonGrid(AMRGridPatch):
@@ -52,18 +52,18 @@ class SkeletonHierarchy(AMRHierarchy):
     grid = SkeletonGrid
     float_type = np.float64
     
-    def __init__(self, pf, dataset_type='skeleton'):
-        self.dataset_type = dataset_type
+    def __init__(self, pf, data_style='skeleton'):
+        self.data_style = data_style
         self.parameter_file = weakref.proxy(pf)
         # for now, the hierarchy file is the parameter file!
         self.hierarchy_filename = self.parameter_file.parameter_filename
         self.directory = os.path.dirname(self.hierarchy_filename)
-        AMRHierarchy.__init__(self, pf, dataset_type)
+        AMRHierarchy.__init__(self, pf, data_style)
 
     def _initialize_data_storage(self):
         pass
 
-    def _detect_fields(self):
+    def _detect_output_fields(self):
         # This needs to set a self.field_list that contains all the available,
         # on-disk fields.
         pass
@@ -94,20 +94,20 @@ class SkeletonHierarchy(AMRHierarchy):
         # identified.
         pass
 
-class SkeletonDataset(Dataset):
-    _index_class = SkeletonHierarchy
+class SkeletonStaticOutput(StaticOutput):
+    _hierarchy_class = SkeletonHierarchy
     _fieldinfo_fallback = SkeletonFieldInfo
     _fieldinfo_known = KnownSkeletonFields
     _handle = None
     
-    def __init__(self, filename, dataset_type='skeleton',
+    def __init__(self, filename, data_style='skeleton',
                  storage_filename = None,
                  conversion_override = None):
 
         if conversion_override is None: conversion_override = {}
         self._conversion_override = conversion_override
 
-        Dataset.__init__(self, filename, dataset_type)
+        StaticOutput.__init__(self, filename, data_style)
         self.storage_filename = storage_filename
 
     def _set_units(self):

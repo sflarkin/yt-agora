@@ -15,7 +15,7 @@ API for Geometry Handlers
 #-----------------------------------------------------------------------------
 
 from geometry_handler import \
-    Index
+    GeometryHandler
 
 from grid_geometry_handler import \
-    GridIndex
+    GridGeometryHandler

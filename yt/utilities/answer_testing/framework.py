@@ -31,7 +31,7 @@ from nose.plugins import Plugin
 from yt.testing import *
 from yt.convenience import load, simulation
 from yt.config import ytcfg
-from yt.data_objects.dataset import Dataset
+from yt.data_objects.static_output import StaticOutput
 from yt.utilities.logger import disable_stream_logging
 from yt.utilities.command_line import get_yt_version
 
@@ -253,8 +253,8 @@ def temp_cwd(cwd):
     yield
     os.chdir(oldcwd)
 
-def can_run_pf(pf_fn):
-    if isinstance(pf_fn, Dataset):
+def can_run_pf(pf_fn, file_check = False):
+    if isinstance(pf_fn, StaticOutput):
         return AnswerTestingTest.result_storage is not None
     path = ytcfg.get("yt", "test_data_dir")
     if not os.path.isdir(path):
@@ -271,7 +271,7 @@ def can_run_pf(pf_fn):
 
 def data_dir_load(pf_fn, cls = None, args = None, kwargs = None):
     path = ytcfg.get("yt", "test_data_dir")
-    if isinstance(pf_fn, Dataset): return pf_fn
+    if isinstance(pf_fn, StaticOutput): return pf_fn
     if not os.path.isdir(path):
         return False
     with temp_cwd(path):
@@ -484,7 +484,7 @@ class PixelizedProjectionValuesTest(AnswerTestingTest):
             obj = create_obj(self.pf, self.obj_type)
         else:
             obj = None
-        proj = self.pf.h.proj(self.field, self.axis, 
+        proj = self.pf.h.proj(self.field, self.axis,
                               weight_field=self.weight_field,
                               data_source = obj)
         frb = proj.to_frb((1.0, 'unitary'), 256)

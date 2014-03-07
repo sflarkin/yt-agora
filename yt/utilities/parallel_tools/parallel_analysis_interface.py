@@ -26,30 +26,15 @@ from yt.config import ytcfg
 from yt.utilities.definitions import \
     x_dict, y_dict
 import yt.utilities.logger
-from yt.utilities.lib import \
+from yt.utilities.lib.QuadTree import \
     QuadTree, merge_quadtrees
+from yt.units.yt_array import YTArray
+from yt.units.unit_registry import UnitRegistry
 
 parallel_capable = ytcfg.getboolean("yt", "__parallel")
 
-dtype_names = dict(
-        float32 = "MPI.FLOAT",
-        float64 = "MPI.DOUBLE",
-        int32   = "MPI.INT",
-        int64   = "MPI.LONG",
-        c       = "MPI.CHAR",
-)
-op_names = dict(
-        sum = "MPI.SUM",
-        min = "MPI.MIN",
-        max = "MPI.MAX"
-)
-
 # Set up translation table and import things
-
-def enable_parallelism():
-    global parallel_capable
-    parallel_capable = ytcfg.getboolean("yt", "__parallel")
-    if not parallel_capable: return False
+if parallel_capable:
     from mpi4py import MPI
     yt.utilities.logger.uncolorize_logging()
     # Even though the uncolorize function already resets the format string,
@@ -63,18 +48,32 @@ def enable_parallelism():
     if ytcfg.getint("yt","LogLevel") < 20:
         yt.utilities.logger.ytLogger.warning(
           "Log Level is set low -- this could affect parallel performance!")
-    dtype_names.update(dict(
+    dtype_names = dict(
             float32 = MPI.FLOAT,
             float64 = MPI.DOUBLE,
             int32   = MPI.INT,
             int64   = MPI.LONG,
             c       = MPI.CHAR,
-    ))
-    op_names.update(dict(
+    )
+    op_names = dict(
         sum = MPI.SUM,
         min = MPI.MIN,
         max = MPI.MAX
-    ))
+    )
+
+else:
+    dtype_names = dict(
+            float32 = "MPI.FLOAT",
+            float64 = "MPI.DOUBLE",
+            int32   = "MPI.INT",
+            int64   = "MPI.LONG",
+            c       = "MPI.CHAR",
+    )
+    op_names = dict(
+            sum = "MPI.SUM",
+            min = "MPI.MIN",
+            max = "MPI.MAX"
+    )
 
 # Because the dtypes will == correctly but do not hash the same, we need this
 # function for dictionary access.
@@ -358,7 +357,7 @@ def parallel_objects(objects, njobs = 0, storage = None, barrier = True,
     Calls to this function can be nested.
 
     This should not be used to iterate over parameter files --
-    :class:`~yt.data_objects.time_series.DatasetSeries` provides a much nicer
+    :class:`~yt.data_objects.time_series.TimeSeriesData` provides a much nicer
     interface for that.
 
     Parameters
@@ -723,12 +722,19 @@ class Communicator(object):
         if isinstance(data, np.ndarray) and \
                 get_mpi_type(data.dtype) is not None:
             if self.comm.rank == root:
-                info = (data.shape, data.dtype)
+                if isinstance(data, YTArray):
+                    info = (data.shape, data.dtype, str(data.units), data.units.registry.lut)
+                else:
+                    info = (data.shape, data.dtype)
             else:
                 info = ()
             info = self.comm.bcast(info, root=root)
             if self.comm.rank != root:
-                data = np.empty(info[0], dtype=info[1])
+                if len(info) == 4:
+                    registry = UnitRegistry(lut=info[3], add_default_symbols=False)
+                    data = YTArray(np.empty(info[0], dtype=info[1]), info[2], registry=registry)
+                else:
+                    data = np.empty(info[0], dtype=info[1])
             mpi_type = get_mpi_type(info[1])
             self.comm.Bcast([data, mpi_type], root = root)
             return data
@@ -933,16 +939,24 @@ class Communicator(object):
             self.comm.send(arr, dest=dest, tag=tag)
             return
         tmp = arr.view(self.__tocast) # Cast to CHAR
-        # communicate type and shape
-        self.comm.send((arr.dtype.str, arr.shape), dest=dest, tag=tag)
+        # communicate type and shape and optionally units
+        if isinstance(arr, YTArray):
+            unit_metadata = (str(arr.units), arr.units.registry.lut)
+        else:
+            unit_metadata = ()
+        self.comm.send((arr.dtype.str, arr.shape) + unit_metadata, dest=dest, tag=tag)
         self.comm.Send([arr, MPI.CHAR], dest=dest, tag=tag)
         del tmp
 
     def recv_array(self, source, tag = 0):
-        dt, ne = self.comm.recv(source=source, tag=tag)
-        if dt is None and ne is None:
+        metadata = self.comm.recv(source=source, tag=tag)
+        dt, ne = metadata[:2]
+        if ne is None and dt is None:
             return self.comm.recv(source=source, tag=tag)
         arr = np.empty(ne, dtype=dt)
+        if len(metadata) == 4:
+            registry = UnitRegistry(lut=metadata[3], add_default_symbols=False)
+            arr = YTArray(arr, metadata[2], registry=registry)
         tmp = arr.view(self.__tocast)
         self.comm.Recv([tmp, MPI.CHAR], source=source, tag=tag)
         return arr
@@ -958,6 +972,10 @@ class Communicator(object):
         offset = offsets[self.comm.rank]
         tmp_send = send.view(self.__tocast)
         recv = np.empty(total_size, dtype=send.dtype)
+        if isinstance(send, YTArray):
+            # We assume send.units is consitent with the units
+            # on the receiving end.
+            recv = YTArray(recv, send.units)
         recv[offset:offset+send.size] = send[:]
         dtr = send.dtype.itemsize / tmp_send.dtype.itemsize # > 1
         roff = [off * dtr for off in offsets]

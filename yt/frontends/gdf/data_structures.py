@@ -22,10 +22,10 @@ from yt.funcs import \
 from yt.data_objects.grid_patch import \
     AMRGridPatch
 from yt.geometry.grid_geometry_handler import \
-    GridIndex
-from yt.data_objects.dataset import \
-    Dataset
-from yt.utilities.lib import \
+    GridGeometryHandler
+from yt.data_objects.static_output import \
+    StaticOutput
+from yt.utilities.lib.misc_utilities import \
     get_box_grids_level
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
@@ -33,7 +33,6 @@ from yt.utilities.definitions import \
 from .fields import GDFFieldInfo, KnownGDFFields
 from yt.data_objects.field_info_container import \
     NullFunc
-
 
 def _get_convert(fname):
     def _conv(data):
@@ -73,17 +72,17 @@ class GDFGrid(AMRGridPatch):
             self.dds
 
 
-class GDFHierarchy(GridIndex):
+class GDFHierarchy(GridGeometryHandler):
 
     grid = GDFGrid
     filtered_particle_types = []
 
-    def __init__(self, pf, dataset_type='grid_data_format'):
+    def __init__(self, pf, data_style='grid_data_format'):
         self.parameter_file = weakref.proxy(pf)
         self.hierarchy_filename = self.parameter_file.parameter_filename
         h5f = h5py.File(self.hierarchy_filename, 'r')
-        self.dataset_type = dataset_type
-        GridIndex.__init__(self, pf, dataset_type)
+        self.data_style = data_style
+        GridGeometryHandler.__init__(self, pf, data_style)
         self.max_level = 10  # FIXME
         # for now, the hierarchy file is the parameter file!
         self.directory = os.path.dirname(self.hierarchy_filename)
@@ -96,6 +95,11 @@ class GDFHierarchy(GridIndex):
         h5f = h5py.File(self.hierarchy_filename, 'r')
         self.field_list = h5f['field_types'].keys()
         h5f.close()
+
+    def _setup_classes(self):
+        dd = self._get_data_reader_dict()
+        GridGeometryHandler._setup_classes(self, dd)
+        self.object_types.sort()
 
     def _count_grids(self):
         h5f = h5py.File(self.hierarchy_filename, 'r')
@@ -173,14 +177,14 @@ class GDFHierarchy(GridIndex):
         return [g for g in self.grids[mask] if g.Level == grid.Level + 1]
 
 
-class GDFDataset(Dataset):
+class GDFStaticOutput(StaticOutput):
     _hierarchy_class = GDFHierarchy
     _fieldinfo_fallback = GDFFieldInfo
     _fieldinfo_known = KnownGDFFields
 
-    def __init__(self, filename, dataset_type='grid_data_format',
+    def __init__(self, filename, data_style='grid_data_format',
                  storage_filename=None):
-        Dataset.__init__(self, filename, dataset_type)
+        StaticOutput.__init__(self, filename, data_style)
         self.storage_filename = storage_filename
         self.filename = filename
 
@@ -221,8 +225,7 @@ class GDFDataset(Dataset):
                 current_fields_unit = ""
             self._fieldinfo_known.add_field(
                 field_name, function=NullFunc, take_log=False,
-                units=current_fields_unit, projected_units="",
-                convert_function=_get_convert(field_name))
+                units=current_fields_unit, projected_units="")
 
         h5f.close()
 

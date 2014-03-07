@@ -25,8 +25,8 @@ from yt.funcs import *
 from yt.utilities.logger import ytLogger as mylog
 from yt.arraytypes import blankRecordArray
 from yt.config import ytcfg
-from yt.data_objects.field_info_container import NullFunc
-from yt.geometry.geometry_handler import Index, YTDataChunk
+from yt.fields.field_info_container import NullFunc
+from yt.geometry.geometry_handler import GeometryHandler, YTDataChunk
 from yt.geometry.particle_oct_container import \
     ParticleOctreeContainer, ParticleRegions
 from yt.utilities.definitions import MAXLEVEL
@@ -37,17 +37,17 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
 from yt.data_objects.data_containers import data_object_registry
 from yt.data_objects.octree_subset import ParticleOctreeSubset
 
-class ParticleIndex(Index):
+class ParticleGeometryHandler(GeometryHandler):
     _global_mesh = False
 
-    def __init__(self, pf, dataset_type):
-        self.dataset_type = dataset_type
+    def __init__(self, pf, data_style):
+        self.data_style = data_style
         self.parameter_file = weakref.proxy(pf)
         # for now, the hierarchy file is the parameter file!
         self.hierarchy_filename = self.parameter_file.parameter_filename
         self.directory = os.path.dirname(self.hierarchy_filename)
         self.float_type = np.float64
-        super(ParticleIndex, self).__init__(pf, dataset_type)
+        super(ParticleGeometryHandler, self).__init__(pf, data_style)
 
     def _setup_geometry(self):
         mylog.debug("Initializing Particle Geometry Handler.")
@@ -114,7 +114,7 @@ class ParticleIndex(Index):
         # Now we add them all at once.
         self.oct_handler.add(morton)
 
-    def _detect_fields(self):
+    def _detect_output_fields(self):
         # TODO: Add additional fields
         pfl = []
         for dom in self.data_files:
@@ -131,7 +131,7 @@ class ParticleIndex(Index):
 
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
-        super(ParticleIndex, self)._setup_classes(dd)
+        super(ParticleGeometryHandler, self)._setup_classes(dd)
         self.object_types.sort()
 
     def _identify_base_chunk(self, dobj):

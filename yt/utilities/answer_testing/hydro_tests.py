@@ -16,9 +16,9 @@ Hydro tests
 import matplotlib
 import pylab
 from yt.mods import *
-from output_tests import SingleOutputTest, DatasetTest, create_test
+from output_tests import SingleOutputTest, YTStaticOutputTest, create_test
 
-class TestProjection(DatasetTest):
+class TestProjection(YTStaticOutputTest):
 
     field = None
     axis = None
@@ -56,7 +56,7 @@ class TestProjection(DatasetTest):
         pylab.savefig(fn)
         return [fn]
 
-class TestOffAxisProjection(DatasetTest):
+class TestOffAxisProjection(YTStaticOutputTest):
 
     field = None
     weight_field = None
@@ -84,7 +84,7 @@ class TestOffAxisProjection(DatasetTest):
         write_image(self.result, fn)
         return [fn]
 
-class TestRay(DatasetTest):
+class TestRay(YTStaticOutputTest):
 
     field = None
 
@@ -112,7 +112,7 @@ class TestRay(DatasetTest):
     def plot(self):
         return
 
-class TestSlice(DatasetTest):
+class TestSlice(YTStaticOutputTest):
 
     field = None
     axis = None
@@ -145,7 +145,7 @@ for axis in range(3):
         create_test(TestProjection, "projection_test_%s_%s" % (axis, field),
                     field = field, axis = axis)
 
-class TestGasDistribution(DatasetTest):
+class TestGasDistribution(YTStaticOutputTest):
     field_x = None
     field_y = None
     weight = "CellMassMsun"
@@ -172,7 +172,7 @@ class TestGasDistribution(DatasetTest):
 
 # Now we create all our tests, but we're only going to check the binning
 # against Density for now.
-for field in ["Temperature", "x-velocity"]:
+for field in ["Temperature", "velocity_x"]:
     create_test(TestGasDistribution, "profile_density_test_%s" % field,
                 field_x = "Density", field_y = field)
 

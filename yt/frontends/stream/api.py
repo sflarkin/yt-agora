@@ -16,7 +16,7 @@ API for yt.frontends.stream
 from .data_structures import \
       StreamGrid, \
       StreamHierarchy, \
-      StreamDataset, \
+      StreamStaticOutput, \
       StreamHandler, \
       load_uniform_grid, \
       load_amr_grids, \
@@ -26,9 +26,7 @@ from .data_structures import \
       refine_amr
 
 from .fields import \
-      KnownStreamFields, \
-      StreamFieldInfo, \
-      add_stream_field
+      StreamFieldInfo
 
 from .io import \
       IOHandlerStream

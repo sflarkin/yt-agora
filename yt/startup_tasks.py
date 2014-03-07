@@ -18,10 +18,8 @@ the namespace and getting the last argument on the command line.
 
 import argparse, os, sys
 
-from .config import ytcfg
-from .funcs import *
-from yt.utilities.parallel_tools.parallel_analysis_interface import \
-    enable_parallelism
+from yt.config import ytcfg
+from yt.funcs import *
 
 exe_name = os.path.basename(sys.executable)
 # At import time, we determined whether or not we're being run in parallel.
@@ -49,9 +47,6 @@ def turn_on_parallelism():
             if ytcfg.getboolean("yt","LogFile"):
                 ytcfg["yt","LogFile"] = "False"
                 yt.utilities.logger.disable_file_logging()
-        # Now we have to turn on the parallelism from the perspective of the
-        # parallel_analysis_interface
-        enable_parallelism()
     return parallel_capable
 
 # This fallback is for Paraview:
@@ -65,7 +60,7 @@ try:
     mylog.debug("SIGUSR1 registered for traceback printing")
     signal.signal(signal.SIGUSR2, signal_ipython)
     mylog.debug("SIGUSR2 registered for IPython Insertion")
-except ValueError:  # Not in main thread
+except (ValueError, RuntimeError, AttributeError) as e:  # Not in main thread
     pass
 
 class SetExceptionHandling(argparse.Action):

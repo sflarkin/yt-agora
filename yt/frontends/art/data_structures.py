@@ -23,16 +23,16 @@ import glob
 
 from yt.funcs import *
 from yt.geometry.oct_geometry_handler import \
-    OctreeIndex
+    OctreeGeometryHandler
 from yt.geometry.geometry_handler import \
-    Index, YTDataChunk
-from yt.data_objects.dataset import \
-    Dataset
+    GeometryHandler, YTDataChunk
+from yt.data_objects.static_output import \
+    StaticOutput
 from yt.data_objects.octree_subset import \
     OctreeSubset
 from yt.geometry.oct_container import \
     ARTOctreeContainer
-from yt.data_objects.field_info_container import \
+from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc
 from .fields import \
     ARTFieldInfo, add_art_field, KnownARTFields
@@ -40,9 +40,8 @@ from yt.utilities.definitions import \
     mpc_conversion
 from yt.utilities.io_handler import \
     io_registry
-from yt.utilities.lib import \
+from yt.utilities.lib.misc_utilities import \
     get_box_grids_level
-import yt.utilities.lib as amr_utils
 
 from yt.frontends.art.definitions import *
 from yt.utilities.fortran_utils import *
@@ -56,26 +55,24 @@ from .io import b2t
 from .fields import ARTFieldInfo, KnownARTFields
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
-from yt.utilities.lib import \
-    get_box_grids_level
 from yt.utilities.io_handler import \
     io_registry
-from yt.data_objects.field_info_container import \
+from yt.fields.field_info_container import \
     FieldInfoContainer, NullFunc
 from yt.utilities.physical_constants import \
     mass_hydrogen_cgs, sec_per_Gyr
 
 
-class ARTIndex(OctreeIndex):
-    def __init__(self, pf, dataset_type="art"):
+class ARTGeometryHandler(OctreeGeometryHandler):
+    def __init__(self, pf, data_style="art"):
         self.fluid_field_list = fluid_fields
-        self.dataset_type = dataset_type
+        self.data_style = data_style
         self.parameter_file = weakref.proxy(pf)
         self.hierarchy_filename = self.parameter_file.parameter_filename
         self.directory = os.path.dirname(self.hierarchy_filename)
         self.max_level = pf.max_level
         self.float_type = np.float64
-        super(ARTIndex, self).__init__(pf, dataset_type)
+        super(ARTGeometryHandler, self).__init__(pf, data_style)
 
     def get_smallest_dx(self):
         """
@@ -109,7 +106,7 @@ class ARTIndex(OctreeIndex):
         domain._read_amr_level(self.oct_handler)
         self.oct_handler.finalize()
 
-    def _detect_fields(self):
+    def _detect_output_fields(self):
         self.particle_field_list = particle_fields
         self.field_list = [("gas", f) for f in fluid_fields]
         self.field_list += set(particle_fields + particle_star_fields \
@@ -129,6 +126,11 @@ class ARTIndex(OctreeIndex):
             for pfield in self.particle_field_list:
                 pfn = (ptype, pfield)
                 self.field_list.append(pfn)
+
+    def _setup_classes(self):
+        dd = self._get_data_reader_dict()
+        super(ARTGeometryHandler, self)._setup_classes(dd)
+        self.object_types.sort()
 
     def _identify_base_chunk(self, dobj):
         """
@@ -176,12 +178,12 @@ class ARTIndex(OctreeIndex):
                               cache = cache)
 
 
-class ARTDataset(Dataset):
-    _index_class = ARTIndex
+class ARTStaticOutput(StaticOutput):
+    _hierarchy_class = ARTGeometryHandler
     _fieldinfo_fallback = ARTFieldInfo
     _fieldinfo_known = KnownARTFields
 
-    def __init__(self, filename, dataset_type='art',
+    def __init__(self, filename, data_style='art',
                  fields=None, storage_filename=None,
                  skip_particles=False, skip_stars=False,
                  limit_level=None, spread_age=True,
@@ -205,7 +207,7 @@ class ARTDataset(Dataset):
         self.spread_age = spread_age
         self.domain_left_edge = np.zeros(3, dtype='float')
         self.domain_right_edge = np.zeros(3, dtype='float')+1.0
-        Dataset.__init__(self, filename, dataset_type)
+        StaticOutput.__init__(self, filename, data_style)
         self.storage_filename = storage_filename
 
     def _find_files(self, file_amr):
@@ -406,6 +408,7 @@ class ARTDataset(Dataset):
             self.max_level = self.force_max_level
         self.hubble_time = 1.0/(self.hubble_constant*100/3.08568025e19)
         self.current_time = b2t(self.parameters['t']) * sec_per_Gyr
+        self.gamma = self.parameters["gamma"]
         mylog.info("Max level is %02i", self.max_level)
 
     @classmethod

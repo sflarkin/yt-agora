@@ -20,7 +20,7 @@ from yt.utilities.answer_testing.framework import \
     small_patch_amr, \
     big_patch_amr, \
     data_dir_load
-from yt.frontends.art.api import ARTDataset
+from yt.frontends.art.api import ARTStaticOutput
 
 _fields = ("Density", "particle_mass", ("all", "particle_position_x"))
 

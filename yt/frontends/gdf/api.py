@@ -15,7 +15,7 @@ API for yt.frontends.gdf
 from .data_structures import \
       GDFGrid, \
       GDFHierarchy, \
-      GDFDataset
+      GDFStaticOutput
 
 from .fields import \
       GDFFieldInfo, \
