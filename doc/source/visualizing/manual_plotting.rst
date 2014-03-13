@@ -15,7 +15,7 @@ matplotlib or another python library are easiest, but these methods allow you to
 take your data and plot it in gnuplot, or any unnamed commercial plotting
 packages.
 
-Note that the hierarchy object associated with your snapshot file contains a
+Note that the index object associated with your snapshot file contains a
 list of plots you've made in ``pf.h.plots``.
 
 .. _fixed-resolution-buffers:
@@ -38,14 +38,14 @@ of any data two-dimensional data object:
    from yt.mods import *
    pf = load("IsolatedGalaxy/galaxy0030/galaxy0030")
 
-   c = pf.h.find_max('Density')[1]
-   proj = pf.h.proj(0, 'Density')
+   c = pf.h.find_max('density')[1]
+   proj = pf.proj(0, 'density')
 
    width = 10/pf['kpc'] # we want a 1.5 mpc view
    res = [1000, 1000] # create an image with 1000x1000 pixels
    frb = proj.to_frb(width, res, center=c)
 
-   P.imshow(frb['Density'])
+   P.imshow(frb['density'])
    P.savefig('my_perfect_figure.png')
    
 The FRB is a very small object that can be deleted and recreated quickly (in
@@ -64,24 +64,24 @@ matplotlib can be found in the cookbook.
 Line Plots
 ----------
 
-This is perhaps the simplest thing to do. ``yt`` provides a number of one dimensional objects, and these return a 1-D numpy array of their contents with direct dictionary access. As a simple example, take a :class:`~yt.data_objects.data_containers.AMROrthoRayBase` object, which can be created from a hierarchy by calling ``pf.h.ortho_ray(axis, center)``. 
+This is perhaps the simplest thing to do. ``yt`` provides a number of one dimensional objects, and these return a 1-D numpy array of their contents with direct dictionary access. As a simple example, take a :class:`~yt.data_objects.data_containers.AMROrthoRayBase` object, which can be created from a index by calling ``pf.ortho_ray(axis, center)``. 
 
 .. python-script::
 
    from yt.mods import *
    import pylab as P
    pf = load("IsolatedGalaxy/galaxy0030/galaxy0030")
-   c = pf.h.find_max("Density")[1]
+   c = pf.h.find_max("density")[1]
    ax = 0 # take a line cut along the x axis
-   ray = pf.h.ortho_ray(ax, (c[1], c[2])) # cutting through the y0,z0 such that we hit the max density
+   ray = pf.ortho_ray(ax, (c[1], c[2])) # cutting through the y0,z0 such that we hit the max density
 
    P.subplot(211)
-   P.semilogy(ray['x'], ray['Density'])
-   P.ylabel('Density')
+   P.semilogy(ray['x'], ray['density'])
+   P.ylabel('density')
    P.subplot(212)
-   P.semilogy(ray['x'], ray['Temperature'])
+   P.semilogy(ray['x'], ray['temperature'])
    P.xlabel('x')
-   P.ylabel('Temperature')
+   P.ylabel('temperature')
 
    P.savefig("den_temp_xsweep.png")
 

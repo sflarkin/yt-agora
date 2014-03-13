@@ -18,7 +18,7 @@ The code outlined here is a barebones Sunrise export:
 	from yt.mods import *
 	import numpy as na
 
-	pf = ARTStaticOutput(file_amr)
+	pf = ARTDataset(file_amr)
 	potential_value,center=pf.h.find_min('Potential_New')
 	root_cells = pf.domain_dimensions[0]
 	le = np.floor(root_cells*center) #left edge
@@ -69,7 +69,7 @@ The code snippet below finds the location of every star under 10 Myr and looks u
 
 	for x,a in enumerate(zip(pos,age)): #loop over stars
 	    center = x*pf['kpc']
-	    grid,idx = find_cell(pf.h.grids[0],center)
+	    grid,idx = find_cell(pf.index.grids[0],center)
 	    pk[i] = grid['Pk'][idx]
 
 This code is how Sunrise calculates the pressure, so we can add our own derived field:
@@ -79,10 +79,10 @@ This code is how Sunrise calculates the pressure, so we can add our own derived 
 	def _Pk(field,data):
 	    #calculate pressure over Boltzmann's constant: P/k=(n/V)T
 	    #Local stellar ISM values are ~16500 Kcm^-3
-	    vol = data['CellVolumeCode'].astype('float64')*data.pf['cm']**3.0 #volume in cm
-	    m_g = data["CellMassMsun"]*1.988435e33 #mass of H in g
+	    vol = data['cell_volume'].astype('float64')*data.pf['cm']**3.0 #volume in cm
+	    m_g = data["cell_mass"]*1.988435e33 #mass of H in g
 	    n_g = m_g*5.97e23 #number of H atoms
-	    teff = data["Temperature"]
+	    teff = data["temperature"]
 	    val = (n_g/vol)*teff #should be of order 1e2-1e5
 	    return  val
 	add_field("Pk", function=_Pk,units=r"Kcm^{-3}")
@@ -114,11 +114,11 @@ This snippet locates the cell containing a star and returns the grid and grid id
 Sanity Check: Gas & Stars Line Up
 ---------------------------------
 
-If you add your star particles separately from the gas cell hierarchy, then it is worth checking that they still lined up once they've been loaded into Sunrise. This is fairly easy to do with a useful 'auxiliary' run. In Sunrise, set all of your rays to zero, (nrays_nonscatter, nrays_scatter,nrays_intensity,nrays_ir ) except for nrays_aux, and this will produce an mcrx FITS file with a gas map, a metals map, a temperature*gass_mass map and a stellar map for each camera. As long as you keep some cameras at theta,phi = 0,0 or 90,0, etc., then a standard yt projection down the code's xyz axes should look identical:
+If you add your star particles separately from the gas cell index, then it is worth checking that they still lined up once they've been loaded into Sunrise. This is fairly easy to do with a useful 'auxiliary' run. In Sunrise, set all of your rays to zero, (nrays_nonscatter, nrays_scatter,nrays_intensity,nrays_ir ) except for nrays_aux, and this will produce an mcrx FITS file with a gas map, a metals map, a temperature*gass_mass map and a stellar map for each camera. As long as you keep some cameras at theta,phi = 0,0 or 90,0, etc., then a standard yt projection down the code's xyz axes should look identical:
 
 .. code-block:: python
 
-	pc.add_projection("Density", 0, "Density")  
+	pc.add_projection("density", 0, "density")  
 
 
 Convergence: High Resolution
