@@ -23,11 +23,11 @@ import glob
 
 from yt.funcs import *
 from yt.geometry.oct_geometry_handler import \
-    OctreeGeometryHandler
+    OctreeIndex
 from yt.geometry.geometry_handler import \
-    GeometryHandler, YTDataChunk
+    Index, YTDataChunk
 from yt.data_objects.static_output import \
-    StaticOutput
+    Dataset
 from yt.data_objects.octree_subset import \
     OctreeSubset
 from yt.geometry.oct_container import \
@@ -58,16 +58,16 @@ from yt.utilities.physical_constants import \
     mass_hydrogen_cgs, sec_per_Gyr
 
 
-class ARTGeometryHandler(OctreeGeometryHandler):
-    def __init__(self, pf, data_style="art"):
+class ARTIndex(OctreeIndex):
+    def __init__(self, pf, dataset_type="art"):
         self.fluid_field_list = fluid_fields
-        self.data_style = data_style
+        self.dataset_type = dataset_type
         self.parameter_file = weakref.proxy(pf)
-        self.hierarchy_filename = self.parameter_file.parameter_filename
-        self.directory = os.path.dirname(self.hierarchy_filename)
+        self.index_filename = self.parameter_file.parameter_filename
+        self.directory = os.path.dirname(self.index_filename)
         self.max_level = pf.max_level
         self.float_type = np.float64
-        super(ARTGeometryHandler, self).__init__(pf, data_style)
+        super(ARTIndex, self).__init__(pf, dataset_type)
 
     def get_smallest_dx(self):
         """
@@ -120,11 +120,6 @@ class ARTGeometryHandler(OctreeGeometryHandler):
                 pfn = (ptype, pfield)
                 self.field_list.append(pfn)
 
-    def _setup_classes(self):
-        dd = self._get_data_reader_dict()
-        super(ARTGeometryHandler, self)._setup_classes(dd)
-        self.object_types.sort()
-
     def _identify_base_chunk(self, dobj):
         """
         Take the passed in data source dobj, and use its embedded selector
@@ -171,11 +166,11 @@ class ARTGeometryHandler(OctreeGeometryHandler):
                               cache = cache)
 
 
-class ARTStaticOutput(StaticOutput):
-    _hierarchy_class = ARTGeometryHandler
+class ARTDataset(Dataset):
+    _index_class = ARTIndex
     _field_info_class = ARTFieldInfo
 
-    def __init__(self, filename, data_style='art',
+    def __init__(self, filename, dataset_type='art',
                  fields=None, storage_filename=None,
                  skip_particles=False, skip_stars=False,
                  limit_level=None, spread_age=True,
@@ -199,7 +194,7 @@ class ARTStaticOutput(StaticOutput):
         self.spread_age = spread_age
         self.domain_left_edge = np.zeros(3, dtype='float')
         self.domain_right_edge = np.zeros(3, dtype='float')+1.0
-        StaticOutput.__init__(self, filename, data_style)
+        Dataset.__init__(self, filename, dataset_type)
         self.storage_filename = storage_filename
 
     def _find_files(self, file_amr):
