@@ -16,8 +16,8 @@ API for yt.frontends.art
 from .data_structures import \
       ARTDomainFile,\
       ARTDomainSubset,\
-      ARTGeometryHandler,\
-      ARTStaticOutput
+      ARTIndex,\
+      ARTDataset
 
 from .fields import \
       ARTFieldInfo

@@ -29,7 +29,7 @@ from yt.utilities.physical_constants import sec_per_year
 
 
 class IOHandlerART(BaseIOHandler):
-    _data_style = "art"
+    _dataset_type = "art"
     tb, ages = None, None
     cache = None
     masks = None
@@ -198,7 +198,6 @@ def interpolate_ages(data, file_stars, interp_tb=None, interp_ages=None,
     return interp_tb, interp_ages, temp
 
 
-
 def _read_art_level_info(f, level_oct_offsets, level, coarse_grid=128,
                          ncell0=None, root_level=None):
     pos = f.tell()
@@ -208,7 +207,7 @@ def _read_art_level_info(f, level_oct_offsets, level, coarse_grid=128,
 
     # fortran indices start at 1
 
-    # Skip all the oct hierarchy data
+    # Skip all the oct index data
     le = np.zeros((nLevel, 3), dtype='int64')
     fl = np.ones((nLevel, 6), dtype='int64')
     iocts = np.zeros(nLevel+1, dtype='int64')

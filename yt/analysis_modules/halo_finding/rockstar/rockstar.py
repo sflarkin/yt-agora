@@ -15,7 +15,7 @@ Operations to get Rockstar loaded up
 
 from yt.config import ytcfg
 from yt.data_objects.time_series import \
-     TimeSeriesData
+     DatasetSeries
 from yt.funcs import \
      is_root
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
@@ -117,11 +117,11 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
 
     Parameters
     ----------
-    ts   : TimeSeriesData, StaticOutput
+    ts   : DatasetSeries, Dataset
         This is the data source containing the DM particles. Because 
         halo IDs may change from one snapshot to the next, the only
         way to keep a consistent halo ID across time is to feed 
-        Rockstar a set of snapshots, ie, via TimeSeriesData.
+        Rockstar a set of snapshots, ie, via DatasetSeries.
     num_readers: int
         The number of reader can be increased from the default
         of 1 in the event that a single snapshot is split among
@@ -146,7 +146,7 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
         the width of the smallest grid element in the simulation from the
         last data snapshot (i.e. the one where time has evolved the
         longest) in the time series:
-        ``pf_last.h.get_smallest_dx().in_units("Mpc/h")``.
+        ``pf_last.index.get_smallest_dx().in_units("Mpc/h")``.
     total_particles : int
         If supplied, this is a pre-calculated total number of particles present
         in the simulation. For example, this is useful when analyzing a series
@@ -215,15 +215,15 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
         # Note that Rockstar does not support subvolumes.
         # We assume that all of the snapshots in the time series
         # use the same domain info as the first snapshots.
-        if not isinstance(ts, TimeSeriesData):
-            ts = TimeSeriesData([ts])
+        if not isinstance(ts, DatasetSeries):
+            ts = DatasetSeries([ts])
         self.ts = ts
         self.particle_type = particle_type
         self.outbase = outbase
         if force_res is None:
             tpf = ts[-1] # Cache a reference
-            self.force_res = tpf.h.get_smallest_dx().in_units("Mpc/h")
-            # We have to delete now to wipe the hierarchy
+            self.force_res = tpf.index.get_smallest_dx().in_units("Mpc/h")
+            # We have to delete now to wipe the index
             del tpf
         else:
             self.force_res = force_res
@@ -248,7 +248,7 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
 
         dd = tpf.h.all_data()
         # Get DM particle mass.
-        all_fields = set(tpf.h.derived_field_list + tpf.h.field_list)
+        all_fields = set(tpf.derived_field_list + tpf.field_list)
         has_particle_type = ("particle_type" in all_fields)
 
         particle_mass = self.particle_mass
