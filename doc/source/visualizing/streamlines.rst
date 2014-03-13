@@ -63,7 +63,7 @@ Example Script
     pos_dx = np.random.random((N,3))*scale-scale/2.
     pos = c+pos_dx
     
-    streamlines = Streamlines(pf,pos,'x-velocity', 'y-velocity', 'z-velocity', length=1.0) 
+    streamlines = Streamlines(pf,pos,'velocity_x', 'velocity_y', 'velocity_z', length=1.0) 
     streamlines.integrate_through_volume()
     
     import matplotlib.pylab as pl
@@ -101,7 +101,7 @@ Example Script
     streamlines = Streamlines(pf, [0.5]*3) 
     streamlines.integrate_through_volume()
     stream = streamlines.path(0)
-    matplotlib.pylab.semilogy(stream['t'], stream['Density'], '-x')
+    matplotlib.pylab.semilogy(stream['t'], stream['density'], '-x')
 
 
 Running in Parallel

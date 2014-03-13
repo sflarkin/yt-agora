@@ -48,7 +48,7 @@ def _get_h5_handle(fn):
     return f
 
 class IOHandlerOWLS(BaseIOHandler):
-    _data_style = "OWLS"
+    _dataset_type = "OWLS"
     _vector_fields = ("Coordinates", "Velocity", "Velocities")
     _known_ptypes = ghdf5_ptypes
     _var_mass = None
@@ -165,12 +165,12 @@ class IOHandlerOWLS(BaseIOHandler):
         return fields, {}
 
 class IOHandlerGadgetHDF5(IOHandlerOWLS):
-    _data_style = "gadget_hdf5"
+    _dataset_type = "gadget_hdf5"
 
 ZeroMass = object()
 
 class IOHandlerGadgetBinary(BaseIOHandler):
-    _data_style = "gadget_binary"
+    _dataset_type = "gadget_binary"
     _vector_fields = ("Coordinates", "Velocity", "Velocities")
 
     # Particle types (Table 3 in GADGET-2 user guide)
@@ -348,7 +348,7 @@ class IOHandlerGadgetBinary(BaseIOHandler):
         return field_list, {}
 
 class IOHandlerTipsyBinary(BaseIOHandler):
-    _data_style = "tipsy"
+    _dataset_type = "tipsy"
     _vector_fields = ("Coordinates", "Velocity", "Velocities")
 
     _pdtypes = None # dtypes, to be filled in later
@@ -421,7 +421,7 @@ class IOHandlerTipsyBinary(BaseIOHandler):
                 if tp[ptype] == 0: continue
                 f.seek(poff[ptype], os.SEEK_SET)
                 p = np.fromfile(f, self._pdtypes[ptype], count=tp[ptype])
-                d = [p['Coordinates'][ax].astype("float64") for ax in 'xyz']
+                d = [p["Coordinates"][ax].astype("float64") for ax in 'xyz']
                 del p
                 yield ptype, d
 
@@ -439,9 +439,9 @@ class IOHandlerTipsyBinary(BaseIOHandler):
                 f.seek(poff[ptype], os.SEEK_SET)
                 p = np.fromfile(f, self._pdtypes[ptype], count=tp[ptype])
                 mask = selector.select_points(
-                    p['Coordinates']['x'].astype("float64"),
-                    p['Coordinates']['y'].astype("float64"),
-                    p['Coordinates']['z'].astype("float64"))
+                    p["Coordinates"]['x'].astype("float64"),
+                    p["Coordinates"]['y'].astype("float64"),
+                    p["Coordinates"]['z'].astype("float64"))
                 if mask is None: continue
                 tf = self._fill_fields(field_list, p, mask)
                 for field in field_list:
@@ -540,7 +540,7 @@ class IOHandlerTipsyBinary(BaseIOHandler):
         return field_offsets
 
 class IOHandlerHTTPStream(BaseIOHandler):
-    _data_style = "http_particle_stream"
+    _dataset_type = "http_particle_stream"
     _vector_fields = ("Coordinates", "Velocity", "Velocities")
     
     def __init__(self, pf):

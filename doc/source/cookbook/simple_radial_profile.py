@@ -4,11 +4,11 @@ from yt.mods import *
 pf = load("IsolatedGalaxy/galaxy0030/galaxy0030")
 
 # Create a sphere of radius 100 kpc in the center of the box.
-my_sphere = pf.h.sphere("c", (100.0, "kpc"))
+my_sphere = pf.sphere("c", (100.0, "kpc"))
 
 # Create a profile of the average density vs. radius.
-plot = ProfilePlot(my_sphere, "Radiuskpc", "Density",
-                   weight_field="CellMassMsun")
+plot = ProfilePlot(my_sphere, "Radiuskpc", "density",
+                   weight_field="cell_mass")
 
 # Save the image.
 # Optionally, give a string as an argument

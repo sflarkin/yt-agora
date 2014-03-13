@@ -16,9 +16,9 @@ pf = load(fn) # load data
 #   bw is the base-width in inches, but 4 is about right for most cases.
 fig, axes, colorbars = get_multi_plot(3, 2, colorbar=orient, bw = 4)
 
-slc = pf.h.slice(2, 0.0, fields=["Density","Temperature","VelocityMagnitude"], 
+slc = pf.slice(2, 0.0, fields=["density","temperature","velocity_magnitude"], 
                  center=pf.domain_center)
-proj = pf.h.proj(2, "Density", weight_field="Density", center=pf.domain_center)
+proj = pf.proj(2, "density", weight_field="density", center=pf.domain_center)
 
 slc_frb = slc.to_frb((1.0, "mpc"), 512)
 proj_frb = proj.to_frb((1.0, "mpc"), 512)
@@ -36,12 +36,12 @@ for dax, tax, vax in zip(dens_axes, temp_axes, vels_axes) :
     vax.xaxis.set_visible(False)
     vax.yaxis.set_visible(False)
 
-plots = [dens_axes[0].imshow(slc_frb["Density"], origin='lower', norm=LogNorm()),
-         dens_axes[1].imshow(proj_frb["Density"], origin='lower', norm=LogNorm()),
-         temp_axes[0].imshow(slc_frb["Temperature"], origin='lower'),    
-         temp_axes[1].imshow(proj_frb["Temperature"], origin='lower'),
-         vels_axes[0].imshow(slc_frb["VelocityMagnitude"], origin='lower', norm=LogNorm()),
-         vels_axes[1].imshow(proj_frb["VelocityMagnitude"], origin='lower', norm=LogNorm())]
+plots = [dens_axes[0].imshow(slc_frb["density"], origin='lower', norm=LogNorm()),
+         dens_axes[1].imshow(proj_frb["density"], origin='lower', norm=LogNorm()),
+         temp_axes[0].imshow(slc_frb["temperature"], origin='lower'),    
+         temp_axes[1].imshow(proj_frb["temperature"], origin='lower'),
+         vels_axes[0].imshow(slc_frb["velocity_magnitude"], origin='lower', norm=LogNorm()),
+         vels_axes[1].imshow(proj_frb["velocity_magnitude"], origin='lower', norm=LogNorm())]
          
 plots[0].set_clim((1.0e-27,1.0e-25))
 plots[0].set_cmap("bds_highcontrast")
@@ -57,7 +57,7 @@ plots[5].set_clim((1e6, 1e8))
 plots[5].set_cmap("gist_rainbow")
 
 titles=[r'$\mathrm{Density}\ (\mathrm{g\ cm^{-3}})$', 
-        r'$\mathrm{Temperature}\ (\mathrm{K})$',
+        r'$\mathrm{temperature}\ (\mathrm{K})$',
         r'$\mathrm{VelocityMagnitude}\ (\mathrm{cm\ s^{-1}})$']
 
 for p, cax, t in zip(plots[0:6:2], colorbars, titles):

@@ -3,7 +3,7 @@ from yt.mods import * # set up our namespace
 # Follow the simple_volume_rendering cookbook for the first part of this.
 pf = load("IsolatedGalaxy/galaxy0030/galaxy0030") # load data
 dd = pf.h.all_data()
-mi, ma = dd.quantities["Extrema"]("Density")[0]
+mi, ma = dd.quantities["Extrema"]("density")[0]
 
 # Set up transfer function
 tf = ColorTransferFunction((np.log10(mi), np.log10(ma)))
@@ -19,7 +19,7 @@ Nvec = 512 # Pixels on a side
 north_vector = [0.,0.,1.]
 
 # Find the maximum density location, store it in max_c
-v,max_c = pf.h.find_max('Density')
+v,max_c = pf.h.find_max('density')
 
 # Initialize the Camera
 cam = pf.h.camera(c, L, W, (Nvec,Nvec), tf, north_vector=north_vector)
