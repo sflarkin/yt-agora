@@ -40,6 +40,8 @@ class CallbackWrapper(object):
             self._type_name = "CuttingPlane"
         else:
             self._type_name = viewer._plot_type
+
+
 class PlotMPL(object):
     """A base class for all yt plots made using matplotlib.
 
@@ -89,7 +91,7 @@ class ImagePlotMPL(PlotMPL):
     """
     def __init__(self, fsize, axrect, caxrect, zlim, figure, axes, cax):
         """Initialize ImagePlotMPL class object"""
-        PlotMPL.__init__(self, fsize, axrect, figure, axes)
+        super(ImagePlotMPL, self).__init__(fsize, axrect, figure, axes)
         self.zmin, self.zmax = zlim
         if cax is None:
             self.cax = self.figure.add_axes(caxrect)
