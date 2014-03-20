@@ -16,6 +16,8 @@ native.
 #-----------------------------------------------------------------------------
 
 import numpy as np
+import types
+from numbers import Number as numeric_type
 
 from yt.funcs import mylog, only_on_root
 from yt.units.unit_object import Unit
@@ -56,6 +58,7 @@ class FieldInfoContainer(dict):
         # Now we start setting things up.
         self.field_list = field_list
         self.slice_info = slice_info
+        self.field_aliases = {}
         self.setup_fluid_aliases()
 
     def setup_fluid_fields(self):
@@ -71,7 +74,8 @@ class FieldInfoContainer(dict):
                 self.alias((ptype, alias), (ptype, f))
 
         # We'll either have particle_position or particle_position_[xyz]
-        if (ptype, "particle_position") in self.field_list:
+        if (ptype, "particle_position") in self.field_list or \
+           (ptype, "particle_position") in self.field_aliases:
             particle_scalar_functions(ptype,
                    "particle_position", "particle_velocity",
                    self)
@@ -104,6 +108,19 @@ class FieldInfoContainer(dict):
             args = known_other_fields.get(
                 field[1], ("", [], None))
             units, aliases, display_name = args
+            # We allow field_units to override this.  First we check if the
+            # field *name* is in there, then the field *tuple*.
+            units = self.pf.field_units.get(field[1], units)
+            units = self.pf.field_units.get(field, units)
+            if not isinstance(units, types.StringTypes) and args[0] != "":
+                units = "((%s)*%s)" % (args[0], units)
+            if isinstance(units, (numeric_type, np.number, np.ndarray)) and \
+                args[0] == "" and units != 1.0:
+                mylog.warning("Cannot interpret units: %s * %s, " +
+                              "setting to dimensionless.", units, args[0])
+                units = ""
+            elif units == 1.0:
+                units = ""
             self.add_output_field(field, units = units,
                                   display_name = display_name)
             for alias in aliases:
@@ -158,6 +175,7 @@ class FieldInfoContainer(dict):
             u = Unit(self[original_name].units,
                       registry = self.pf.unit_registry)
             units = str(u.get_cgs_equivalent())
+        self.field_aliases[alias_name] = original_name
         self.add_field(alias_name,
             function = TranslationFunc(original_name),
             particle_type = self[original_name].particle_type,
