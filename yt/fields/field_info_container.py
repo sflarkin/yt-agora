@@ -16,6 +16,8 @@ native.
 #-----------------------------------------------------------------------------
 
 import numpy as np
+import types
+from numbers import Number as numeric_type
 
 from yt.funcs import mylog, only_on_root
 from yt.units.unit_object import Unit
@@ -37,7 +39,8 @@ from .particle_fields import \
     particle_deposition_functions, \
     particle_vector_functions, \
     particle_scalar_functions, \
-    standard_particle_fields
+    standard_particle_fields, \
+    add_volume_weighted_smoothed_field
 
 class FieldInfoContainer(dict):
     """
@@ -56,6 +59,7 @@ class FieldInfoContainer(dict):
         # Now we start setting things up.
         self.field_list = field_list
         self.slice_info = slice_info
+        self.field_aliases = {}
         self.setup_fluid_aliases()
 
     def setup_fluid_fields(self):
@@ -71,7 +75,8 @@ class FieldInfoContainer(dict):
                 self.alias((ptype, alias), (ptype, f))
 
         # We'll either have particle_position or particle_position_[xyz]
-        if (ptype, "particle_position") in self.field_list:
+        if (ptype, "particle_position") in self.field_list or \
+           (ptype, "particle_position") in self.field_aliases:
             particle_scalar_functions(ptype,
                    "particle_position", "particle_velocity",
                    self)
@@ -93,6 +98,26 @@ class FieldInfoContainer(dict):
             self.add_output_field(field, 
                                   units = self.pf.field_units.get(field, ""),
                                   particle_type = True)
+        self.setup_smoothed_fields(ptype)
+
+    def setup_smoothed_fields(self, ptype, num_neighbors = 64, ftype = "gas"):
+        # We can in principle compute this, but it is not yet implemented.
+        if (ptype, "density") not in self:
+            return
+        if (ptype, "smoothing_length") in self:
+            sml_name = "smoothing_length"
+        else:
+            sml_name = None
+        new_aliases = []
+        for _, alias_name in self.field_aliases:
+            fn = add_volume_weighted_smoothed_field(ptype,
+                "particle_position", "particle_mass",
+                sml_name, "density", alias_name, self,
+                num_neighbors)
+            new_aliases.append(((ftype, alias_name), fn[0]))
+        for alias, source in new_aliases:
+            #print "Aliasing %s => %s" % (alias, source)
+            self.alias(alias, source)
 
     def setup_fluid_aliases(self):
         known_other_fields = dict(self.known_other_fields)
@@ -104,6 +129,19 @@ class FieldInfoContainer(dict):
             args = known_other_fields.get(
                 field[1], ("", [], None))
             units, aliases, display_name = args
+            # We allow field_units to override this.  First we check if the
+            # field *name* is in there, then the field *tuple*.
+            units = self.pf.field_units.get(field[1], units)
+            units = self.pf.field_units.get(field, units)
+            if not isinstance(units, types.StringTypes) and args[0] != "":
+                units = "((%s)*%s)" % (args[0], units)
+            if isinstance(units, (numeric_type, np.number, np.ndarray)) and \
+                args[0] == "" and units != 1.0:
+                mylog.warning("Cannot interpret units: %s * %s, " +
+                              "setting to dimensionless.", units, args[0])
+                units = ""
+            elif units == 1.0:
+                units = ""
             self.add_output_field(field, units = units,
                                   display_name = display_name)
             for alias in aliases:
@@ -158,6 +196,7 @@ class FieldInfoContainer(dict):
             u = Unit(self[original_name].units,
                       registry = self.pf.unit_registry)
             units = str(u.get_cgs_equivalent())
+        self.field_aliases[alias_name] = original_name
         self.add_field(alias_name,
             function = TranslationFunc(original_name),
             particle_type = self[original_name].particle_type,
