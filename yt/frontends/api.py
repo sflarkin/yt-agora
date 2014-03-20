@@ -24,7 +24,7 @@ _frontends = [
     'enzo',
     'fits',
     'flash',
-    #'gdf',
+    'gdf',
     'halo_catalogs',
     'moab',
     #'pluto',
