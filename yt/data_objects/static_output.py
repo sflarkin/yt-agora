@@ -81,6 +81,20 @@ class IndexProxy(object):
             return getattr(self.ds.index, name)
         raise AttributeError
 
+def requires_index(attr_name):
+    @property
+    def ireq(self):
+        self.index
+        # By now it should have been set
+        attr = self.__dict__[attr_name]
+        return attr
+
+    @ireq.setter
+    def ireq(self, value):
+        self.__dict__[attr_name] = value
+
+    return ireq
+
 class Dataset(object):
 
     default_fluid_type = "gas"
@@ -95,6 +109,7 @@ class Dataset(object):
     known_filters = None
     _index_class = None
     field_units = None
+    derived_field_list = requires_index("derived_field_list")
 
     class __metaclass__(type):
         def __init__(cls, name, b, d):
@@ -363,6 +378,8 @@ class Dataset(object):
         rv = self.field_info.find_dependencies(new_fields)
 
     def add_particle_filter(self, filter):
+        # This requires an index
+        self.index
         # This is a dummy, which we set up to enable passthrough of "all"
         # concatenation fields.
         n = getattr(filter, "name", filter)
