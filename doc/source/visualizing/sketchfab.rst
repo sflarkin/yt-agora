@@ -35,15 +35,15 @@ value.  For example:
 
    from yt.mods import *
    pf = load("/data/workshop2012/IsolatedGalaxy/galaxy0030/galaxy0030")
-   sphere = pf.h.sphere("max", (1.0, "mpc"))
-   surface = pf.h.surface(sphere, "Density", 1e-27)
+   sphere = pf.sphere("max", (1.0, "mpc"))
+   surface = pf.surface(sphere, "density", 1e-27)
 
 This object, ``surface``, can now be queried for values on the surface.  For
 instance:
 
 .. code-block:: python
 
-   print surface["Temperature"].min(), surface["Temperature"].max()
+   print surface["temperature"].min(), surface["temperature"].max()
 
 will return the values 11850.7476943 and 13641.0663899.  These values are
 interpolated to the face centers of every triangle that constitutes a portion
@@ -94,19 +94,19 @@ Now you can run a script like this:
 
    from yt.mods import *
    pf = load("redshift0058")
-   dd = pf.h.sphere("max", (200, "kpc"))
+   dd = pf.sphere("max", (200, "kpc"))
    rho = 5e-27
 
    bounds = [(dd.center[i] - 100.0/pf['kpc'],
               dd.center[i] + 100.0/pf['kpc']) for i in range(3)]
 
-   surf = pf.h.surface(dd, "Density", rho)
+   surf = pf.surface(dd, "density", rho)
 
    upload_id = surf.export_sketchfab(
        title = "RD0058 - 5e-27",
        description = "Extraction of Density (colored by Temperature) at 5e-27 " \
                    + "g/cc from a galaxy formation simulation by Ryan Joung."
-       color_field = "Temperature",
+       color_field = "temperature",
        color_map = "hot",
        color_log = True,
        bounds = bounds
@@ -151,10 +151,10 @@ galaxy simulation:
    trans = [1.0, 0.5]
    filename = './surfaces'
 
-   sphere = pf.h.sphere("max", (1.0, "mpc"))
+   sphere = pf.sphere("max", (1.0, "mpc"))
    for i,r in enumerate(rho):
-       surf = pf.h.surface(sphere, 'Density', r)
-       surf.export_obj(filename, transparency = trans[i], color_field='Temperature', plot_index = i)
+       surf = pf.surface(sphere, 'density', r)
+       surf.export_obj(filename, transparency = trans[i], color_field='temperature', plot_index = i)
 
 The calling sequence is fairly similar to the ``export_ply`` function
 `previously used <http://blog.yt-project.org/post/3DSurfacesAndSketchFab.html>`_
@@ -224,14 +224,14 @@ to output one more type of variable on your surfaces.  For example:
    filename = './surfaces'
 
    def _Emissivity(field, data):
-       return (data['Density']*data['Density']*np.sqrt(data['Temperature']))
+       return (data['density']*data['density']*np.sqrt(data['temperature']))
    add_field("Emissivity", function=_Emissivity, units=r"\rm{g K}/\rm{cm}^{6}")
 
-   sphere = pf.h.sphere("max", (1.0, "mpc"))
+   sphere = pf.sphere("max", (1.0, "mpc"))
    for i,r in enumerate(rho):
-       surf = pf.h.surface(sphere, 'Density', r)
+       surf = pf.surface(sphere, 'density', r)
        surf.export_obj(filename, transparency = trans[i],
-                       color_field='Temperature', emit_field = 'Emissivity',
+                       color_field='temperature', emit_field = 'Emissivity',
 		       plot_index = i)
 
 will output the same OBJ and MTL as in our previous example, but it will scale

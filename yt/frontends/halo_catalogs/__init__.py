@@ -1,5 +1,5 @@
 """
-API for yt.frontends.gadget
+API for halo catalog frontends.
 
 
 

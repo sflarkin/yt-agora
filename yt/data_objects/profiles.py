@@ -54,8 +54,8 @@ class BinnedProfile(ParallelAnalysisInterface):
         self.field_data = YTFieldData()
 
     @property
-    def hierarchy(self):
-        return self.pf.hierarchy
+    def index(self):
+        return self.pf.index
 
     def _get_dependencies(self, fields):
         return ParallelAnalysisInterface._get_dependencies(
@@ -715,7 +715,7 @@ class BinnedProfile3D(BinnedProfile):
     def store_profile(self, name, force=False):
         """
         By identifying the profile with a fixed, user-input *name* we can
-        store it in the serialized data section of the hierarchy file.  *force*
+        store it in the serialized data section of the index file.  *force*
         governs whether or not an existing profile with that name will be
         overwritten.
         """
@@ -740,7 +740,7 @@ class BinnedProfile3D(BinnedProfile):
             order.append(field)
             values.append(self[field].ravel())
         values = np.array(values).transpose()
-        self._data_source.hierarchy.save_data(values, "/Profiles", name,
+        self._data_source.index.save_data(values, "/Profiles", name,
                                               set_attr, force=force)
 
 class ProfileFieldAccumulator(object):
@@ -793,9 +793,12 @@ class ProfileND(ParallelAnalysisInterface):
         # We use our main comm here
         # This also will fill _field_data
         # FIXME: Add parallelism and combining std stuff
+        blank = ~temp_storage.used
+        self.used = temp_storage.used
         if self.weight_field is not None:
             temp_storage.values /= temp_storage.weight_values[...,None]
-        blank = ~temp_storage.used
+            self.weight = temp_storage.weight_values[...,None]
+            self.weight[blank] = 0.0
         self.field_map = {}
         for i, field in enumerate(fields):
             self.field_data[field] = array_like_field(self.data_source, temp_storage.values[...,i], field)
@@ -867,7 +870,6 @@ class Profile1D(ProfileND):
         self.x_bins = array_like_field(data_source,
                                        self._get_bins(x_min, x_max, x_n, x_log),
                                        self.x_field)
-
         self.size = (self.x_bins.size - 1,)
         self.bin_fields = (self.x_field,)
         self.x = 0.5*(self.x_bins[1:]+self.x_bins[:-1])

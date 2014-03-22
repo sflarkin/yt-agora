@@ -6,7 +6,7 @@ fn = "Enzo_64/RD0006/RedshiftOutput0006" # parameter file to load
 
 
 pf = load(fn) # load data
-v, c = pf.h.find_max("Density")
+v, c = pf.h.find_max("density")
 
 # set up our Fixed Resolution Buffer parameters: a width, resolution, and center
 width = (1.0, 'unitary')
@@ -28,7 +28,7 @@ fig, axes, colorbars = get_multi_plot( 2, 3, colorbar=orient, bw = 6)
 # over the columns, which will become axes of slicing.
 plots = []
 for ax in range(3):
-    sli = pf.h.slice(ax, c[ax])
+    sli = pf.slice(ax, c[ax])
     frb = sli.to_frb(width, res)
     den_axis = axes[ax][0]
     temp_axis = axes[ax][1]
@@ -39,11 +39,11 @@ for ax in range(3):
         ax.xaxis.set_visible(False)
         ax.yaxis.set_visible(False)
 
-    plots.append(den_axis.imshow(frb['Density'], norm=LogNorm()))
+    plots.append(den_axis.imshow(frb['density'], norm=LogNorm()))
     plots[-1].set_clim((5e-32, 1e-29))
     plots[-1].set_cmap("bds_highcontrast")
 
-    plots.append(temp_axis.imshow(frb['Temperature'], norm=LogNorm()))
+    plots.append(temp_axis.imshow(frb['temperature'], norm=LogNorm()))
     plots[-1].set_clim((1e3, 1e8))
     plots[-1].set_cmap("hot")
     
@@ -51,7 +51,7 @@ for ax in range(3):
 # the zip command creates triples from each element of the three lists
 # .  Note that it cuts off after the shortest iterator is exhausted,
 # in this case, titles.
-titles=[r'$\mathrm{Density}\ (\mathrm{g\ cm^{-3}})$', r'$\mathrm{Temperature}\ (\mathrm{K})$']
+titles=[r'$\mathrm{Density}\ (\mathrm{g\ cm^{-3}})$', r'$\mathrm{temperature}\ (\mathrm{K})$']
 for p, cax, t in zip(plots, colorbars,titles):
     # Now we make a colorbar, using the 'image' we stored in plots
     # above. note this is what is *returned* by the imshow method of

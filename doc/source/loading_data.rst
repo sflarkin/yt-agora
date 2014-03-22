@@ -20,7 +20,7 @@ contains no extension.  For instance, if you have the following files:
 
    DD0010/
    DD0010/data0010
-   DD0010/data0010.hierarchy
+   DD0010/data0010.index
    DD0010/data0010.cpu0000
    DD0010/data0010.cpu0001
    DD0010/data0010.cpu0002
@@ -41,7 +41,8 @@ mentioned.
   will notify you if it cannot determine the units, although this
   notification will be passive.
 * 2D and 1D data are supported, but the extraneous dimensions are set to be
-  of length 1.0
+  of length 1.0 in "code length" which may produce strange results for volume
+  quantities.
 
 .. _loading-orion-data:
 
@@ -80,10 +81,6 @@ You would feed it the filename ``pltgmlcs5600``:
    from yt.mods import *
    pf = load("pltgmlcs5600")
 
-.. rubric:: Caveats
-
-* There are no major caveats for Orion usage
-
 .. _loading-flash-data:
 
 FLASH Data
@@ -92,9 +89,9 @@ FLASH Data
 FLASH HDF5 data is *mostly* supported and cared for by John ZuHone.  To load a
 FLASH dataset, you can use the ``load`` command provided by ``yt.mods`` and
 supply to it the file name of a plot file or checkpoint file, but particle
-files are not currently directly loadable by themselves, due to the
-fact that they typically lack grid information. For instance, if you were in a directory with
-the following files:
+files are not currently directly loadable by themselves, due to the fact that
+they typically lack grid information. For instance, if you were in a directory
+with the following files:
 
 .. code-block:: none
 
@@ -119,22 +116,18 @@ consistent with the grid structure of the latter), its data may be loaded with t
 
 .. rubric:: Caveats
 
-* Please be careful that the units are correctly utilized; yt assumes cgs
-* Velocities and length units will be scaled to comoving coordinates if yt is
-  able to discern you are examining a cosmology simulation; particle and grid
-  positions will not be.
-* Domains may be visualized assuming periodicity.
+* Please be careful that the units are correctly utilized; yt assumes cgs.
 
 .. _loading-ramses-data:
 
 RAMSES Data
 -----------
 
-RAMSES data enjoys preliminary support and is cared for by Matthew Turk.  If
-you are interested in taking a development or stewardship role, please contact
-him.  To load a RAMSES dataset, you can use the ``load`` command provided by
-``yt.mods`` and supply to it the ``info*.txt`` filename.  For instance, if you
-were in a directory with the following files:
+In yt-3.0, RAMSES data is fully supported.  If you are interested in taking a
+development or stewardship role, please contact the yt-dev mailing list.  To
+load a RAMSES dataset, you can use the ``load`` command provided by ``yt.mods``
+and supply to it the ``info*.txt`` filename.  For instance, if you were in a
+directory with the following files:
 
 .. code-block:: none
 
@@ -152,36 +145,305 @@ You would feed it the filename ``output_00007/info_00007.txt``:
    from yt.mods import *
    pf = load("output_00007/info_00007.txt")
 
-.. rubric:: Caveats
+yt will attempt to guess the fields in the file.  You may also specify a list
+of fields by supplying the ``fields`` keyword in your call to ``load``.
 
-* Please be careful that the units are correctly set!  This may not be the
-  case for RAMSES data
-* Upon instantiation of the hierarchy, yt will attempt to regrid the entire
-  domain to ensure minimum-coverage from a set of grid patches.  (This is
-  described in the yt method paper.)  This is a time-consuming process and it
-  has not yet been written to be stored between calls.
-* Particles are not supported
-* Parallelism will not be terribly efficient for large datasets
-* There may be occasional segfaults on multi-domain data, which do not
-  reflect errors in the calculation
+.. _loading-gadget-data:
 
-If you are interested in helping with RAMSES support, we are eager to hear from
-you!
+Gadget Data
+-----------
+
+yt has support for reading Gadget data in both raw binary and HDF5 formats.  It
+is able to access the particles as it would any other particle dataset, and it
+can apply smoothing kernels to the data to produce both quantitative analysis
+and visualization.
+
+Gadget data in HDF5 format can be loaded with the ``load`` command:
+
+.. code-block:: python
+
+   from yt.mods import *
+   pf = load("snapshot_061.hdf5")
+
+However, yt cannot detect raw-binary Gadget data, and so you must specify the
+format as being Gadget:
+
+.. code-block:: python
+
+   from yt.mods import *
+   pf = GadgetDataset("snapshot_061")
+
+.. _particle-bbox:
+
+Units and Bounding Boxes
+++++++++++++++++++++++++
+
+There are two additional pieces of information that may be needed.  If your
+simulation is cosmological, yt can often guess the bounding box and the units
+of the simulation.  However, for isolated simulations and for cosmological
+simulations with non-standard units, these must be supplied.  For example, if
+a length unit of 1.0 corresponds to a kiloparsec, you can supply this in the
+constructor.  yt can accept units such as ``Mpc``, ``kpc``, ``cm``, ``Mpccm/h``
+and so on.  In particular, note that ``Mpc/h`` and ``Mpccm/h`` (``cm`` for
+comoving here) are usable unit definitions.
+
+yt will attempt to use units for ``mass``, ``length`` and ``time`` as supplied
+in the argument ``unit_base``.  The ``bounding_box`` argument is a list of
+two-item tuples or lists that describe the left and right extents of the
+particles.
+
+.. code-block:: python
+
+   pf = GadgetDataset("snap_004",
+           unit_base = {'length': ('kpc', 1.0)},
+           bounding_box = [[-600.0, 600.0], [-600.0, 600.0], [-600.0, 600.0]])
+
+.. _particle-indexing-criteria:
+
+Indexing Criteria
++++++++++++++++++
+
+yt generates a global mesh index via octree that governs the resolution of
+volume elements.  This is governed by two parameters, ``n_ref`` and
+``over_refine_factor``.  They are weak proxies for each other.  The first,
+``n_ref``, governs how many particles in an oct results in that oct being
+refined into eight child octs.  Lower values mean higher resolution; the
+default is 64.  The secon parameter, ``over_refine_factor``, governs how many
+cells are in a given oct; the default value of 1 corresponds to 8 cells.
+The number of cells in an oct is defined by the expression
+``2**(3*over_refine_factor)``.
+
+It's recommended that if you want higher-resolution, try reducing the value of
+``n_ref`` to 32 or 16.
+
+.. _gadget-field-spec:
+
+Field Specifications
+++++++++++++++++++++
+
+Binary Gadget outputs often have additional fields or particle types that are
+non-standard from the default Gadget distribution format.  These can be
+specified in the call to ``GadgetDataset`` by either supplying one of the
+sets of field specifications as a string or by supplying a field specification
+itself.  As an example, yt has built-in definitions for ``default`` (the
+default) and ``agora_unlv``.  Field specifications must be tuples, and must be
+of this format:
+
+.. code-block:: python
+
+   default = ( "Coordinates",
+               "Velocities",
+               "ParticleIDs",
+               "Mass",
+               ("InternalEnergy", "Gas"),
+               ("Density", "Gas"),
+               ("SmoothingLength", "Gas"),
+   )
+
+This is the default specification used by the Gadget frontend.  It means that
+the fields are, in order, Coordinates, Velocities, ParticleIDs, Mass, and the
+fields InternalEnergy, Density and SmoothingLength *only* for Gas particles.
+So for example, if you have defined a Metallicity field for the particle type
+Halo, which comes right after ParticleIDs in the file, you could define it like
+this:
+
+.. code-block:: python
+
+   my_field_def = ( "Coordinates",
+               "Velocities",
+               "ParticleIDs",
+               ("Metallicity", "Halo"),
+               "Mass",
+               ("InternalEnergy", "Gas"),
+               ("Density", "Gas"),
+               ("SmoothingLength", "Gas"),
+   )
+
+To save time, you can utilize the plugins file for yt and use it to add items
+to the dictionary where these definitions are stored.  You could do this like
+so:
+
+.. code-block:: python
+
+   from yt.frontends.sph.definitions import gadget_field_specs
+   gadget_field_specs["my_field_def"] = my_field_def
+
+Please also feel free to issue a pull request with any new field
+specifications, as we're happy to include them in the main distribution!
+
+.. _gadget-ptype-spec:
+
+Particle Type Definitions
++++++++++++++++++++++++++
+
+In some cases, research groups add new particle types or re-order them.  You
+can supply alternate particle types by using the keyword ``ptype_spec`` to the
+``GadgetDataset`` call.  The default for Gadget binary data is:
+
+.. code-block:: python
+
+    ( "Gas", "Halo", "Disk", "Bulge", "Stars", "Bndry" )
+
+You can specify alternate names, but note that this may cause problems with the
+field specification if none of the names match old names.
+
+.. _gadget-header-spec:
+
+Header Specification
+++++++++++++++++++++
+
+If you have modified the header in your Gadget binary file, you can specify an
+alternate header specification with the keyword ``header_spec``.  This can
+either be a list of strings corresponding to individual header types known to
+yt, or it can be a combination of strings and header specifications.  The
+default header specification (found in ``yt/frontends/sph/definitions.py``) is:
+
+.. code-block:: python
+   
+    default      = (('Npart', 6, 'i'),
+                    ('Massarr', 6, 'd'),
+                    ('Time', 1, 'd'),
+                    ('Redshift', 1, 'd'),
+                    ('FlagSfr', 1, 'i'),
+                    ('FlagFeedback', 1, 'i'),
+                    ('Nall', 6, 'i'),
+                    ('FlagCooling', 1, 'i'),
+                    ('NumFiles', 1, 'i'),
+                    ('BoxSize', 1, 'd'),
+                    ('Omega0', 1, 'd'),
+                    ('OmegaLambda', 1, 'd'),
+                    ('HubbleParam', 1, 'd'),
+                    ('FlagAge', 1, 'i'),
+                    ('FlagMEtals', 1, 'i'),
+                    ('NallHW', 6, 'i'),
+                    ('unused', 16, 'i'))
+
+These items will all be accessible inside the object ``pf.parameters``, which
+is a dictionary.  You can add combinations of new items, specified in the same
+way, or alternately other types of headers.  The other string keys defined are
+``pad32``, ``pad64``, ``pad128``, and ``pad256`` each of which corresponds to
+an empty padding in bytes.  For example, if you have an additional 256 bytes of
+padding at the end, you can specify this with:
+
+.. code-block:: python
+
+   header_spec = ["default", "pad256"]
+
+This can then be supplied to the constructor.  Note that you can also do this
+manually, for instance with:
+
+
+.. code-block:: python
+
+   header_spec = ["default", (('some_value', 8, 'd'),
+                              ('another_value', 1, 'i'))]
+
+The letters correspond to data types from the Python struct module.  Please
+feel free to submit alternate header types to the main yt repository.
+
+.. _specifying-gadget-units:
+
+Specifying Units
+++++++++++++++++
+
+If you are running a cosmology simulation, yt will be able to guess the units
+with some reliability.  However, if you are not and you do not specify a
+parameter file, yt will not be able to and will use the defaults of length
+being 1.0 Mpc/h (comoving), velocity being in cm/s, and mass being in 10^10
+Msun/h.  You can specify alternate units by supplying the ``unit_base`` keyword
+argument of this form:
+
+.. code-block:: python
+
+   unit_base = {'length': (1.0, 'cm'), 'mass': (1.0, 'g'), 'time': (1.0, 's')}
+
+yt will utilize length, mass and time to set up all other units.
+
+.. _loading-tipsy-data:
+
+Tipsy Data
+----------
+
+yt also supports loading Tipsy data.  Many of its characteristics are similar
+to how Gadget data is loaded; specifically, it shares its definition of
+indexing and mesh-identification with that described in
+:ref:`particle-indexing-criteria`.  However, unlike Gadget, the Tipsy frontend
+has not yet implemented header specifications, field specifications, or
+particle type specifications.  *These are all excellent projects for new
+contributors!*
+
+Tipsy data cannot be automatically detected.  You can load it with a command
+similar to the following:
+
+.. code-block:: python
+
+    ds = TipsyDataset('test.00169',
+        parameter_file='test.param',
+        endian = '<',
+        domain_left_edge = domain_left_edge,
+        domain_right_edge = domain_right_edge,
+    )
+
+Not all of these arguments are necessary; additionally, yt accepts the
+arguments ``n_ref``, ``over_refine_factor``, ``cosmology_parameters``, and
+``unit_base``.  By default, yt will not utilize a parameter file, and by
+default it will assume the data is "big" endian (`>`).  Optionally, you may
+specify ``field_dtypes``, which describe the size of various fields.  For
+example, if you have stored positions as 64-bit floats, you can specify this
+with:
+
+.. code-block:: python
+
+    ds = TipsyDataset("./halo1e11_run1.00400", endian="<",
+                           field_dtypes = {"Coordinates": "d"})
+
+.. _specifying-cosmology-tipsy:
+
+Specifying Tipsy Cosmological Parameters
+++++++++++++++++++++++++++++++++++++++++
+
+Cosmological parameters can be specified to Tipsy to enable computation of
+default units.  The parameters recognized are of this form:
+
+.. code-block:: python
+
+   cosmology_parameters = {'current_redshift': 0.0,
+                           'omega_lambda': 0.728,
+                           'omega_matter': 0.272,
+                           'hubble_constant': 0.702}
+
+These will be used set the units, if they are specified.
+
+.. _loading-artio-data:
+
+ARTIO Data
+----------
+
+ARTIO data has a well-specified internal parameter system and has few free
+parameters.  However, for optimization purposes, the parameter that provides
+the most guidance to yt as to how to manage ARTIO data is ``max_range``.  This
+governs the maximum number of space-filling curve cells that will be used in a
+single "chunk" of data read from disk.  For small datasets, setting this number
+very large will enable more data to be loaded into memory at any given time;
+for very large datasets, this parameter can be left alone safely.  By default
+it is set to 1024; it can in principle be set as high as the total number of
+SFC cells.
+
+To load ARTIO data, you can specify a command such as this:
+
+.. code-block:: python
+
+    ds = load("./A11QR1/s11Qzm1h2_a1.0000.art")
 
 .. _loading-art-data:
 
 ART Data
 --------
 
-ART data enjoys preliminary support and is supported by Christopher Moody.
-Please contact the ``yt-dev`` mailing list if you are interested in using yt
-for ART data, or if you are interested in assisting with development of yt to
-work with ART data.
-
-At the moment, the ART octree is 'regridded' at each level to make the native
-octree look more like a mesh-based code. As a result, the initial outlay
-is about ~60 seconds to grid octs onto a mesh. This will be improved in 
-``yt-3.0``, where octs will be supported natively. 
+ART data enjoys preliminary support and has been supported in the past by
+Christopher Moody.  Please contact the ``yt-dev`` mailing list if you are
+interested in using yt for ART data, or if you are interested in assisting with
+development of yt to work with ART data.
 
 To load an ART dataset you can use the ``load`` command provided by 
 ``yt.mods`` and passing the gas mesh file. It will search for and attempt 
@@ -219,19 +481,17 @@ by specifying the window in seconds, ``spread=1.0e7*265*24*3600``.
     
    from yt.mods import *
 
-   file = "/u/cmoody3/data/art_snapshots/SFG1/10MpcBox_csf512_a0.460.d"
-   pf = load(file,discover_particles=True,grid_particles=2,limit_level=3)
-   pf.h.print_stats()
-   dd=pf.h.all_data()
-   print np.sum(dd['particle_type']==0)
+   pf = load("/u/cmoody3/data/art_snapshots/SFG1/10MpcBox_csf512_a0.460.d")
 
-In the above example code, the first line imports the standard yt functions,
-followed by defining the gas mesh file. It's loaded only through level 3, but
-grids particles on to meshes on level 2 and higher. Finally, we create a data
-container and ask it to gather the particle_type array. In this case ``type==0``
-is for the most highly-refined dark matter particle, and we print out how many
-high-resolution star particles we find in the simulation.  Typically, however,
-you shouldn't have to specify any keyword arguments to load in a dataset.
+.. _loading-moab-data:
+
+MOAB Data
+---------
+
+.. _loading-pyne-data:
+
+PyNE Data
+---------
 
 .. _loading-numpy-array:
 
@@ -311,7 +571,7 @@ resolution.
    ]
   
    for g in grid_data:
-       g["Density"] = np.random.random(g["dimensions"]) * 2**g["level"]
+       g["density"] = np.random.random(g["dimensions"]) * 2**g["level"]
   
    pf = load_amr_grids(grid_data, [32, 32, 32], 1.0)
 
@@ -329,10 +589,13 @@ setting the ``number_of_particles`` key to each ``grid``'s dict:
 * Units will be incorrect unless the data has already been converted to cgs.
 * Some functions may behave oddly, and parallelism will be disappointing or
   non-existent in most cases.
-* No consistency checks are performed on the hierarchy
+* No consistency checks are performed on the index
 * Data must already reside in memory.
 * Consistency between particle positions and grids is not checked;
   ``load_amr_grids`` assumes that particle positions associated with one grid are
   not bounded within another grid at a higher level, so this must be
   ensured by the user prior to loading the grid data. 
+
+Generic Particle Data
+---------------------
 

@@ -9,7 +9,7 @@ type of code that each field is supported by.  "Universal" fields are available
 everywhere, "Enzo" fields in Enzo datasets, "Orion" fields in Orion datasets,
 and so on.
 
-Try using the ``pf.h.field_list`` and ``pf.h.derived_field_list`` to view the
+Try using the ``pf.field_list`` and ``pf.derived_field_list`` to view the
 native and derived fields available for your dataset respectively. For example
 to display the native fields in alphabetical order:
 
@@ -17,7 +17,7 @@ to display the native fields in alphabetical order:
 
   from yt.mods import *
   pf = load("Enzo_64/DD0043/data0043")
-  for i in sorted(pf.h.field_list):
+  for i in sorted(pf.field_list):
     print i
 
 .. note:: Universal fields will be overridden by a code-specific field.
@@ -116,13 +116,13 @@ AveragedDensity
 .. code-block:: python
 
   def _AveragedDensity(field, data):
-      nx, ny, nz = data["Density"].shape
+      nx, ny, nz = data["density"].shape
       new_field = np.zeros((nx-2,ny-2,nz-2), dtype='float64')
       weight_field = np.zeros((nx-2,ny-2,nz-2), dtype='float64')
       i_i, j_i, k_i = np.mgrid[0:3,0:3,0:3]
       for i,j,k in zip(i_i.ravel(),j_i.ravel(),k_i.ravel()):
           sl = [slice(i,nx-(2-i)),slice(j,ny-(2-j)),slice(k,nz-(2-k))]
-          new_field += data["Density"][sl] * data["CellMass"][sl]
+          new_field += data["density"][sl] * data["CellMass"][sl]
           weight_field += data["CellMass"][sl]
       # Now some fancy footwork
       new_field2 = np.zeros((nx,ny,nz))
@@ -261,7 +261,7 @@ BaroclinicVorticityX
 .. code-block:: python
 
   def _BaroclinicVorticityX(field, data):
-      rho2 = data["Density"].astype('float64')**2
+      rho2 = data["density"].astype('float64')**2
       return (data["gradPressureY"] * data["gradDensityZ"] -
               data["gradPressureZ"] * data["gradDensityY"]) / rho2
   
@@ -281,7 +281,7 @@ BaroclinicVorticityY
 .. code-block:: python
 
   def _BaroclinicVorticityY(field, data):
-      rho2 = data["Density"].astype('float64')**2
+      rho2 = data["density"].astype('float64')**2
       return (data["gradPressureZ"] * data["gradDensityX"] -
               data["gradPressureX"] * data["gradDensityZ"]) / rho2
   
@@ -301,7 +301,7 @@ BaroclinicVorticityZ
 .. code-block:: python
 
   def _BaroclinicVorticityZ(field, data):
-      rho2 = data["Density"].astype('float64')**2
+      rho2 = data["density"].astype('float64')**2
       return (data["gradPressureX"] * data["gradDensityY"] -
               data["gradPressureY"] * data["gradDensityX"]) / rho2
   
@@ -324,7 +324,7 @@ Baryon_Overdensity
           omega_baryon_now = data.pf['omega_baryon_now']
       else:
           omega_baryon_now = 0.0441
-      return data['Density'] / (omega_baryon_now * rho_crit_now * 
+      return data['density'] / (omega_baryon_now * rho_crit_now * 
                                 (data.pf.hubble_constant**2) * 
                                 ((1+data.pf.current_redshift)**3))
   
@@ -344,7 +344,7 @@ CellMass
 .. code-block:: python
 
   def _CellMass(field, data):
-      return data["Density"] * data["CellVolume"]
+      return data["density"] * data["CellVolume"]
   
 
 **Convert Function Source**
@@ -361,7 +361,7 @@ CellMassCode
 .. code-block:: python
 
   def _CellMassCode(field, data):
-      return data["Density"] * data["CellVolumeCode"]
+      return data["density"] * data["CellVolumeCode"]
   
 
 **Convert Function Source**
@@ -369,7 +369,7 @@ CellMassCode
 .. code-block:: python
 
   def _convertCellMassCode(data):
-      return 1.0/data.convert("Density")
+      return 1.0/data.convert("density")
   
 
 CellMassMsun
@@ -383,7 +383,7 @@ CellMassMsun
 .. code-block:: python
 
   def _CellMass(field, data):
-      return data["Density"] * data["CellVolume"]
+      return data["density"] * data["CellVolume"]
   
 
 **Convert Function Source**
@@ -546,7 +546,7 @@ ComovingDensity
 
   def _ComovingDensity(field, data):
       ef = (1.0 + data.pf.current_redshift)**3.0
-      return data["Density"]/ef
+      return data["density"]/ef
   
 
 **Convert Function Source**
@@ -791,7 +791,7 @@ DynamicalTime
       M{sqrt(3pi/(16*G*rho))} or M{sqrt(3pi/(16G))*rho^-(1/2)}
       Note that we return in our natural units already
       """
-      return (3.0*np.pi/(16*G*data["Density"]))**(1./2.)
+      return (3.0*np.pi/(16*G*data["density"]))**(1./2.)
   
 
 **Convert Function Source**
@@ -818,7 +818,7 @@ Entropy
       except:
           gammam1 = 5./3. - 1.0
       return kboltz * data["Temperature"] / \
-             ((data["Density"]/mw)**gammam1)
+             ((data["density"]/mw)**gammam1)
   
 
 **Convert Function Source**
@@ -919,7 +919,7 @@ JeansMassMsun
   
       return (MJ_constant *
               ((data["Temperature"]/data["MeanMolecularWeight"])**(1.5)) *
-              (data["Density"]**(-0.5)))
+              (data["density"]**(-0.5)))
   
 
 **Convert Function Source**
@@ -995,7 +995,7 @@ Matter_Density
 .. code-block:: python
 
   def _Matter_Density(field,data):
-      return (data['Density'] + data['particle_density'])
+      return (data['density'] + data['particle_density'])
   
 
 **Convert Function Source**
@@ -1012,7 +1012,7 @@ MeanMolecularWeight
 .. code-block:: python
 
   def _MeanMolecularWeight(field,data):
-      return (data["Density"] / (mh *data["NumberDensity"]))
+      return (data["density"] / (mh *data["NumberDensity"]))
   
 
 **Convert Function Source**
@@ -1047,7 +1047,7 @@ OnesOverDx
 
   def _OnesOverDx(field, data):
       return np.ones(data["Ones"].shape,
-                     dtype=data["Density"].dtype)/data['dx']
+                     dtype=data["density"].dtype)/data['dx']
   
 
 **Convert Function Source**
@@ -1064,7 +1064,7 @@ Overdensity
 .. code-block:: python
 
   def _Matter_Density(field,data):
-      return (data['Density'] + data['particle_density'])
+      return (data['density'] + data['particle_density'])
   
 
 **Convert Function Source**
@@ -1535,7 +1535,7 @@ Pressure
   def _Pressure(field, data):
       """M{(Gamma-1.0)*rho*E}"""
       return (data.pf["Gamma"] - 1.0) * \
-             data["Density"] * data["ThermalEnergy"]
+             data["density"] * data["ThermalEnergy"]
   
 
 **Convert Function Source**
@@ -1791,7 +1791,7 @@ SZKinetic
       if vel_axis > 2:
           raise NeedsParameter(['axis'])
       vel = data["%s-velocity" % ({0:'x',1:'y',2:'z'}[vel_axis])]
-      return (vel*data["Density"])
+      return (vel*data["density"])
   
 
 **Convert Function Source**
@@ -1812,7 +1812,7 @@ SZY
 .. code-block:: python
 
   def _SZY(field, data):
-      return (data["Density"]*data["Temperature"])
+      return (data["density"]*data["Temperature"])
   
 
 **Convert Function Source**
@@ -2046,10 +2046,10 @@ SoundSpeed
 
   def _SoundSpeed(field, data):
       if data.pf["EOSType"] == 1:
-          return np.ones(data["Density"].shape, dtype='float64') * \
+          return np.ones(data["density"].shape, dtype='float64') * \
                   data.pf["EOSSoundSpeed"]
       return ( data.pf["Gamma"]*data["Pressure"] / \
-               data["Density"] )**(1.0/2.0)
+               data["density"] )**(1.0/2.0)
   
 
 **Convert Function Source**
@@ -2215,7 +2215,7 @@ TotalMass
 .. code-block:: python
 
   def _TotalMass(field,data):
-      return (data["Density"]+data["particle_density"]) * data["CellVolume"]
+      return (data["density"]+data["particle_density"]) * data["CellVolume"]
   
 
 **Convert Function Source**
@@ -2233,7 +2233,7 @@ TotalMassMsun
 .. code-block:: python
 
   def _TotalMass(field,data):
-      return (data["Density"]+data["particle_density"]) * data["CellVolume"]
+      return (data["density"]+data["particle_density"]) * data["CellVolume"]
   
 
 **Convert Function Source**
@@ -2558,7 +2558,7 @@ VorticityRadPressureX
 .. code-block:: python
 
   def _VorticityRadPressureX(field, data):
-      rho = data["Density"].astype('float64')
+      rho = data["density"].astype('float64')
       return (data["RadAccel2"] * data["gradDensityZ"] -
               data["RadAccel3"] * data["gradDensityY"]) / rho
   
@@ -2582,7 +2582,7 @@ VorticityRadPressureY
 .. code-block:: python
 
   def _VorticityRadPressureY(field, data):
-      rho = data["Density"].astype('float64')
+      rho = data["density"].astype('float64')
       return (data["RadAccel3"] * data["gradDensityX"] -
               data["RadAccel1"] * data["gradDensityZ"]) / rho
   
@@ -2606,7 +2606,7 @@ VorticityRadPressureZ
 .. code-block:: python
 
   def _VorticityRadPressureZ(field, data):
-      rho = data["Density"].astype('float64')
+      rho = data["density"].astype('float64')
       return (data["RadAccel1"] * data["gradDensityY"] -
               data["RadAccel2"] * data["gradDensityX"]) / rho
   
@@ -2911,7 +2911,7 @@ XRayEmissivity
 .. code-block:: python
 
   def _XRayEmissivity(field, data):
-      return ((data["Density"].astype('float64')**2.0) \
+      return ((data["density"].astype('float64')**2.0) \
               *data["Temperature"]**0.5)
   
 
@@ -3311,10 +3311,10 @@ gradDensityX
           sl_left = slice(None,-2,None)
           sl_right = slice(2,None,None)
           div_fac = 2.0
-      new_field = np.zeros(data["Density"].shape, dtype='float64')
+      new_field = np.zeros(data["density"].shape, dtype='float64')
       ds = div_fac * data['dx'].flat[0]
-      new_field[1:-1,1:-1,1:-1]  = data["Density"][sl_right,1:-1,1:-1]/ds
-      new_field[1:-1,1:-1,1:-1] -= data["Density"][sl_left ,1:-1,1:-1]/ds
+      new_field[1:-1,1:-1,1:-1]  = data["density"][sl_right,1:-1,1:-1]/ds
+      new_field[1:-1,1:-1,1:-1] -= data["density"][sl_left ,1:-1,1:-1]/ds
       return new_field
   
 
@@ -3346,10 +3346,10 @@ gradDensityY
           sl_left = slice(None,-2,None)
           sl_right = slice(2,None,None)
           div_fac = 2.0
-      new_field = np.zeros(data["Density"].shape, dtype='float64')
+      new_field = np.zeros(data["density"].shape, dtype='float64')
       ds = div_fac * data['dy'].flat[0]
-      new_field[1:-1,1:-1,1:-1]  = data["Density"][1:-1,sl_right,1:-1]/ds
-      new_field[1:-1,1:-1,1:-1] -= data["Density"][1:-1,sl_left ,1:-1]/ds
+      new_field[1:-1,1:-1,1:-1]  = data["density"][1:-1,sl_right,1:-1]/ds
+      new_field[1:-1,1:-1,1:-1] -= data["density"][1:-1,sl_left ,1:-1]/ds
       return new_field
   
 
@@ -3381,10 +3381,10 @@ gradDensityZ
           sl_left = slice(None,-2,None)
           sl_right = slice(2,None,None)
           div_fac = 2.0
-      new_field = np.zeros(data["Density"].shape, dtype='float64')
+      new_field = np.zeros(data["density"].shape, dtype='float64')
       ds = div_fac * data['dz'].flat[0]
-      new_field[1:-1,1:-1,1:-1]  = data["Density"][1:-1,1:-1,sl_right]/ds
-      new_field[1:-1,1:-1,1:-1] -= data["Density"][1:-1,1:-1,sl_left ]/ds
+      new_field[1:-1,1:-1,1:-1]  = data["density"][1:-1,1:-1,sl_right]/ds
+      new_field[1:-1,1:-1,1:-1] -= data["density"][1:-1,1:-1,sl_left ]/ds
       return new_field
   
 
@@ -4071,7 +4071,7 @@ DII_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -4154,7 +4154,7 @@ DI_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -4231,7 +4231,7 @@ Electron_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -4290,7 +4290,7 @@ H2II_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -4327,7 +4327,7 @@ H2I_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -4364,7 +4364,7 @@ HDI_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -4401,7 +4401,7 @@ HII_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -4438,7 +4438,7 @@ HI_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -4475,7 +4475,7 @@ HM_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -4512,10 +4512,10 @@ H_NumberDensity
 .. code-block:: python
 
   def _H_NumberDensity(field, data):
-      field_data = np.zeros(data["Density"].shape,
-                            dtype=data["Density"].dtype)
+      field_data = np.zeros(data["density"].shape,
+                            dtype=data["density"].dtype)
       if data.pf.parameters["MultiSpecies"] == 0:
-          field_data += data["Density"] * \
+          field_data += data["density"] * \
             data.pf.parameters["HydrogenFractionByMass"]
       if data.pf.parameters["MultiSpecies"] > 0:
           field_data += data["HI_Density"]
@@ -4548,7 +4548,7 @@ HeIII_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -4585,7 +4585,7 @@ HeII_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -4622,7 +4622,7 @@ HeI_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -4677,7 +4677,7 @@ KineticEnergy
 .. code-block:: python
 
   def _KineticEnergy(field, data):
-      return 0.5*data["Density"] * ( data["x-velocity"]**2.0
+      return 0.5*data["density"] * ( data["x-velocity"]**2.0
                                      + data["y-velocity"]**2.0
                                      + data["z-velocity"]**2.0 )
   
@@ -4697,7 +4697,7 @@ MetalSNIa_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -4734,7 +4734,7 @@ Metal_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -4793,7 +4793,7 @@ Metallicity3
 .. code-block:: python
 
   def _Metallicity3(field, data):
-      return data["SN_Colour"]/data["Density"]
+      return data["SN_Colour"]/data["density"]
   
 
 **Convert Function Source**
@@ -4818,14 +4818,14 @@ NumberDensity
       # We can assume that we at least have Density
       # We should actually be guaranteeing the presence of a .shape attribute,
       # but I am not currently implementing that
-      fieldData = np.zeros(data["Density"].shape,
-                           dtype = data["Density"].dtype)
+      fieldData = np.zeros(data["density"].shape,
+                           dtype = data["density"].dtype)
       if data.pf["MultiSpecies"] == 0:
           if data.has_field_parameter("mu"):
               mu = data.get_field_parameter("mu")
           else:
               mu = 0.6
-          fieldData += data["Density"] / mu
+          fieldData += data["density"] / mu
       if data.pf["MultiSpecies"] > 0:
           fieldData += data["HI_Density"] / 1.0
           fieldData += data["HII_Density"] / 1.0
@@ -4895,7 +4895,7 @@ ParticleMass
 .. code-block:: python
 
   def _convertParticleMass(data):
-      return data.convert("Density")*(data.convert("cm")**3.0)
+      return data.convert("density")*(data.convert("cm")**3.0)
   
 
 ParticleMassMsun
@@ -4919,7 +4919,7 @@ ParticleMassMsun
 .. code-block:: python
 
   def _convertParticleMassMsun(data):
-      return data.convert("Density")*((data.convert("cm")**3.0)/1.989e33)
+      return data.convert("density")*((data.convert("cm")**3.0)/1.989e33)
   
 
 PreShock_Fraction
@@ -4933,7 +4933,7 @@ PreShock_Fraction
 
   def _SpeciesFraction(field, data):
       sp = field.name.split("_")[0] + "_Density"
-      return data[sp] / data["Density"]
+      return data[sp] / data["density"]
   
 
 **Convert Function Source**
@@ -5089,7 +5089,7 @@ ThermalEnergy
               data["x-velocity"]**2.0
               + data["y-velocity"]**2.0
               + data["z-velocity"]**2.0 ) \
-              - data["MagneticEnergy"]/data["Density"]
+              - data["MagneticEnergy"]/data["density"]
   
       return data["TotalEnergy"] - 0.5*(
           data["x-velocity"]**2.0
@@ -5323,7 +5323,7 @@ dm_density
 .. code-block:: python
 
   def _convertDensity(data):
-      return data.convert("Density")
+      return data.convert("density")
   
 
 particle_mass
@@ -5336,7 +5336,7 @@ particle_mass
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           try:
@@ -5431,7 +5431,7 @@ star_density
 .. code-block:: python
 
   def _convertDensity(data):
-      return data.convert("Density")
+      return data.convert("density")
   
 
 star_dynamical_time
@@ -5655,7 +5655,7 @@ Temperature
 .. code-block:: python
 
   def _Temperature(field,data):
-      return (data.pf["Gamma"]-1.0)*data.pf["mu"]*mh*data["ThermalEnergy"]/(kboltz*data["Density"])
+      return (data.pf["Gamma"]-1.0)*data.pf["mu"]*mh*data["ThermalEnergy"]/(kboltz*data["density"])
   
 
 **Convert Function Source**
@@ -5718,7 +5718,7 @@ particle_angmomen_x
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -5739,7 +5739,7 @@ particle_angmomen_y
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -5760,7 +5760,7 @@ particle_angmomen_z
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -5781,7 +5781,7 @@ particle_burnstate
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -5802,7 +5802,7 @@ particle_id
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -5823,7 +5823,7 @@ particle_luminosity
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -5844,7 +5844,7 @@ particle_mass
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -5865,7 +5865,7 @@ particle_mdeut
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -5886,7 +5886,7 @@ particle_mdot
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -5907,7 +5907,7 @@ particle_mlast
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -5928,7 +5928,7 @@ particle_momentum_x
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -5949,7 +5949,7 @@ particle_momentum_y
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -5970,7 +5970,7 @@ particle_momentum_z
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -5991,7 +5991,7 @@ particle_n
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -6012,7 +6012,7 @@ particle_position_x
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -6033,7 +6033,7 @@ particle_position_y
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -6054,7 +6054,7 @@ particle_position_z
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -6075,7 +6075,7 @@ particle_r
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -6263,7 +6263,7 @@ DII_Density
 .. code-block:: python
 
       def _dens(field, data):
-          return data[fname] * data['Density']
+          return data[fname] * data['density']
   
 
 **Convert Function Source**
@@ -6299,7 +6299,7 @@ DI_Density
 .. code-block:: python
 
       def _dens(field, data):
-          return data[fname] * data['Density']
+          return data[fname] * data['density']
   
 
 **Convert Function Source**
@@ -6373,7 +6373,7 @@ Electron_Density
 .. code-block:: python
 
       def _dens(field, data):
-          return data[fname] * data['Density']
+          return data[fname] * data['density']
   
 
 **Convert Function Source**
@@ -6409,7 +6409,7 @@ Flame_Density
 .. code-block:: python
 
       def _dens(field, data):
-          return data[fname] * data['Density']
+          return data[fname] * data['density']
   
 
 **Convert Function Source**
@@ -6481,7 +6481,7 @@ H2II_Density
 .. code-block:: python
 
       def _dens(field, data):
-          return data[fname] * data['Density']
+          return data[fname] * data['density']
   
 
 **Convert Function Source**
@@ -6517,7 +6517,7 @@ H2I_Density
 .. code-block:: python
 
       def _dens(field, data):
-          return data[fname] * data['Density']
+          return data[fname] * data['density']
   
 
 **Convert Function Source**
@@ -6553,7 +6553,7 @@ HD_Density
 .. code-block:: python
 
       def _dens(field, data):
-          return data[fname] * data['Density']
+          return data[fname] * data['density']
   
 
 **Convert Function Source**
@@ -6589,7 +6589,7 @@ HII_Density
 .. code-block:: python
 
       def _dens(field, data):
-          return data[fname] * data['Density']
+          return data[fname] * data['density']
   
 
 **Convert Function Source**
@@ -6625,7 +6625,7 @@ HI_Density
 .. code-block:: python
 
       def _dens(field, data):
-          return data[fname] * data['Density']
+          return data[fname] * data['density']
   
 
 **Convert Function Source**
@@ -6661,7 +6661,7 @@ HM_Density
 .. code-block:: python
 
       def _dens(field, data):
-          return data[fname] * data['Density']
+          return data[fname] * data['density']
   
 
 **Convert Function Source**
@@ -6697,7 +6697,7 @@ HeIII_Density
 .. code-block:: python
 
       def _dens(field, data):
-          return data[fname] * data['Density']
+          return data[fname] * data['density']
   
 
 **Convert Function Source**
@@ -6733,7 +6733,7 @@ HeII_Density
 .. code-block:: python
 
       def _dens(field, data):
-          return data[fname] * data['Density']
+          return data[fname] * data['density']
   
 
 **Convert Function Source**
@@ -6769,7 +6769,7 @@ HeI_Density
 .. code-block:: python
 
       def _dens(field, data):
-          return data[fname] * data['Density']
+          return data[fname] * data['density']
   
 
 **Convert Function Source**
@@ -6906,14 +6906,14 @@ ThermalEnergy
       except:
           pass
       try:
-          return data["Pressure"] / (data.pf["Gamma"] - 1.0) / data["Density"]
+          return data["Pressure"] / (data.pf["Gamma"] - 1.0) / data["density"]
       except:
           pass
       if data.has_field_parameter("mu") :
           mu = data.get_field_parameter("mu")
       else:
           mu = 0.6
-      return kboltz*data["Density"]*data["Temperature"]/(mu*mh) / (data.pf["Gamma"] - 1.0)
+      return kboltz*data["density"]*data["Temperature"]/(mu*mh) / (data.pf["Gamma"] - 1.0)
   
 
 **Convert Function Source**
@@ -6939,7 +6939,7 @@ TotalEnergy
               data["y-velocity"]**2.0 +
               data["z-velocity"]**2.0)
       try:
-          etot += data['magp']/data["Density"]
+          etot += data['magp']/data["density"]
       except:
           pass
       return etot
@@ -7225,7 +7225,7 @@ Bx
 .. code-block:: python
 
   def _convertBfield(data):
-          return np.sqrt(4*np.pi*data.convert("Density")*data.convert("x-velocity")**2)
+          return np.sqrt(4*np.pi*data.convert("density")*data.convert("x-velocity")**2)
   
 
 By
@@ -7247,7 +7247,7 @@ By
 .. code-block:: python
 
   def _convertBfield(data):
-          return np.sqrt(4*np.pi*data.convert("Density")*data.convert("x-velocity")**2)
+          return np.sqrt(4*np.pi*data.convert("density")*data.convert("x-velocity")**2)
   
 
 Bz
@@ -7269,7 +7269,7 @@ Bz
 .. code-block:: python
 
   def _convertBfield(data):
-          return np.sqrt(4*np.pi*data.convert("Density")*data.convert("x-velocity")**2)
+          return np.sqrt(4*np.pi*data.convert("density")*data.convert("x-velocity")**2)
   
 
 Density
@@ -7292,7 +7292,7 @@ Density
 .. code-block:: python
 
   def _convertDensity(data) :
-      return data.convert("Density")
+      return data.convert("density")
   
 
 Gas_Energy
@@ -7357,7 +7357,7 @@ Pressure
 .. code-block:: python
 
   def _convertPressure(data) :
-      return data.convert("Density")*data.convert("x-velocity")**2
+      return data.convert("density")*data.convert("x-velocity")**2
   
 
 Temperature
@@ -7375,7 +7375,7 @@ Temperature
           mu = data.get_field_parameter("mu")
       else:
           mu = 0.6
-      return mu*mh*data["Pressure"]/data["Density"]/kboltz
+      return mu*mh*data["Pressure"]/data["density"]/kboltz
   
 
 **Convert Function Source**
@@ -7540,7 +7540,7 @@ Temperature
 
   def _temperature(field, data):
       return ((data.pf["Gamma"] - 1.0) * data.pf["mu"] * mh *
-              data["ThermalEnergy"] / (kboltz * data["Density"]))
+              data["ThermalEnergy"] / (kboltz * data["density"]))
   
 
 **Convert Function Source**
@@ -7704,7 +7704,7 @@ Density
   def _Density(field,data):
       """A duplicate of the density field. This is needed because when you try 
       to instantiate a PlotCollection without passing in a center, the code
-      will try to generate one for you using the "Density" field, which gives an error 
+      will try to generate one for you using the "density" field, which gives an error 
       if it isn't defined.
   
       """
@@ -7780,7 +7780,7 @@ particle_angmomen_x
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -7801,7 +7801,7 @@ particle_angmomen_y
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -7822,7 +7822,7 @@ particle_angmomen_z
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -7843,7 +7843,7 @@ particle_burnstate
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -7864,7 +7864,7 @@ particle_id
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -7885,7 +7885,7 @@ particle_luminosity
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -7906,7 +7906,7 @@ particle_mass
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -7927,7 +7927,7 @@ particle_mdeut
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -7948,7 +7948,7 @@ particle_mdot
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -7969,7 +7969,7 @@ particle_mlast
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -7990,7 +7990,7 @@ particle_momentum_x
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -8011,7 +8011,7 @@ particle_momentum_y
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -8032,7 +8032,7 @@ particle_momentum_z
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -8053,7 +8053,7 @@ particle_n
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -8074,7 +8074,7 @@ particle_position_x
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -8095,7 +8095,7 @@ particle_position_y
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -8116,7 +8116,7 @@ particle_position_z
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -8137,7 +8137,7 @@ particle_r
 .. code-block:: python
 
       def _Particles(field, data):
-          io = data.hierarchy.io
+          io = data.index.io
           if not data.NumberOfParticles > 0:
               return np.array([], dtype=dtype)
           else:
@@ -8224,7 +8224,7 @@ Density
   def _Density(field,data):
       """A duplicate of the density field. This is needed because when you try 
       to instantiate a PlotCollection without passing in a center, the code
-      will try to generate one for you using the "Density" field, which gives an error 
+      will try to generate one for you using the "density" field, which gives an error 
       if it isn't defined.
   
       """
