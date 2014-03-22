@@ -27,9 +27,9 @@ import types
 from yt.utilities.fortran_utils import read_record
 from yt.utilities.logger import ytLogger as mylog
 from yt.geometry.particle_geometry_handler import \
-    ParticleGeometryHandler
+    ParticleIndex
 from yt.data_objects.static_output import \
-    StaticOutput, ParticleFile
+    Dataset, ParticleFile
 from yt.utilities.definitions import \
     mpc_conversion, sec_conversion
 from yt.utilities.physical_constants import \
@@ -50,6 +50,11 @@ try:
 except ImportError:
     requests = None
 
+def _fix_unit_ordering(unit):
+    if isinstance(unit[0], types.StringTypes):
+        unit = unit[1], unit[0]
+    return unit
+
 class GadgetBinaryFile(ParticleFile):
     def __init__(self, pf, io, filename, file_id):
         with open(filename, "rb") as f:
@@ -66,13 +71,13 @@ class GadgetBinaryFile(ParticleFile):
             self._position_offset, self._file_size)
 
 
-class ParticleStaticOutput(StaticOutput):
+class ParticleDataset(Dataset):
     _unit_base = None
     over_refine_factor = 1
 
 
-class GadgetStaticOutput(ParticleStaticOutput):
-    _hierarchy_class = ParticleGeometryHandler
+class GadgetDataset(ParticleDataset):
+    _index_class = ParticleIndex
     _file_class = GadgetBinaryFile
     _field_info_class = SPHFieldInfo
     _particle_mass_name = "Mass"
@@ -80,7 +85,7 @@ class GadgetStaticOutput(ParticleStaticOutput):
     _particle_velocity_name = "Velocities"
     _suffix = ""
 
-    def __init__(self, filename, data_style="gadget_binary",
+    def __init__(self, filename, dataset_type="gadget_binary",
                  additional_fields=(),
                  unit_base=None, n_ref=64,
                  over_refine_factor=1,
@@ -110,7 +115,7 @@ class GadgetStaticOutput(ParticleStaticOutput):
             self.domain_right_edge = bbox[:,1]
         else:
             self.domain_left_edge = self.domain_right_edge = None
-        super(GadgetStaticOutput, self).__init__(filename, data_style)
+        super(GadgetDataset, self).__init__(filename, dataset_type)
 
     def _setup_binary_spec(self, spec, spec_dict):
         if isinstance(spec, types.StringTypes):
@@ -197,36 +202,39 @@ class GadgetStaticOutput(ParticleStaticOutput):
         # Set a sane default for cosmological simulations.
         if self._unit_base is None and self.cosmological_simulation == 1:
             mylog.info("Assuming length units are in Mpc/h (comoving)")
-            self._unit_base = dict(length = ("Mpccm/h", 1.0))
+            self._unit_base = dict(length = (1.0, "Mpccm/h"))
         # The other same defaults we will use from the standard Gadget
         # defaults.
         unit_base = self._unit_base or {}
         if "length" in unit_base:
             length_unit = unit_base["length"]
         elif "UnitLength_in_cm" in unit_base:
-            length_unit = ("cm", unit_base["UnitLength_in_cm"])
+            length_unit = (unit_base["UnitLength_in_cm"], "cm")
         else:
             raise RuntimeError
-        self.length_unit = self.quan(length_unit[1], length_unit[0])
+        length_unit = _fix_unit_ordering(length_unit)
+        self.length_unit = self.quan(length_unit[0], length_unit[1])
 
         unit_base = self._unit_base or {}
         if "velocity" in unit_base:
             velocity_unit = unit_base["velocity"]
         elif "UnitVelocity_in_cm_per_s" in unit_base:
-            velocity_unit = ("cm/s", unit_base["UnitVelocity_in_cm_per_s"])
+            velocity_unit = (unit_base["UnitVelocity_in_cm_per_s"], "cm/s")
         else:
-            velocity_unit = ("cm/s", 1e5)
-        self.velocity_unit = self.quan(velocity_unit[1], velocity_unit[0])
+            velocity_unit = (1e5, "cm/s")
+        velocity_unit = _fix_unit_ordering(velocity_unit)
+        self.velocity_unit = self.quan(velocity_unit[0], velocity_unit[1])
         # We set hubble_constant = 1.0 for non-cosmology, so this is safe.
         # Default to 1e10 Msun/h if mass is not specified.
         if "mass" in unit_base:
             mass_unit = unit_base["mass"]
         elif "UnitMass_in_g" in unit_base:
-            mass_unit = ("g", unit_base["UnitMass_in_g"])
+            mass_unit = (unit_base["UnitMass_in_g"], "g")
         else:
             # Sane default
-            mass_unit = ("1e10*Msun/h", 1.0)
-        self.mass_unit = self.quan(mass_unit[1], mass_unit[0])
+            mass_unit = (1.0, "1e10*Msun/h")
+        mass_unit = _fix_unit_ordering(mass_unit)
+        self.mass_unit = self.quan(mass_unit[0], mass_unit[1])
         self.time_unit = self.length_unit / self.velocity_unit
 
     @classmethod
@@ -235,20 +243,20 @@ class GadgetStaticOutput(ParticleStaticOutput):
         return False
 
 
-class GadgetHDF5StaticOutput(GadgetStaticOutput):
+class GadgetHDF5Dataset(GadgetDataset):
     _file_class = ParticleFile
     _field_info_class = SPHFieldInfo
     _particle_mass_name = "Masses"
     _suffix = ".hdf5"
 
-    def __init__(self, filename, data_style="gadget_hdf5", 
+    def __init__(self, filename, dataset_type="gadget_hdf5", 
                  unit_base = None, n_ref=64,
                  over_refine_factor=1,
                  bounding_box = None):
         self.storage_filename = None
         filename = os.path.abspath(filename)
-        super(GadgetHDF5StaticOutput, self).__init__(
-            filename, data_style, unit_base=unit_base, n_ref=n_ref,
+        super(GadgetHDF5Dataset, self).__init__(
+            filename, dataset_type, unit_base=unit_base, n_ref=n_ref,
             over_refine_factor=over_refine_factor,
             bounding_box = bounding_box)
 
@@ -274,7 +282,7 @@ class GadgetHDF5StaticOutput(GadgetStaticOutput):
             pass
         return False
 
-class OWLSStaticOutput(GadgetHDF5StaticOutput):
+class OWLSDataset(GadgetHDF5Dataset):
     _particle_mass_name = "Mass"
 
     def _parse_parameter_file(self):
@@ -344,8 +352,8 @@ class TipsyFile(ParticleFile):
         io._create_dtypes(self)
 
 
-class TipsyStaticOutput(ParticleStaticOutput):
-    _hierarchy_class = ParticleGeometryHandler
+class TipsyDataset(ParticleDataset):
+    _index_class = ParticleIndex
     _file_class = TipsyFile
     _field_info_class = SPHFieldInfo
     _particle_mass_name = "Mass"
@@ -358,7 +366,7 @@ class TipsyStaticOutput(ParticleStaticOutput):
                     ('nstar',   'i'),
                     ('dummy',   'i'))
 
-    def __init__(self, filename, data_style="tipsy",
+    def __init__(self, filename, dataset_type="tipsy",
                  endian=">",
                  field_dtypes=None,
                  domain_left_edge=None,
@@ -391,7 +399,7 @@ class TipsyStaticOutput(ParticleStaticOutput):
             parameter_file = os.path.abspath(parameter_file)
         self._param_file = parameter_file
         filename = os.path.abspath(filename)
-        super(TipsyStaticOutput, self).__init__(filename, data_style)
+        super(TipsyDataset, self).__init__(filename, dataset_type)
 
     def __repr__(self):
         return os.path.basename(self.parameter_filename)
@@ -489,7 +497,7 @@ class TipsyStaticOutput(ParticleStaticOutput):
         # Set a sane default for cosmological simulations.
         if self._unit_base is None and self.cosmological_simulation == 1:
             mylog.info("Assuming length units are in Mpc/h (comoving)")
-            self._unit_base.update(dict(length = ("Mpccm/h", 1.0)))
+            self._unit_base.update(dict(length = (1.0, "Mpccm/h")))
         if self.cosmological_simulation:
             length_units = self._unit_base['length']
             DW = self.quan(1./length_units[1], length_units[0])
@@ -514,8 +522,8 @@ class TipsyStaticOutput(ParticleStaticOutput):
 class HTTPParticleFile(ParticleFile):
     pass
 
-class HTTPStreamStaticOutput(ParticleStaticOutput):
-    _hierarchy_class = ParticleGeometryHandler
+class HTTPStreamDataset(ParticleDataset):
+    _index_class = ParticleIndex
     _file_class = HTTPParticleFile
     _field_info_class = SPHFieldInfo
     _particle_mass_name = "Mass"
@@ -524,14 +532,14 @@ class HTTPStreamStaticOutput(ParticleStaticOutput):
     filename_template = ""
     
     def __init__(self, base_url,
-                 data_style = "http_particle_stream",
+                 dataset_type = "http_particle_stream",
                  n_ref = 64, over_refine_factor=1):
         if requests is None:
             raise RuntimeError
         self.base_url = base_url
         self.n_ref = n_ref
         self.over_refine_factor = over_refine_factor
-        super(HTTPStreamStaticOutput, self).__init__("", data_style)
+        super(HTTPStreamDataset, self).__init__("", dataset_type)
 
     def __repr__(self):
         return self.base_url
@@ -575,7 +583,7 @@ class HTTPStreamStaticOutput(ParticleStaticOutput):
         self._unit_base = {}
         self._unit_base['cm'] = 1.0/length_unit
         self._unit_base['s'] = 1.0/time_unit
-        super(HTTPStreamStaticOutput, self)._set_units()
+        super(HTTPStreamDataset, self)._set_units()
         self.conversion_factors["velocity"] = velocity_unit
         self.conversion_factors["mass"] = mass_unit
         self.conversion_factors["density"] = density_unit

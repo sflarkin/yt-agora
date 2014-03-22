@@ -36,9 +36,9 @@ def _FreeFree_Emission(field, data) :
     else :
         photon_emission = False # Flag for energy or photon emission
 
-    n_e = data["Density"]/(mue*mp)
-    n_i = data["Density"]/(mui*mp)
-    kT = data["Temperature"]*KtokeV
+    n_e = data["density"]/(mue*mp)
+    n_i = data["density"]/(mui*mp)
+    kT = data["temperature"]*KtokeV
 
     # Compute the Gaunt factor
 
@@ -47,7 +47,7 @@ def _FreeFree_Emission(field, data) :
     g_ff[Ephoton/kT < 1.] = (sqrt3/np.pi)*np.log((4./expgamma) *
                                                  kT[Ephoton/kT < 1.]/Ephoton)
 
-    eps_E = 1.64e-20*Z*Z*n_e*n_i/np.sqrt(data["Temperature"]) * \
+    eps_E = 1.64e-20*Z*Z*n_e*n_i/np.sqrt(data["temperature"]) * \
         np.exp(-Ephoton/kT)*g_ff
 
     if photon_emission: eps_E /= (Ephoton*keVtoerg)
@@ -59,7 +59,7 @@ add_field("FreeFree_Emission", function=_FreeFree_Emission)
 # Define the luminosity derived quantity
 
 def _FreeFreeLuminosity(data) :
-    return (data["FreeFree_Emission"]*data["CellVolume"]).sum()
+    return (data["FreeFree_Emission"]*data["cell_volume"]).sum()
 
 def _combFreeFreeLuminosity(data, luminosity) :
     return luminosity.sum()
@@ -69,7 +69,7 @@ add_quantity("FreeFree_Luminosity", function=_FreeFreeLuminosity,
 
 pf = load("GasSloshing/sloshing_nomag2_hdf5_plt_cnt_0150")
 
-sphere = pf.h.sphere(pf.domain_center, (100., "kpc"))
+sphere = pf.sphere(pf.domain_center, (100., "kpc"))
 
 # Print out the total luminosity at 1 keV for the sphere
 

@@ -1,5 +1,5 @@
 """
-Halo catalog data-file handling function
+Rockstar data-file handling function
 
 
 
@@ -14,7 +14,9 @@ Halo catalog data-file handling function
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
+import h5py
 import numpy as np
+
 from yt.utilities.exceptions import *
 from yt.funcs import mylog
 
@@ -28,7 +30,7 @@ from yt.utilities.lib.geometry_utils import compute_morton
 from yt.geometry.oct_container import _ORDER_MAX
 
 class IOHandlerRockstarBinary(BaseIOHandler):
-    _data_style = "rockstar_binary"
+    _dataset_type = "rockstar_binary"
 
     def _read_fluid_selection(self, chunks, selector, fields, size):
         raise NotImplementedError
@@ -121,5 +123,4 @@ class IOHandlerRockstarBinary(BaseIOHandler):
     def _identify_fields(self, data_file):
         fields = [("halos", f) for f in halo_dt.fields if
                   "padding" not in f]
-        return fields
-
+        return fields, {}

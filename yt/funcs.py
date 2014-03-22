@@ -341,6 +341,7 @@ def get_pbar(title, maxval):
     maxval = max(maxval, 1)
     from yt.config import ytcfg
     if ytcfg.getboolean("yt", "suppressStreamLogging") or \
+       "__IPYTHON__" in dir(__builtin__) or \
        ytcfg.getboolean("yt", "__withintesting"):
         return DummyProgressBar()
     elif ytcfg.getboolean("yt", "__withinreason"):
@@ -348,13 +349,12 @@ def get_pbar(title, maxval):
         return ExtProgressBar(title, maxval)
     elif ytcfg.getboolean("yt", "__parallel"):
         return ParallelProgressBar(title, maxval)
-    else:
-        widgets = [ title,
-                    pb.Percentage(), ' ',
-                    pb.Bar(marker=pb.RotatingMarker()),
-                    ' ', pb.ETA(), ' ']
-        pbar = pb.ProgressBar(widgets=widgets,
-                              maxval=maxval).start()
+    widgets = [ title,
+            pb.Percentage(), ' ',
+            pb.Bar(marker=pb.RotatingMarker()),
+            ' ', pb.ETA(), ' ']
+    pbar = pb.ProgressBar(widgets=widgets,
+                          maxval=maxval).start()
     return pbar
 
 def only_on_root(func, *args, **kwargs):
@@ -650,6 +650,12 @@ def ensure_dir_exists(path):
     if not os.path.exists(my_dir):
         only_on_root(os.makedirs, my_dir)
 
+def ensure_dir(path):
+    r"""Parallel safe directory maker."""
+    if not os.path.exists(path):
+        only_on_root(os.makedirs, path)
+    return path
+        
 def assert_valid_width_tuple(width):
     try:
         assert iterable(width) and len(width) == 2, \
@@ -707,3 +713,15 @@ def memory_checker(interval = 15):
     mem_check.start()
     yield
     e.set()
+
+def deprecated_class(cls):
+    @wraps(cls)
+    def _func(*args, **kwargs):
+        # Note we use SyntaxWarning because by default, DeprecationWarning is
+        # not shown.
+        warnings.warn(
+            "This usage is deprecated.  Please use %s instead." % cls.__name__,
+            SyntaxWarning, stacklevel=2)
+        return cls(*args, **kwargs)
+    return _func
+    

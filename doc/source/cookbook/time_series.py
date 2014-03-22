@@ -13,7 +13,7 @@ fns.sort()
 
 # Construct the time series object
 
-ts = TimeSeriesData.from_filenames(fns)
+ts = DatasetSeries.from_filenames(fns)
 
 storage = {}
 
@@ -21,10 +21,10 @@ storage = {}
 # Alternately, you could just iterate "for pf in ts:" and directly append to
 # times and entrs.
 for sto, pf in ts.piter(storage=storage):
-    sphere = pf.h.sphere("c", (100., "kpc"))
-    temp = sphere["Temperature"]/keV
-    dens = sphere["Density"]/(m_p*mue)
-    mgas = sphere["CellMass"]
+    sphere = pf.sphere("c", (100., "kpc"))
+    temp = sphere["temperature"]/keV
+    dens = sphere["density"]/(m_p*mue)
+    mgas = sphere["cell_mass"]
     entr = (temp*(dens**mtt)*mgas).sum()/mgas.sum() 
     sto.result = (pf.current_time, entr)
 

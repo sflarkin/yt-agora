@@ -27,7 +27,6 @@ from yt.utilities.definitions import inv_axis_names
 from yt.visualization.volume_rendering.camera import off_axis_projection
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
      communication_system, parallel_root_only
-from yt.visualization.plot_window import StandardCenter
 from yt import units
 
 import numpy as np
@@ -140,7 +139,7 @@ class SZProjection(object):
 
         beta_par = generate_beta_par(L)
         self.pf.field_info.add_field(name=("gas","beta_par"), function=beta_par, units="g/cm**3")
-        proj = self.pf.h.proj("density", axis, center=ctr, data_source=source)
+        proj = self.pf.proj("density", axis, center=ctr, data_source=source)
         frb = proj.to_frb(width, nx)
         dens = frb["density"]
         Te = frb["t_sz"]/dens

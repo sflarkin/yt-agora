@@ -14,6 +14,7 @@ Callbacksr to add additional functionality on to plots.
 #-----------------------------------------------------------------------------
 
 import numpy as np
+import h5py
 
 from yt.funcs import *
 from _mpl_imports import *
@@ -28,6 +29,7 @@ from yt.utilities.physical_constants import \
     sec_per_day, sec_per_hr
 from yt.units.yt_array import YTQuantity, YTArray
 from yt.visualization.image_writer import apply_colormap
+from yt.utilities.lib.geometry_utils import triangle_plane_intersect
 
 import _MPL
 
@@ -1125,7 +1127,7 @@ class ParticleCallback(PlotCallback):
         px, py = self.convert_to_plot(plot,
                     [reg[field_x][gg][::self.stride],
                      reg[field_y][gg][::self.stride]])
-        plot._axes.scatter(px, py, edgecolors='None', marker=self.marker,
+        plot._axes.scatter(px.ndarray_view(), py.ndarray_view(), edgecolors='None', marker=self.marker,
                            s=self.p_size, c=self.color,alpha=self.alpha)
         plot._axes.set_xlim(xx0,xx1)
         plot._axes.set_ylim(yy0,yy1)
@@ -1139,13 +1141,13 @@ class ParticleCallback(PlotCallback):
         zax = axis
         LE[xax], RE[xax] = xlim
         LE[yax], RE[yax] = ylim
-        LE[zax] = data.center[zax] - self.width*0.5
-        RE[zax] = data.center[zax] + self.width*0.5
+        LE[zax] = data.center[zax].ndarray_view() - self.width*0.5
+        RE[zax] = data.center[zax].ndarray_view() + self.width*0.5
         if self.region is not None \
             and np.all(self.region.left_edge <= LE) \
             and np.all(self.region.right_edge >= RE):
             return self.region
-        self.region = data.pf.h.region(data.center, LE, RE)
+        self.region = data.pf.region(data.center, LE, RE)
         return self.region
 
 class TitleCallback(PlotCallback):
@@ -1313,7 +1315,7 @@ class MaterialBoundaryCallback(ContourCallback):
                                clim=(0.9, 1.0), **kwargs):
 
     Add the limiting contours of *field* to the plot.  Nominally, *field* is 
-    the target material but may be any other field present in the hierarchy.
+    the target material but may be any other field present in the index.
     The number of contours generated is given by *ncount*, *factor* governs 
     the number of points used in the interpolation, and *clim* gives the 
     (upper, lower) limits for contouring.  For this to truly be the boundary
@@ -1332,4 +1334,30 @@ class MaterialBoundaryCallback(ContourCallback):
 
     def __call__(self, plot):
         super(MaterialBoundaryCallback, self).__call__(plot)
+
+class TriangleFacetsCallback(PlotCallback):
+    """ 
+    annotate_triangle_facets(triangle_vertices, plot_args=None )
+
+    Intended for representing a slice of a triangular faceted 
+    geometry in a slice plot. 
+
+    Uses a set of *triangle_vertices* to find all trangles the plane of a 
+    SlicePlot intersects with. The lines between the intersection points 
+    of the triangles are then added to the plot to create an outline
+    of the geometry represented by the triangles. 
+    """
+    _type_name = "triangle_facets"
+    def __init__(self, triangle_vertices, plot_args=None):
+        super(TriangleFacetsCallback, self).__init__()
+        self.plot_args = {} if plot_args is None else plot_args
+        self.vertices = triangle_vertices
+
+    def __call__(self, plot):
+        plot._axes.hold(True)
+        xax, yax = x_dict[plot.data.axis], y_dict[plot.data.axis]
+        l_cy = triangle_plane_intersect(plot.data.axis, plot.data.coord, self.vertices)[:,:,(xax, yax)]
+        lc = matplotlib.collections.LineCollection(l_cy, **self.plot_args)
+        plot._axes.add_collection(lc)
+        plot._axes.hold(False)
 
