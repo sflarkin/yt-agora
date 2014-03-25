@@ -21,6 +21,7 @@ except ImportError:
 import stat
 import numpy as np
 import weakref
+import warnings
 
 from yt.config import ytcfg
 from yt.funcs import *
@@ -252,7 +253,9 @@ class FITSDataset(Dataset):
         except:
             pass
         try:
-            fileh = pyfits.open(args[0])
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', category=UserWarning, append=True)
+                fileh = pyfits.open(args[0])
             for h in fileh:
                 if h.is_image and h.data is not None:
                     fileh.close()
