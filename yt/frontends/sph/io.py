@@ -113,7 +113,9 @@ class IOHandlerOWLS(BaseIOHandler):
                     elif field in self._element_names:
                         rfield = 'ElementAbundance/' + field
                         data = g[rfield][:][mask,...]
-
+                    elif field.startswith("Metallicity_"):
+                        col = int(field.rsplit("_", 1)[-1])
+                        data = g["Metallicity"][:,col][mask]
                     else:
                         data = g[field][:][mask,...]
 
@@ -178,6 +180,8 @@ class IOHandlerOWLS(BaseIOHandler):
 
             #ptype = int(key[8:])
             ptype = str(key)
+            if ptype not in self.var_mass:
+                fields.append((ptype, mname))
 
             # loop over all keys in PartTypeX group
             #----------------------------------------
@@ -188,6 +192,10 @@ class IOHandlerOWLS(BaseIOHandler):
                     for j in gp.keys():
                         kk = j
                         fields.append((ptype, str(kk)))
+                elif k == 'Metallicity' and len(g[k].shape) > 1:
+                    # Vector of metallicity
+                    for i in range(g[k].shape[1]):
+                        fields.append((ptype, "Metallicity_%02i" % i))
                 else:
                     kk = k
                     if not hasattr(g[kk], "shape"): continue
@@ -390,7 +398,7 @@ class IOHandlerTipsyBinary(BaseIOHandler):
                 "DarkMatter",
                 "Stars" )
 
-    _aux_fields = []
+    _aux_fields = None
     _fields = ( ("Gas", "Mass"),
                 ("Gas", "Coordinates"),
                 ("Gas", "Velocities"),
@@ -412,6 +420,10 @@ class IOHandlerTipsyBinary(BaseIOHandler):
                 ("Stars", "Epsilon"),
                 ("Stars", "Phi")
               )
+
+    def __init__(self, *args, **kwargs):
+        self._aux_fields = []
+        super(IOHandlerTipsyBinary, self).__init__(*args, **kwargs)
 
     def _read_fluid_selection(self, chunks, selector, fields, size):
         raise NotImplementedError
@@ -621,6 +633,22 @@ class IOHandlerTipsyBinary(BaseIOHandler):
         }
         return npart
 
+    @classmethod
+    def _compute_dtypes(cls, field_dtypes, endian = "<"):
+        pds = {}
+        for ptype, field in cls._fields:
+            dtbase = field_dtypes.get(field, 'f')
+            ff = "%s%s" % (endian, dtbase)
+            if field in cls._vector_fields:
+                dt = (field, [('x', ff), ('y', ff), ('z', ff)])
+            else:
+                dt = (field, ff)
+            pds.setdefault(ptype, []).append(dt)
+        pdtypes = {}
+        for ptype in pds:
+            pdtypes[ptype] = np.dtype(pds[ptype])
+        return pdtypes
+
     def _create_dtypes(self, data_file):
         # We can just look at the particle counts.
         self._header_offset = data_file.pf._header_offset
@@ -630,19 +658,14 @@ class IOHandlerTipsyBinary(BaseIOHandler):
         tp = data_file.total_particles
         aux_filenames = glob.glob(data_file.filename+'.*') # Find out which auxiliaries we have
         self._aux_fields = [f[1+len(data_file.filename):] for f in aux_filenames]
+        self._pdtypes = self._compute_dtypes(data_file.pf._field_dtypes,
+                                             data_file.pf.endian)
         for ptype, field in self._fields:
-            pfields = []
-            if tp[ptype] == 0: continue
-            dtbase = data_file.pf._field_dtypes.get(field, 'f')
-            ff = "%s%s" % (data_file.pf.endian, dtbase)
-            if field in self._vector_fields:
-                dt = (field, [('x', ff), ('y', ff), ('z', ff)])
-            else:
-                dt = (field, ff)
-            pds.setdefault(ptype, []).append(dt)
+            if tp[ptype] == 0:
+                # We do not want out _pdtypes to have empty particles.
+                self._pdtypes.pop(ptype, None)
+                continue
             field_list.append((ptype, field))
-        for ptype in pds:
-            self._pdtypes[ptype] = np.dtype(pds[ptype])
         if any(["Gas"==f[0] for f in field_list]): #Add the auxiliary fields to each ptype we have
             field_list += [("Gas",a) for a in self._aux_fields] 
         if any(["DarkMatter"==f[0] for f in field_list]):

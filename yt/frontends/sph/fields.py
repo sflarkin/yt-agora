@@ -63,9 +63,28 @@ class SPHFieldInfo(FieldInfoContainer):
         ("Metals", ("code_metallicity", ["metallicity"], None)),
         ("Phi", ("code_length", [], None)),
         ("FormationTime", ("code_time", ["creation_time"], None)),
+        # These are metallicity fields that get discovered for FIRE simulations
+        ("Metallicity_00", ("", ["metallicity"], None)),
+        ("Metallicity_01", ("", ["He_fraction"], None)),
+        ("Metallicity_02", ("", ["C_fraction"], None)),
+        ("Metallicity_03", ("", ["N_fraction"], None)),
+        ("Metallicity_04", ("", ["O_fraction"], None)),
+        ("Metallicity_05", ("", ["Ne_fraction"], None)),
+        ("Metallicity_06", ("", ["Mg_fraction"], None)),
+        ("Metallicity_07", ("", ["Si_fraction"], None)),
+        ("Metallicity_08", ("", ["S_fraction"], None)),
+        ("Metallicity_09", ("", ["Ca_fraction"], None)),
+        ("Metallicity_10", ("", ["Fe_fraction"], None)),
     )
 
-
+    def setup_particle_fields(self, ptype):
+        super(SPHFieldInfo, self).setup_particle_fields(ptype)
+        for _, fname in self.field_aliases:
+            if _ != ptype: continue
+            if not fname.endswith("_fraction"): continue
+            element, _ = fname.split("_")
+            add_species_field_by_fraction(self, ptype, element,
+                                          particle_type=True)
 
 class TipsyFieldInfo(SPHFieldInfo):
 
