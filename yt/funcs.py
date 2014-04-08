@@ -605,6 +605,8 @@ def fix_length(length, pf=None):
     else:
         registry = None
     if isinstance(length, YTArray):
+        if registry is not None:
+            length.units.registry = registry
         return length.in_units("code_length")
     if isinstance(length, numeric_type):
         return YTArray(length, 'code_length', registry=registry)
@@ -725,3 +727,14 @@ def deprecated_class(cls):
         return cls(*args, **kwargs)
     return _func
     
+def enable_plugins():
+    from yt.config import ytcfg
+    my_plugin_name = ytcfg.get("yt","pluginfilename")
+    # We assume that it is with respect to the $HOME/.yt directory
+    if os.path.isfile(my_plugin_name):
+        _fn = my_plugin_name
+    else:
+        _fn = os.path.expanduser("~/.yt/%s" % my_plugin_name)
+    if os.path.isfile(_fn):
+        mylog.info("Loading plugins from %s", _fn)
+        execfile(_fn)

@@ -80,8 +80,7 @@ def particle_deposition_functions(ptype, coord_name, mass_name, registry):
     registry.add_field(("deposit", "%s_count" % ptype),
              function = particle_count,
              validators = [ValidateSpatial()],
-             display_name = "\\mathrm{%s Count}" % ptype,
-             projection_conversion = '1')
+             display_name = "\\mathrm{%s Count}" % ptype)
 
     def particle_mass(field, data):
         pos = data[ptype, coord_name]
@@ -133,12 +132,6 @@ def particle_deposition_functions(ptype, coord_name, mass_name, registry):
                        function = particle_ones,
                        particle_type = True,
                        units = "")
-
-    registry.alias((ptype, "ParticleMass"), (ptype, mass_name),
-                    units = "g")
-
-    registry.alias((ptype, "ParticleMassMsun"), (ptype, mass_name),
-                    units = "Msun")
 
     def particle_mesh_ids(field, data):
         pos = data[ptype, coord_name]

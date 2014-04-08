@@ -161,8 +161,12 @@ def get_sanitized_center(center, pf):
     return center
 
 def get_window_parameters(axis, center, width, pf):
-    width = get_sanitized_width(axis, width, None, pf)
-    center = get_sanitized_center(center, pf)
+    if pf.geometry == "cartesian":
+        width = get_sanitized_width(axis, width, None, pf)
+        center = get_sanitized_center(center, pf)
+    elif pf.geometry in ("polar", "cylindrical"):
+        width = [pf.domain_right_edge[0]*2.0, pf.domain_right_edge[0]*2.0]
+        center = pf.arr([0.0, 0.0, 0.0], "code_length")
     bounds = (center[x_dict[axis]]-width[0] / 2,
               center[x_dict[axis]]+width[0] / 2,
               center[y_dict[axis]]-width[1] / 2,
@@ -301,6 +305,8 @@ class PlotWindow(ImagePlotContainer):
             bounds = self.xlim+self.ylim+self.zlim
         else:
             bounds = self.xlim+self.ylim
+        if self._frb_generator is ObliqueFixedResolutionBuffer:
+            bounds = np.array(bounds)
         self._frb = self._frb_generator(self.data_source,
                                         bounds, self.buff_size,
                                         self.antialias,
@@ -796,8 +802,11 @@ class PWViewerMPL(PlotWindow):
 
             self.run_callbacks(f)
 
-            self.plots[f]._toggle_axes(draw_axes)
-            self.plots[f]._toggle_colorbar(draw_colorbar)
+            if draw_axes is False:
+                self.plots[f]._toggle_axes(draw_axes)
+
+            if draw_colorbar is False:
+                self.plots[f]._toggle_colorbar(draw_colorbar)
 
             if self._font_color is not None:
                 ax = self.plots[f].axes

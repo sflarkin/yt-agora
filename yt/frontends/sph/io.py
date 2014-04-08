@@ -14,6 +14,7 @@ Gadget-specific data-file handling function
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
+import glob
 import h5py
 import numpy as np
 from .definitions import gadget_ptypes, ghdf5_ptypes
@@ -52,6 +53,9 @@ class IOHandlerOWLS(BaseIOHandler):
     _vector_fields = ("Coordinates", "Velocity", "Velocities")
     _known_ptypes = ghdf5_ptypes
     _var_mass = None
+    _element_names = ('Hydrogen', 'Helium', 'Carbon', 'Nitrogen', 'Oxygen', 
+                       'Neon', 'Magnesium', 'Silicon', 'Iron' )
+
 
     @property
     def var_mass(self):
@@ -99,13 +103,20 @@ class IOHandlerOWLS(BaseIOHandler):
                 del coords
                 if mask is None: continue
                 for field in field_list:
+                    
                     if field in ("Mass", "Masses") and \
                         ptype not in self.var_mass:
                         data = np.empty(mask.sum(), dtype="float64")
                         ind = self._known_ptypes.index(ptype) 
                         data[:] = self.pf["Massarr"][ind]
+
+                    elif field in self._element_names:
+                        rfield = 'ElementAbundance/' + field
+                        data = g[rfield][:][mask,...]
+
                     else:
                         data = g[field][:][mask,...]
+
                     yield (ptype, field), data
             f.close()
 
@@ -143,24 +154,48 @@ class IOHandlerOWLS(BaseIOHandler):
         npart = dict(("PartType%s" % (i), v) for i, v in enumerate(pcount)) 
         return npart
 
+
     def _identify_fields(self, data_file):
         f = _get_h5_handle(data_file.filename)
         fields = []
-        cname = self.pf._particle_coordinates_name
-        mname = self.pf._particle_mass_name
-        for key in f.keys():
+        cname = self.pf._particle_coordinates_name  # Coordinates
+        mname = self.pf._particle_mass_name  # Mass
+
+        # loop over all keys in OWLS hdf5 file
+        #--------------------------------------------------
+        for key in f.keys():   
+
+            # only want particle data
+            #--------------------------------------
             if not key.startswith("PartType"): continue
+
+            # particle data group
+            #--------------------------------------
             g = f[key]
             if cname not in g: continue
+
+            # note str => not unicode!
+
             #ptype = int(key[8:])
             ptype = str(key)
-            for k in g.keys():
-                if not hasattr(g[k], "shape"): continue
-                # str => not unicode!
-                fields.append((ptype, str(k)))
-            if mname not in g.keys():
-                # We'll append it anyway.
+            if ptype not in self.var_mass:
                 fields.append((ptype, mname))
+
+            # loop over all keys in PartTypeX group
+            #----------------------------------------
+            for k in g.keys():
+
+                if k == 'ElementAbundance':
+                    gp = g[k]
+                    for j in gp.keys():
+                        kk = j
+                        fields.append((ptype, str(kk)))
+                else:
+                    kk = k
+                    if not hasattr(g[kk], "shape"): continue
+                    fields.append((ptype, str(kk)))
+
+
         f.close()
         return fields, {}
 
@@ -357,6 +392,7 @@ class IOHandlerTipsyBinary(BaseIOHandler):
                 "DarkMatter",
                 "Stars" )
 
+    _aux_fields = None
     _fields = ( ("Gas", "Mass"),
                 ("Gas", "Coordinates"),
                 ("Gas", "Velocities"),
@@ -379,10 +415,58 @@ class IOHandlerTipsyBinary(BaseIOHandler):
                 ("Stars", "Phi")
               )
 
+    def __init__(self, *args, **kwargs):
+        self._aux_fields = []
+        super(IOHandlerTipsyBinary, self).__init__(*args, **kwargs)
+
     def _read_fluid_selection(self, chunks, selector, fields, size):
         raise NotImplementedError
 
-    def _fill_fields(self, fields, vals, mask):
+    def _read_aux_fields(self, field, mask, data_file):
+        """
+        Read in auxiliary files from gasoline/pkdgrav.
+        This method will automatically detect the format of the file.
+        """
+        filename = data_file.filename+'.'+field
+        dtype = None
+        # We need to do some fairly ugly detection to see what format the auxiliary
+        # files are in.  They can be either ascii or binary, and the binary files can be
+        # either floats, ints, or doubles.  We're going to use a try-catch cascade to 
+        # determine the format.
+        try:#ASCII
+            auxdata = np.genfromtxt(filename, skip_header=1)
+            if auxdata.size != np.sum(data_file.total_particles.values()):
+                print "Error reading auxiliary tipsy file"
+                raise RuntimeError 
+        except ValueError:#binary/xdr
+            f = open(filename, 'rb')
+            l = struct.unpack(data_file.pf.endian+"i", f.read(4))[0]
+            if l != np.sum(data_file.total_particles.values()):
+                print "Error reading auxiliary tipsy file"
+                raise RuntimeError
+            dtype = 'd'
+            if field in ('iord', 'igasorder', 'grp'):#These fields are integers
+                dtype = 'i'
+            try:# If we try loading doubles by default, we can catch an exception and try floats next
+                auxdata = np.array(struct.unpack(data_file.pf.endian+(l*dtype), f.read()))
+            except struct.error:
+                f.seek(4)
+                dtype = 'f'
+                try:
+                    auxdata = np.array(struct.unpack(data_file.pf.endian+(l*dtype), f.read()))
+                except struct.error: # None of the binary attempts to read succeeded
+                    print "Error reading auxiliary tipsy file"
+                    raise RuntimeError
+            
+        # Use the mask to slice out the appropriate particle type data
+        if mask.size == data_file.total_particles['Gas']:
+            return auxdata[:data_file.total_particles['Gas']]
+        elif mask.size == data_file.total_particles['DarkMatter']:
+            return auxdata[data_file.total_particles['Gas']:-data_file.total_particles['DarkMatter']]
+        else:
+            return auxdata[-data_file.total_particles['Stars']:]
+
+    def _fill_fields(self, fields, vals, mask, data_file):
         if mask is None:
             size = 0
         else:
@@ -390,7 +474,9 @@ class IOHandlerTipsyBinary(BaseIOHandler):
         rv = {}
         for field in fields:
             mylog.debug("Allocating %s values for %s", size, field)
-            if field in self._vector_fields:
+            if field in self._aux_fields: #Read each of the auxiliary fields
+                rv[field] = self._read_aux_fields(field, mask, data_file)
+            elif field in self._vector_fields:
                 rv[field] = np.empty((size, 3), dtype="float64")
                 if size == 0: continue
                 rv[field][:,0] = vals[field]['x'][mask]
@@ -407,6 +493,7 @@ class IOHandlerTipsyBinary(BaseIOHandler):
                       self.domain_left_edge[i] + eps,
                       self.domain_right_edge[i] - eps)
         return rv
+
 
     def _read_particle_coords(self, chunks, ptf):
         data_files = set([])
@@ -443,10 +530,47 @@ class IOHandlerTipsyBinary(BaseIOHandler):
                     p["Coordinates"]['y'].astype("float64"),
                     p["Coordinates"]['z'].astype("float64"))
                 if mask is None: continue
-                tf = self._fill_fields(field_list, p, mask)
+                tf = self._fill_fields(field_list, p, mask, data_file)
                 for field in field_list:
                     yield (ptype, field), tf.pop(field)
             f.close()
+
+    def _update_domain(self, data_file):
+        '''
+        This method is used to determine the size needed for a box that will 
+        bound the particles.  It simply finds the largest position of the
+        whole set of particles, and sets the domain to +/- that value.
+        '''
+        pf = data_file.pf
+        ind = 0
+        # Check to make sure that the domain hasn't already been set
+        # by the parameter file 
+        if np.all(np.isfinite(pf.domain_left_edge)) and np.all(np.isfinite(pf.domain_right_edge)):
+            return
+        with open(data_file.filename, "rb") as f:
+            pf.domain_left_edge = 0
+            pf.domain_right_edge = 0
+            f.seek(pf._header_offset)
+            for iptype, ptype in enumerate(self._ptypes):
+                # We'll just add the individual types separately
+                count = data_file.total_particles[ptype]
+                if count == 0: continue
+                start, stop = ind, ind + count
+                while ind < stop:
+                    c = min(CHUNKSIZE, stop - ind)
+                    pp = np.fromfile(f, dtype = self._pdtypes[ptype],
+                                     count = c)
+                    for ax in 'xyz':
+                        mi = pp["Coordinates"][ax].min()
+                        ma = pp["Coordinates"][ax].max()
+                        outlier = YTArray(np.max(np.abs((mi,ma))), 'code_length')
+                        if outlier > pf.domain_right_edge or -outlier < pf.domain_left_edge:
+                            pf.domain_left_edge = -1.01*outlier # scale these up so the domain is slightly
+                            pf.domain_right_edge = 1.01*outlier # larger than the most distant particle position
+                    ind += c
+        pf.domain_left_edge = np.ones(3)*pf.domain_left_edge
+        pf.domain_right_edge = np.ones(3)*pf.domain_right_edge
+        pf.domain_width = np.ones(3)*2*pf.domain_right_edge
 
     def _initialize_index(self, data_file, regions):
         pf = data_file.pf
@@ -503,6 +627,22 @@ class IOHandlerTipsyBinary(BaseIOHandler):
         }
         return npart
 
+    @classmethod
+    def _compute_dtypes(cls, field_dtypes, endian = "<"):
+        pds = {}
+        for ptype, field in cls._fields:
+            dtbase = field_dtypes.get(field, 'f')
+            ff = "%s%s" % (endian, dtbase)
+            if field in cls._vector_fields:
+                dt = (field, [('x', ff), ('y', ff), ('z', ff)])
+            else:
+                dt = (field, ff)
+            pds.setdefault(ptype, []).append(dt)
+        pdtypes = {}
+        for ptype in pds:
+            pdtypes[ptype] = np.dtype(pds[ptype])
+        return pdtypes
+
     def _create_dtypes(self, data_file):
         # We can just look at the particle counts.
         self._header_offset = data_file.pf._header_offset
@@ -510,19 +650,22 @@ class IOHandlerTipsyBinary(BaseIOHandler):
         pds = {}
         field_list = []
         tp = data_file.total_particles
+        aux_filenames = glob.glob(data_file.filename+'.*') # Find out which auxiliaries we have
+        self._aux_fields = [f[1+len(data_file.filename):] for f in aux_filenames]
+        self._pdtypes = self._compute_dtypes(data_file.pf._field_dtypes,
+                                             data_file.pf.endian)
         for ptype, field in self._fields:
-            pfields = []
-            if tp[ptype] == 0: continue
-            dtbase = data_file.pf._field_dtypes.get(field, 'f')
-            ff = "%s%s" % (data_file.pf.endian, dtbase)
-            if field in self._vector_fields:
-                dt = (field, [('x', ff), ('y', ff), ('z', ff)])
-            else:
-                dt = (field, ff)
-            pds.setdefault(ptype, []).append(dt)
+            if tp[ptype] == 0:
+                # We do not want out _pdtypes to have empty particles.
+                self._pdtypes.pop(ptype, None)
+                continue
             field_list.append((ptype, field))
-        for ptype in pds:
-            self._pdtypes[ptype] = np.dtype(pds[ptype])
+        if any(["Gas"==f[0] for f in field_list]): #Add the auxiliary fields to each ptype we have
+            field_list += [("Gas",a) for a in self._aux_fields] 
+        if any(["DarkMatter"==f[0] for f in field_list]):
+            field_list += [("DarkMatter",a) for a in self._aux_fields] 
+        if any(["Stars"==f[0] for f in field_list]):
+            field_list += [("Stars",a) for a in self._aux_fields] 
         self._field_list = field_list
         return self._field_list
 

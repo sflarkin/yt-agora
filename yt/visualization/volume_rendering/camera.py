@@ -21,7 +21,6 @@ from yt.utilities.math_utils import *
 from yt.units.yt_array import YTArray
 from copy import deepcopy
 
-from .grid_partitioner import HomogenizedVolume
 from .transfer_functions import ProjectionTransferFunction
 
 from yt.utilities.lib.grid_traversal import \
@@ -87,7 +86,7 @@ class Camera(ParallelAnalysisInterface):
         vector.  Makes it easier to do rotations along a single
         axis.  If north_vector is specified, is switched to
         True. Default: False
-    volume : `yt.extensions.volume_rendering.HomogenizedVolume`, optional
+    volume : `yt.extensions.volume_rendering.AMRKDTree`, optional
         The volume to ray cast through.  Can be specified for finer-grained
         control, but otherwise will be automatically generated.
     fields : list of fields, optional
@@ -1513,12 +1512,10 @@ class MosaicCamera(Camera):
 
     def build_volume(self, volume, fields, log_fields, l_max, no_ghost, tree_type, le, re):
         if volume is None:
-            if self.use_kd:
-                volume = AMRKDTree(self.pf, l_max=l_max, fields=self.fields, 
-                                   no_ghost=no_ghost, tree_type=tree_type, 
-                                   log_fields=log_fields, le=le, re=re)
-            else:
-                volume = HomogenizedVolume(fields, pf=self.pf, log_fields=log_fields)
+            if self.use_kd: raise NotImplementedError
+            volume = AMRKDTree(self.pf, l_max=l_max, fields=self.fields, 
+                               no_ghost=no_ghost, tree_type=tree_type, 
+                               log_fields=log_fields, le=le, re=re)
         else:
             self.use_kd = isinstance(volume, AMRKDTree)
         return volume
@@ -1612,7 +1609,7 @@ class MosaicFisheyeCamera(Camera):
         The radial distance to cast to
     resolution : int
         The number of pixels in each direction.  Must be a single int.
-    volume : `yt.extensions.volume_rendering.HomogenizedVolume`, optional
+    volume : `yt.extensions.volume_rendering.AMRKDTree`, optional
         The volume to ray cast through.  Can be specified for finer-grained
         control, but otherwise will be automatically generated.
     fields : list of fields, optional
@@ -2304,7 +2301,7 @@ def off_axis_projection(pf, center, normal_vector, width, resolution,
         If supplied, the field will be pre-multiplied by this, then divided by
         the integrated value of this field.  This returns an average rather
         than a sum.
-    volume : `yt.extensions.volume_rendering.HomogenizedVolume`, optional
+    volume : `yt.extensions.volume_rendering.AMRKDTree`, optional
         The volume to ray cast through.  Can be specified for finer-grained
         control, but otherwise will be automatically generated.
     no_ghost: bool, optional

@@ -41,7 +41,7 @@ class Streamlines(ParallelAnalysisInterface):
     zfield: field, optional
         The z component of the vector field to be streamlined.
         Default:'velocity_z'
-    volume : `yt.extensions.volume_rendering.HomogenizedVolume`, optional
+    volume : `yt.extensions.volume_rendering.AMRKDTree`, optional
         The volume to be streamlined.  Can be specified for
         finer-grained control, but otherwise will be automatically
         generated.  At this point it must use the AMRKDTree. 
@@ -99,8 +99,10 @@ class Streamlines(ParallelAnalysisInterface):
         self.get_magnitude=get_magnitude
         self.direction = np.sign(direction)
         if volume is None:
-            volume = AMRKDTree(self.pf, fields=[self.xfield,self.yfield,self.zfield],
-                            log_fields=[False,False,False])
+            volume = AMRKDTree(self.pf)
+            volume.set_fields([self.xfield,self.yfield,self.zfield],
+                              [False,False,False],
+                              False)
             volume.join_parallel_trees()
         self.volume = volume
         if dx is None:
