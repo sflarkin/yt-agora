@@ -38,11 +38,13 @@ from yt.utilities.physical_constants import \
     mass_sun_cgs
 from yt.utilities.cosmology import Cosmology
 from .fields import \
-    SPHFieldInfo
+    SPHFieldInfo, OWLSFieldInfo, TipsyFieldInfo
 from .definitions import \
     gadget_header_specs, \
     gadget_field_specs, \
     gadget_ptype_specs
+from .io import \
+    IOHandlerTipsyBinary
 
 try:
     import requests
@@ -209,7 +211,10 @@ class GadgetDataset(ParticleDataset):
         if "length" in unit_base:
             length_unit = unit_base["length"]
         elif "UnitLength_in_cm" in unit_base:
-            length_unit = (unit_base["UnitLength_in_cm"], "cm")
+            if self.cosmological_simulation == 0:
+                length_unit = (unit_base["UnitLength_in_cm"], "cm")
+            else:
+                length_unit = (unit_base["UnitLength_in_cm"], "cmcm/h")
         else:
             raise RuntimeError
         length_unit = _fix_unit_ordering(length_unit)
@@ -229,7 +234,10 @@ class GadgetDataset(ParticleDataset):
         if "mass" in unit_base:
             mass_unit = unit_base["mass"]
         elif "UnitMass_in_g" in unit_base:
-            mass_unit = (unit_base["UnitMass_in_g"], "g")
+            if self.cosmological_simulation == 0:
+                mass_unit = (unit_base["UnitMass_in_g"], "g")
+            else:
+                mass_unit = (unit_base["UnitMass_in_g"], "g/h")
         else:
             # Sane default
             mass_unit = (1.0, "1e10*Msun/h")
@@ -284,6 +292,9 @@ class GadgetHDF5Dataset(GadgetDataset):
 
 class OWLSDataset(GadgetHDF5Dataset):
     _particle_mass_name = "Mass"
+    _field_info_class = OWLSFieldInfo
+
+
 
     def _parse_parameter_file(self):
         handle = h5py.File(self.parameter_filename, mode="r")
@@ -350,12 +361,13 @@ class TipsyFile(ParticleFile):
         assert file_id == 0
         super(TipsyFile, self).__init__(pf, io, filename, file_id)
         io._create_dtypes(self)
+        io._update_domain(self)#Check automatically what the domain size is
 
 
 class TipsyDataset(ParticleDataset):
     _index_class = ParticleIndex
     _file_class = TipsyFile
-    _field_info_class = SPHFieldInfo
+    _field_info_class = TipsyFieldInfo
     _particle_mass_name = "Mass"
     _particle_coordinates_name = "Coordinates"
     _header_spec = (('time',    'd'),
@@ -367,30 +379,31 @@ class TipsyDataset(ParticleDataset):
                     ('dummy',   'i'))
 
     def __init__(self, filename, dataset_type="tipsy",
-                 endian=">",
                  field_dtypes=None,
-                 domain_left_edge=None,
-                 domain_right_edge=None,
                  unit_base=None,
                  cosmology_parameters=None,
                  parameter_file=None,
                  n_ref=64, over_refine_factor=1):
         self.n_ref = n_ref
         self.over_refine_factor = over_refine_factor
-        self.endian = endian
+        if field_dtypes is None:
+            field_dtypes = {}
+        success, self.endian = self._validate_header(filename, field_dtypes)
+        if not success:
+            print "SOMETHING HAS GONE WRONG.  NBODIES != SUM PARTICLES."
+            print "%s != (%s == %s + %s + %s)" % (
+                self.parameters['nbodies'],
+                tot,
+                self.parameters['nsph'],
+                self.parameters['ndark'],
+                self.parameters['nstar'])
+            print "Often this can be fixed by changing the 'endian' parameter."
+            print "This defaults to '>' but may in fact be '<'."
+            raise RuntimeError
         self.storage_filename = None
-        if domain_left_edge is None:
-            domain_left_edge = np.zeros(3, "float64") - 0.5
-        if domain_right_edge is None:
-            domain_right_edge = np.zeros(3, "float64") + 0.5
-
-        self.domain_left_edge = np.array(domain_left_edge, dtype="float64")
-        self.domain_right_edge = np.array(domain_right_edge, dtype="float64")
 
         # My understanding is that dtypes are set on a field by field basis,
         # not on a (particle type, field) basis
-        if field_dtypes is None:
-            field_dtypes = {}
         self._field_dtypes = field_dtypes
 
         self._unit_base = unit_base or {}
@@ -421,6 +434,7 @@ class TipsyDataset(ParticleDataset):
         self.refine_by = 2
         self.parameters["HydroMethod"] = "sph"
 
+
         self.unique_identifier = \
             int(os.stat(self.parameter_filename)[stat.ST_CTIME])
 
@@ -444,6 +458,7 @@ class TipsyDataset(ParticleDataset):
                     continue
                 # parse parameters according to tipsy parameter type
                 param, val = (i.strip() for i in line.split('=', 1))
+                val = val.split('#')[0]
                 if param.startswith('n') or param.startswith('i'):
                     val = long(val)
                 elif param.startswith('d'):
@@ -457,22 +472,14 @@ class TipsyDataset(ParticleDataset):
         self.domain_dimensions = np.ones(3, "int32") * nz
         if self.parameters.get('bPeriodic', True):
             self.periodicity = (True, True, True)
+            # If we are periodic, that sets our domain width to either 1 or dPeriod.
+            self.domain_left_edge = np.zeros(3, "float64") - 0.5*self.parameters.get('dPeriod', 1)
+            self.domain_right_edge = np.zeros(3, "float64") + 0.5*self.parameters.get('dPeriod', 1)
         else:
             self.periodicity = (False, False, False)
-        tot = sum(self.parameters[ptype] for ptype
-                  in ('nsph', 'ndark', 'nstar'))
-        if tot != self.parameters['nbodies']:
-            print "SOMETHING HAS GONE WRONG.  NBODIES != SUM PARTICLES."
-            print "%s != (%s == %s + %s + %s)" % (
-                self.parameters['nbodies'],
-                tot,
-                self.parameters['nsph'],
-                self.parameters['ndark'],
-                self.parameters['nstar'])
-            print "Often this can be fixed by changing the 'endian' parameter."
-            print "This defaults to '>' but may in fact be '<'."
-            raise RuntimeError
-        if self.parameters.get('bComove', True):
+            self.domain_left_edge = None
+            self.domain_right_edge = None
+        if self.parameters.get('bComove', False):
             self.cosmological_simulation = 1
             cosm = self._cosmology_parameters or {}
             dcosm = dict(current_redshift=0.0,
@@ -514,10 +521,50 @@ class TipsyDataset(ParticleDataset):
             density_unit = self.mass_unit / self.length_unit**3
         self.time_unit = 1.0 / np.sqrt(G * density_unit)
 
+    @staticmethod
+    def _validate_header(filename, field_dtypes):
+        '''
+        This method automatically detects whether the tipsy file is big/little endian
+        and is not corrupt/invalid.  It returns a tuple of (Valid, endianswap) where
+        Valid is a boolean that is true if the file is a tipsy file, and endianswap is 
+        the endianness character '>' or '<'.
+        '''
+        try:
+            f = open(filename,'rb')
+        except:
+            return False, 1
+        try:
+            fs = len(f.read())
+        except IOError:
+            return False, 1
+        f.seek(0)
+        #Read in the header
+        t, n, ndim, ng, nd, ns = struct.unpack("<diiiii", f.read(28))
+        endianswap = "<"
+        #Check Endianness
+        if (ndim < 1 or ndim > 3):
+            endianswap = ">"
+            f.seek(0)
+            t, n, ndim, ng, nd, ns = struct.unpack(">diiiii", f.read(28))
+        # Now we construct the sizes of each of the particles.
+        dtypes = IOHandlerTipsyBinary._compute_dtypes(field_dtypes, endianswap)
+        #Catch for 4 byte padding
+        gas_size = dtypes["Gas"].itemsize
+        dm_size = dtypes["DarkMatter"].itemsize
+        star_size = dtypes["Stars"].itemsize
+        if (fs == 32+gas_size*ng+dm_size*nd+star_size*ns):
+            f.read(4)
+        #File is borked if this is true
+        elif (fs != 28+gas_size*ng+dm_size*nd+star_size*ns):
+            f.close()
+            return False, 0
+        f.close()
+        return True, endianswap
+
     @classmethod
     def _is_valid(self, *args, **kwargs):
-        # We do not allow load() of these files.
-        return False
+        field_dtypes = kwargs.get("field_dtypes", {})
+        return TipsyDataset._validate_header(args[0], field_dtypes)[0]
 
 class HTTPParticleFile(ParticleFile):
     pass

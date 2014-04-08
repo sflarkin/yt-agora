@@ -17,7 +17,9 @@ Cartesian fields
 import numpy as np
 from .coordinate_handler import \
     CoordinateHandler, \
-    _unknown_coord
+    _unknown_coord, \
+    _get_coord_fields
+import yt.visualization._MPL as _MPL
 
 class CartesianCoordinateHandler(CoordinateHandler):
 
@@ -25,16 +27,8 @@ class CartesianCoordinateHandler(CoordinateHandler):
         super(CartesianCoordinateHandler, self).__init__(pf)
 
     def setup_fields(self, registry):
-        def _get_coord_fields(axi, ax):
-            def _dds(field, data):
-                rv = data.pf.arr(data.fwidth[...,axi], 'code_length')
-                return data._reshape_vals(rv)
-            def _coords(field, data):
-                rv = data.pf.arr(data.fcoords[...,axi], 'code_length')
-                return data._reshape_vals(rv)
-            return _dds, _coords
         for axi, ax in enumerate('xyz'):
-            f1, f2 = _get_coord_fields(axi, ax)
+            f1, f2 = _get_coord_fields(axi)
             registry.add_field(("index", "d%s" % ax), function = f1,
                                display_field = False,
                                units = "code_length")
@@ -53,19 +47,27 @@ class CartesianCoordinateHandler(CoordinateHandler):
              ("index", "x"), ("index", "y"), ("index", "z"),
              ("index", "cell_volume")])
 
-    def pixelize(self, dimension, data_source, field, bounds, size, antialias = True):
+    def pixelize(self, dimension, data_source, field, bounds, size,
+                 antialias = True, periodic = True):
         if dimension < 3:
-            return self._ortho_pixelize(data_source, field, bounds, size, antialias)
+            return self._ortho_pixelize(data_source, field, bounds, size,
+                                        antialias, dimension, periodic)
         else:
-            return self._oblique_pixelize(data_source, field, bounds, size, antialias)
+            return self._oblique_pixelize(data_source, field, bounds, size,
+                                          antialias)
 
-    def _ortho_pixelize(self, data_source, field, bounds, size, antialias):
+    def _ortho_pixelize(self, data_source, field, bounds, size, antialias,
+                        dim, periodic):
         # We should be using fcoords
+        period = self.period[:2].copy() # dummy here
+        period[0] = self.period[self.x_axis[dim]]
+        period[1] = self.period[self.y_axis[dim]]
+        period = period.in_units("code_length").d
         buff = _MPL.Pixelize(data_source['px'], data_source['py'],
                              data_source['pdx'], data_source['pdy'],
                              data_source[field], size[0], size[1],
                              bounds, int(antialias),
-                             True, self.period).transpose()
+                             period, int(periodic)).transpose()
         return buff
 
     def _oblique_pixelize(self, data_source, field, bounds, size, antialias):

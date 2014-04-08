@@ -128,7 +128,9 @@ class FieldDetector(defaultdict):
                 return self[item]
         elif finfo is not None and finfo.particle_type:
             if "particle_position" in (item, item[1]) or \
-               "particle_velocity" in (item, item[1]):
+               "particle_velocity" in (item, item[1]) or \
+               "Velocity" in (item, item[1]) or \
+               "Coordinates" in (item, item[1]):
                 # A vector
                 self[item] = \
                   YTArray(np.ones((self.NumberOfParticles, 3)),
@@ -186,6 +188,8 @@ class FieldDetector(defaultdict):
             return rv
         elif param == "fof_groups":
             return None
+        elif param == "mu":
+            return 1.0
         else:
             return 0.0
 

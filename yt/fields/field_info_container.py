@@ -55,6 +55,7 @@ class FieldInfoContainer(dict):
     known_particle_fields = ()
 
     def __init__(self, pf, field_list, slice_info = None):
+        self._show_field_errors = []
         self.pf = pf
         # Now we start setting things up.
         self.field_list = field_list
@@ -65,8 +66,9 @@ class FieldInfoContainer(dict):
     def setup_fluid_fields(self):
         pass
 
-    def setup_particle_fields(self, ptype):
+    def setup_particle_fields(self, ptype, ftype='gas', num_neighbors=64 ):
         for f, (units, aliases, dn) in sorted(self.known_particle_fields):
+            units = self.pf.field_units.get((ptype, f), units)
             self.add_output_field((ptype, f),
                 units = units, particle_type = True, display_name = dn)
             if (ptype, f) not in self.field_list:
@@ -98,7 +100,9 @@ class FieldInfoContainer(dict):
             self.add_output_field(field, 
                                   units = self.pf.field_units.get(field, ""),
                                   particle_type = True)
-        self.setup_smoothed_fields(ptype)
+        self.setup_smoothed_fields(ptype, 
+                                   num_neighbors=num_neighbors,
+                                   ftype=ftype)
 
     def setup_smoothed_fields(self, ptype, num_neighbors = 64, ftype = "gas"):
         # We can in principle compute this, but it is not yet implemented.
@@ -110,6 +114,8 @@ class FieldInfoContainer(dict):
             sml_name = None
         new_aliases = []
         for _, alias_name in self.field_aliases:
+            if alias_name in ("particle_position", "particle_velocity"):
+                continue
             fn = add_volume_weighted_smoothed_field(ptype,
                 "particle_position", "particle_mass",
                 sml_name, "density", alias_name, self,
@@ -171,8 +177,11 @@ class FieldInfoContainer(dict):
         self.find_dependencies(loaded)
 
     def load_plugin(self, plugin_name, ftype = "gas", skip_check = False):
+        if callable(plugin_name):
+            f = plugin_name
+        else:
+            f = field_plugins[plugin_name]
         orig = set(self.items())
-        f = field_plugins[plugin_name]
         f(self, ftype, slice_info = self.slice_info)
         loaded = [n for n, v in set(self.items()).difference(orig)]
         return loaded
@@ -309,6 +318,8 @@ class FieldInfoContainer(dict):
             try:
                 fd = fi.get_dependencies(pf = self.pf)
             except Exception as e:
+                if field in self._show_field_errors:
+                    raise
                 if type(e) != YTFieldNotFound:
                     mylog.debug("Raises %s during field %s detection.",
                                 str(type(e)), field)

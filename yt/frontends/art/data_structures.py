@@ -14,7 +14,6 @@ ART-specific data structures
 #-----------------------------------------------------------------------------
 import numpy as np
 import os.path
-import glob
 import stat
 import weakref
 import cStringIO
@@ -153,7 +152,7 @@ class ARTIndex(OctreeIndex):
                 g = og
             yield YTDataChunk(dobj, "spatial", [g], None)
 
-    def _chunk_io(self, dobj, cache = True):
+    def _chunk_io(self, dobj, cache = True, local_only = False):
         """
         Since subsets are calculated per domain,
         i.e. per file, yield each domain at a time to
@@ -203,14 +202,17 @@ class ARTDataset(Dataset):
         particle header, star files, etc.
         """
         base_prefix, base_suffix = filename_pattern['amr']
+        aexpstr = 'a'+file_amr.rsplit('a',1)[1].replace(base_suffix,'')
         possibles = glob.glob(os.path.dirname(file_amr)+"/*")
         for filetype, (prefix, suffix) in filename_pattern.iteritems():
             # if this attribute is already set skip it
             if getattr(self, "_file_"+filetype, None) is not None:
                 continue
-            stripped = file_amr.replace(base_prefix, prefix)
-            stripped = stripped.replace(base_suffix, suffix)
-            match, = difflib.get_close_matches(stripped, possibles, 1, 0.6)
+            match = None
+            for possible in possibles:
+                if possible.endswith(aexpstr+suffix):
+                    if os.path.basename(possible).startswith(prefix):
+                        match = possible
             if match is not None:
                 mylog.info('discovered %s:%s', filetype, match)
                 setattr(self, "_file_"+filetype, match)

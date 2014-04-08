@@ -1,9 +1,10 @@
-import os, shutil, string, glob
+import os, shutil, string, glob, re
 from sphinx.util.compat import Directive
 from docutils import nodes
 from docutils.parsers.rst import directives
 from IPython.nbconvert import html, python
-from runipy.notebook_runner import NotebookRunner
+from IPython.nbformat.current import read, write
+from runipy.notebook_runner import NotebookRunner, NotebookError
 
 class NotebookDirective(Directive):
     """Insert an evaluated notebook into a document
@@ -14,8 +15,13 @@ class NotebookDirective(Directive):
     required_arguments = 1
     optional_arguments = 1
     option_spec = {'skip_exceptions' : directives.flag}
+    final_argument_whitespace = True
 
-    def run(self):
+    def run(self): # check if there are spaces in the notebook name
+        nb_path = self.arguments[0]
+        if ' ' in nb_path: raise ValueError(
+            "Due to issues with docutils stripping spaces from links, white "
+            "space is not allowed in notebook filenames '{0}'".format(nb_path))
         # check if raw html is supported
         if not self.state.document.settings.raw_enabled:
             raise self.warning('"%s" directive disabled.' % self.name)
@@ -23,10 +29,11 @@ class NotebookDirective(Directive):
         # get path to notebook
         source_dir = os.path.dirname(
             os.path.abspath(self.state.document.current_source))
-        nb_basename = os.path.basename(self.arguments[0])
+        nb_filename = self.arguments[0]
+        nb_basename = os.path.basename(nb_filename)
         rst_file = self.state_machine.document.attributes['source']
         rst_dir = os.path.abspath(os.path.dirname(rst_file))
-        nb_abs_path = os.path.join(rst_dir, nb_basename)
+        nb_abs_path = os.path.abspath(os.path.join(rst_dir, nb_filename))
 
         # Move files around.
         rel_dir = os.path.relpath(rst_dir, setup.confdir)
@@ -57,12 +64,8 @@ class NotebookDirective(Directive):
 
         skip_exceptions = 'skip_exceptions' in self.options
 
-        try:
-            evaluated_text = evaluate_notebook(nb_abs_path, dest_path_eval,
-                                               skip_exceptions=skip_exceptions)
-        except:
-            # bail
-            return []
+        evaluated_text = evaluate_notebook(nb_abs_path, dest_path_eval,
+                                           skip_exceptions=skip_exceptions)
 
         # Create link to notebook and script files
         link_rst = "(" + \
@@ -92,7 +95,6 @@ class NotebookDirective(Directive):
         return [nb_node]
 
 
-
 class notebook_node(nodes.raw):
     pass
 
@@ -112,6 +114,7 @@ def nb_to_html(nb_path):
     # http://imgur.com/eR9bMRH
     header = header.replace('<style', '<style scoped="scoped"')
     header = header.replace('body {\n  overflow: visible;\n  padding: 8px;\n}\n', '')
+    header = header.replace("code,pre{", "code{")
 
     # Filter out styles that conflict with the sphinx theme.
     filter_strings = [
@@ -123,8 +126,16 @@ def nb_to_html(nb_path):
     ]
     filter_strings.extend(['h%s{' % (i+1) for i in range(6)])
 
+    line_begin_strings = [
+        'pre{',
+        'p{margin'
+        ]
+
     header_lines = filter(
         lambda x: not any([s in x for s in filter_strings]), header.split('\n'))
+    header_lines = filter(
+        lambda x: not any([x.startswith(s) for s in line_begin_strings]), header_lines)
+
     header = '\n'.join(header_lines)
 
     # concatenate raw html lines
@@ -138,11 +149,20 @@ def evaluate_notebook(nb_path, dest_path=None, skip_exceptions=False):
     # Create evaluated version and save it to the dest path.
     # Always use --pylab so figures appear inline
     # perhaps this is questionable?
-    nb_runner = NotebookRunner(nb_in=nb_path, pylab=True)
-    nb_runner.run_notebook(skip_exceptions=skip_exceptions)
+    notebook = read(open(nb_path), 'json')
+    nb_runner = NotebookRunner(notebook, pylab=False)
+    try:
+        nb_runner.run_notebook(skip_exceptions=skip_exceptions)
+    except NotebookError as e:
+        print ''
+        print e
+        # Return the traceback, filtering out ANSI color codes.
+        # http://stackoverflow.com/questions/13506033/filtering-out-ansi-escape-sequences
+        return 'Notebook conversion failed with the following traceback: \n%s' % \
+            re.sub(r'\\033[\[\]]([0-9]{1,2}([;@][0-9]{0,2})*)*[mKP]?', '', str(e))
     if dest_path is None:
         dest_path = 'temp_evaluated.ipynb'
-    nb_runner.save_notebook(dest_path)
+    write(nb_runner.nb, open(dest_path, 'w'), 'json')
     ret = nb_to_html(dest_path)
     if dest_path is 'temp_evaluated.ipynb':
         os.remove(dest_path)
