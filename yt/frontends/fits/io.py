@@ -12,8 +12,6 @@ FITS-specific IO functions
 
 import numpy as np
 
-from yt.utilities.math_utils import prec_accum
-
 from yt.utilities.io_handler import \
     BaseIOHandler
 from yt.utilities.logger import ytLogger as mylog
@@ -35,7 +33,6 @@ class IOHandlerFITS(BaseIOHandler):
         chunks = list(chunks)
         if any((ftype != "fits" for ftype, fname in fields)):
             raise NotImplementedError
-        f = self._handle
         rv = {}
         dt = "float64"
         for field in fields:
@@ -45,7 +42,8 @@ class IOHandlerFITS(BaseIOHandler):
                     size, [f2 for f1, f2 in fields], ng)
         for field in fields:
             ftype, fname = field
-            ds = f[fname]
+            f = self.pf.index._file_map[fname]
+            ds = f[self.pf.index._ext_map[fname]]
             ind = 0
             for chunk in chunks:
                 for g in chunk.objs:
@@ -55,10 +53,12 @@ class IOHandlerFITS(BaseIOHandler):
                         nx, ny = g.ActiveDimensions[:2]
                         nz = 1
                         data = np.zeros((nx,ny,nz))
-                        data[:,:,0] = ds.data.transpose()[start[0]:end[0],start[1]:end[1]]
-                    elif self.pf.dimensionality == 3:
-                        data = ds.data.transpose()[start[0]:end[0],start[1]:end[1],start[2]:end[2]]
+                        data[:,:,0] = ds.data[start[1]:end[1],start[0]:end[0]].transpose()
+                    elif self.pf.naxis == 4:
+                        idx = self.pf.index._axis_map[fname]
+                        data = ds.data[idx,start[2]:end[2],start[1]:end[1],start[0]:end[0]].transpose()
+                    else:
+                        data = ds.data[start[2]:end[2],start[1]:end[1],start[0]:end[0]].transpose()
                     if self.pf.mask_nans: data[np.isnan(data)] = 0.0
                     ind += g.select(selector, data.astype("float64"), rv[field], ind)
         return rv
-
