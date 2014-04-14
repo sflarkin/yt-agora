@@ -14,6 +14,7 @@ Simple utilities that don't fit anywhere else
 #-----------------------------------------------------------------------------
 
 import numpy as np
+from yt.units.yt_array import YTArray
 cimport numpy as np
 cimport cython
 cimport libc.math as math
@@ -476,23 +477,27 @@ def pixelize_cylinder(np.ndarray[np.float64_t, ndim=1] radius,
                       np.ndarray[np.float64_t, ndim=1] dradius,
                       np.ndarray[np.float64_t, ndim=1] theta,
                       np.ndarray[np.float64_t, ndim=1] dtheta,
-                      int buff_size,
+                      buff_size,
                       np.ndarray[np.float64_t, ndim=1] field,
-                      np.float64_t rmax=-1.0) :
+                      extents, input_img = None):
 
     cdef np.ndarray[np.float64_t, ndim=2] img
     cdef np.float64_t x, y, dx, dy, r0, theta0
+    cdef np.float64_t rmax, x0, y0, x1, y1
     cdef np.float64_t r_i, theta_i, dr_i, dtheta_i, dthetamin
     cdef int i, pi, pj
     
-    if rmax < 0.0 :
-        imax = radius.argmax()
-        rmax = radius[imax] + dradius[imax]
+    imax = radius.argmax()
+    rmax = radius[imax] + dradius[imax]
           
-    img = np.zeros((buff_size, buff_size))
-    extents = [-rmax, rmax] * 2
-    dx = (extents[1] - extents[0]) / img.shape[0]
-    dy = (extents[3] - extents[2]) / img.shape[1]
+    if input_img is None:
+        img = np.zeros((buff_size[0], buff_size[1]))
+        img[:] = np.nan
+    else:
+        img = input_img
+    x0, x1, y0, y1 = extents
+    dx = (x1 - x0) / img.shape[0]
+    dy = (y1 - y0) / img.shape[1]
       
     dthetamin = dx / rmax
       
@@ -512,9 +517,13 @@ def pixelize_cylinder(np.ndarray[np.float64_t, ndim=1] radius,
                     continue
                 x = r_i * math.cos(theta_i)
                 y = r_i * math.sin(theta_i)
-                pi = <int>((x + rmax)/dx)
-                pj = <int>((y + rmax)/dy)
-                img[pi, pj] = field[i]
+                pi = <int>((x - x0)/dx)
+                pj = <int>((y - y0)/dy)
+                if pi >= 0 and pi < img.shape[0] and \
+                   pj >= 0 and pj < img.shape[1]:
+                    if img[pi, pj] != img[pi, pj]:
+                        img[pi, pj] = 0.0
+                    img[pi, pj] = field[i]
                 r_i += 0.5*dx 
             theta_i += dthetamin
 
@@ -523,6 +532,61 @@ def pixelize_cylinder(np.ndarray[np.float64_t, ndim=1] radius,
 @cython.cdivision(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
+def pixelize_aitoff(np.ndarray[np.float64_t, ndim=1] theta,
+                    np.ndarray[np.float64_t, ndim=1] dtheta,
+                    np.ndarray[np.float64_t, ndim=1] phi,
+                    np.ndarray[np.float64_t, ndim=1] dphi,
+                    buff_size,
+                    np.ndarray[np.float64_t, ndim=1] field,
+                    extents, input_img = None):
+    
+    cdef np.ndarray[np.float64_t, ndim=2] img
+    cdef int i, j, nf, fi
+    cdef np.float64_t x, y, z, zb
+    cdef np.float64_t dx, dy, inside
+    cdef np.float64_t theta1, dtheta1, phi1, dphi1
+    cdef np.float64_t theta0, phi0
+    cdef np.float64_t PI = np.pi
+    cdef np.float64_t s2 = math.sqrt(2.0)
+    nf = field.shape[0]
+    
+    if input_img is None:
+        img = np.zeros((buff_size[0], buff_size[1]))
+        img[:] = np.nan
+    else:
+        img = input_img
+    dx = 2.0 / (img.shape[0] - 1)
+    dy = 2.0 / (img.shape[1] - 1)
+    for i in range(img.shape[0]):
+        x = (-1.0 + i*dx)*s2*2.0
+        for j in range(img.shape[1]):
+            y = (-1.0 + j * dy)*s2
+            zb = (x*x/8.0 + y*y/2.0 - 1.0)
+            if zb > 0: continue
+            z = (1.0 - (x/4.0)**2.0 - (y/2.0)**2.0)
+            z = z**0.5
+            # Longitude
+            phi0 = (2.0*math.atan(z*x/(2.0 * (2.0*z*z-1.0))) + PI)
+            # Latitude
+            # We shift it into co-latitude
+            theta0 = (math.asin(z*y) + PI/2.0)
+            # Now we just need to figure out which pixel contributes.
+            # We do not have a fast search.
+            for fi in range(nf):
+                theta1 = theta[fi]
+                dtheta1 = dtheta[fi]
+                if not (theta1 - dtheta1 <= theta0 <= theta1 + dtheta1):
+                    continue
+                phi1 = phi[fi]
+                dphi1 = dphi[fi]
+                if not (phi1 - dphi1 <= phi0 <= phi1 + dphi1):
+                    continue
+                img[i, j] = field[fi]
+    return img
+
+#@cython.cdivision(True)
+#@cython.boundscheck(False)
+#@cython.wraparound(False)
 def obtain_rvec(data):
     # This is just to let the pointers exist and whatnot.  We can't cdef them
     # inside conditionals.
@@ -543,7 +607,7 @@ def obtain_rvec(data):
         xf = data['x']
         yf = data['y']
         zf = data['z']
-        rf = np.empty((3, xf.shape[0]), 'float64')
+        rf = YTArray(np.empty((3, xf.shape[0]), 'float64'), xf.units)
         for i in range(xf.shape[0]):
             rf[0, i] = xf[i] - c[0]
             rf[1, i] = yf[i] - c[1]
@@ -554,7 +618,9 @@ def obtain_rvec(data):
         xg = data['x']
         yg = data['y']
         zg = data['z']
-        rg = np.empty((3, xg.shape[0], xg.shape[1], xg.shape[2]), 'float64')
+        shape = (3, xg.shape[0], xg.shape[1], xg.shape[2])
+        rg = YTArray(np.empty(shape, 'float64'), xg.units)
+        #rg = YTArray(rg, xg.units)
         for i in range(xg.shape[0]):
             for j in range(xg.shape[1]):
                 for k in range(xg.shape[2]):
@@ -566,7 +632,10 @@ def obtain_rvec(data):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-def obtain_rv_vec(data):
+def obtain_rv_vec(data, field_names = ("velocity_x",
+                                       "velocity_y",
+                                       "velocity_z"),
+                  bulk_vector = "bulk_velocity"):
     # This is just to let the pointers exist and whatnot.  We can't cdef them
     # inside conditionals.
     cdef np.ndarray[np.float64_t, ndim=1] vxf
@@ -579,16 +648,16 @@ def obtain_rv_vec(data):
     cdef np.ndarray[np.float64_t, ndim=4] rvg
     cdef np.float64_t bv[3]
     cdef int i, j, k
-    bulk_velocity = data.get_field_parameter("bulk_velocity")
-    if bulk_velocity == None:
-        bulk_velocity = np.zeros(3)
-    bv[0] = bulk_velocity[0]; bv[1] = bulk_velocity[1]; bv[2] = bulk_velocity[2]
-    if len(data['x-velocity'].shape) == 1:
+    bulk_vector = data.get_field_parameter(bulk_vector)
+    if bulk_vector == None:
+        bulk_vector = np.zeros(3)
+    bv[0] = bulk_vector[0]; bv[1] = bulk_vector[1]; bv[2] = bulk_vector[2]
+    if len(data[field_names[0]].shape) == 1:
         # One dimensional data
-        vxf = data['x-velocity'].astype("float64")
-        vyf = data['y-velocity'].astype("float64")
-        vzf = data['z-velocity'].astype("float64")
-        rvf = np.empty((3, vxf.shape[0]), 'float64')
+        vxf = data[field_names[0]].astype("float64")
+        vyf = data[field_names[1]].astype("float64")
+        vzf = data[field_names[2]].astype("float64")
+        rvf = YTArray(np.empty((3, vxf.shape[0]), 'float64'), vxf.units)
         for i in range(vxf.shape[0]):
             rvf[0, i] = vxf[i] - bv[0]
             rvf[1, i] = vyf[i] - bv[1]
@@ -596,10 +665,11 @@ def obtain_rv_vec(data):
         return rvf
     else:
         # Three dimensional data
-        vxg = data['x-velocity'].astype("float64")
-        vyg = data['y-velocity'].astype("float64")
-        vzg = data['z-velocity'].astype("float64")
-        rvg = np.empty((3, vxg.shape[0], vxg.shape[1], vxg.shape[2]), 'float64')
+        vxg = data[field_names[0]].astype("float64")
+        vyg = data[field_names[1]].astype("float64")
+        vzg = data[field_names[2]].astype("float64")
+        shape = (3, vxg.shape[0], vxg.shape[1], vxg.shape[2])
+        rvg = YTArray(np.empty(shape, 'float64'), vxg.units)
         for i in range(vxg.shape[0]):
             for j in range(vxg.shape[1]):
                 for k in range(vxg.shape[2]):
