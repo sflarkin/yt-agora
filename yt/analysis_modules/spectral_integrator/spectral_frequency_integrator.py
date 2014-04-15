@@ -24,10 +24,14 @@ from yt.funcs import \
      mylog, \
      only_on_root
 
-from yt.data_objects.field_info_container import add_field
+from yt.fields.local_fields import add_field
 from yt.utilities.exceptions import YTException
 from yt.utilities.linear_interpolators import \
     BilinearFieldInterpolator
+from yt.utilities.physical_constants import \
+    erg_per_eV, hcgs
+from yt.units import keV, Hz
+keV_per_Hz = keV/Hz/hcgs
 
 xray_data_version = 1
 
@@ -108,7 +112,7 @@ class EmissivityIntegrator(object):
                   np.power(10, np.concatenate([self.log_E[:-1] - 0.5 * E_diff,
                                                [self.log_E[-1] - 0.5 * E_diff[-1],
                                                 self.log_E[-1] + 0.5 * E_diff[-1]]]))
-        self.dnu = 2.41799e17 * np.diff(self.E_bins)
+        self.dnu = keV_per_Hz * np.diff(self.E_bins)
 
     def _get_interpolator(self, data, e_min, e_max):
         r"""Create an interpolator for total emissivity in a 
@@ -211,8 +215,7 @@ def add_xray_emissivity_field(e_min, e_max, filename=None,
     add_field(field_name, function=_emissivity_field,
               projection_conversion="cm",
               display_name=r"\epsilon_{X}\/(%s-%s\/keV)" % (e_min, e_max),
-              units=r"\rm{erg}\/\rm{cm}^{-3}\/\rm{s}^{-1}",
-              projected_units=r"\rm{erg}\/\rm{cm}^{-2}\/\rm{s}^{-1}")
+              units=r"\rm{erg}\/\rm{cm}^{-3}\/\rm{s}^{-1}")
     return field_name
 
 def add_xray_luminosity_field(e_min, e_max, filename=None,
@@ -255,7 +258,7 @@ def add_xray_luminosity_field(e_min, e_max, filename=None,
     >>> from yt.analysis_modules.spectral_integrator.api import *
     >>> add_xray_luminosity_field(0.5, 2)
     >>> pf = load(dataset)
-    >>> sp = pf.h.sphere('max', (2., 'mpc'))
+    >>> sp = pf.sphere('max', (2., 'mpc'))
     >>> print sp.quantities['TotalQuantity']('Xray_Luminosity_0.5_2keV')
     
     """
@@ -318,7 +321,7 @@ def add_xray_photon_emissivity_field(e_min, e_max, filename=None,
     """
 
     my_si = EmissivityIntegrator(filename=filename)
-    energy_erg = np.power(10, my_si.log_E) * 1.60217646e-9
+    energy_erg = np.power(10, my_si.log_E) * erg_per_eV
 
     em_0 = my_si._get_interpolator((my_si.emissivity_primordial[..., :] / energy_erg),
                                    e_min, e_max)
@@ -345,6 +348,5 @@ def add_xray_photon_emissivity_field(e_min, e_max, filename=None,
     add_field(field_name, function=_emissivity_field,
               projection_conversion="cm",
               display_name=r"\epsilon_{X}\/(%s-%s\/keV)" % (e_min, e_max),
-              units=r"\rm{photons}\/\rm{cm}^{-3}\/\rm{s}^{-1}",
-              projected_units=r"\rm{photons}\/\rm{cm}^{-2}\/\rm{s}^{-1}")
+              units=r"\rm{photons}\/\rm{cm}^{-3}\/\rm{s}^{-1}")
     return field_name

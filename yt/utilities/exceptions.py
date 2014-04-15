@@ -19,8 +19,8 @@ This is a library of yt-defined exceptions
 import os.path
 
 class YTException(Exception):
-    def __init__(self, pf = None):
-        Exception.__init__(self)
+    def __init__(self, message = None, pf = None):
+        Exception.__init__(self, message)
         self.pf = pf
 
 # Data access exceptions:
@@ -36,7 +36,7 @@ class YTOutputNotIdentified(YTException):
 
 class YTSphereTooSmall(YTException):
     def __init__(self, pf, radius, smallest_cell):
-        YTException.__init__(self, pf)
+        YTException.__init__(self, pf=pf)
         self.radius = radius
         self.smallest_cell = smallest_cell
 
@@ -60,6 +60,25 @@ class YTNoDataInObjectError(YTException):
             s += "  It may lie on a grid face.  Try offsetting slightly."
         return s
 
+class YTFieldNotFound(YTException):
+    def __init__(self, fname, pf):
+        self.fname = fname
+        self.pf = pf
+
+    def __str__(self):
+        return "Could not find field '%s' in %s." % (self.fname, self.pf)
+
+class YTCouldNotGenerateField(YTFieldNotFound):
+    def __str__(self):
+        return "Could field '%s' in %s could not be generated." % (self.fname, self.pf)
+
+class YTFieldTypeNotFound(YTException):
+    def __init__(self, fname):
+        self.fname = fname
+
+    def __str__(self):
+        return "Could not find field '%s'." % (self.fname)
+
 class YTSimulationNotIdentified(YTException):
     def __init__(self, sim_type):
         YTException.__init__(self)
@@ -81,7 +100,7 @@ class YTCannotParseFieldDisplayName(YTException):
                 % (self.display_name, self.field_name) + self.mathtext_error
 
 class YTCannotParseUnitDisplayName(YTException):
-    def __init__(self, field_name, display_unit, mathtext_error):
+    def __init__(self, field_name, unit_name, mathtext_error):
         self.field_name = field_name
         self.unit_name = unit_name
         self.mathtext_error = mathtext_error
@@ -101,7 +120,7 @@ class InvalidSimulationTimeSeries(YTException):
             
 class MissingParameter(YTException):
     def __init__(self, pf, parameter):
-        YTException.__init__(self, pf)
+        YTException.__init__(self, pf=pf)
         self.parameter = parameter
 
     def __str__(self):
@@ -110,7 +129,7 @@ class MissingParameter(YTException):
 
 class NoStoppingCondition(YTException):
     def __init__(self, pf):
-        YTException.__init__(self, pf)
+        YTException.__init__(self, pf=pf)
 
     def __str__(self):
         return "Simulation %s has no stopping condition.  StopTime or StopCycle should be set." % \
@@ -120,11 +139,16 @@ class YTNotInsideNotebook(YTException):
     def __str__(self):
         return "This function only works from within an IPython Notebook."
 
-class YTNotDeclaredInsideNotebook(YTException):
+class YTGeometryNotSupported(YTException):
+    def __init__(self, geom):
+        self.geom = geom
+
     def __str__(self):
-        return "You have not declared yourself to be inside the IPython" + \
-               "Notebook.  Do so with this command:\n\n" + \
-               "ytcfg['yt','ipython_notebook'] = 'True'"
+        return "We don't currently support %s geometry" % self.geom
+
+class YTCoordinateNotImplemented(YTException):
+    def __str__(self):
+        return "This coordinate is not implemented for this geometry type."
 
 class YTUnitNotRecognized(YTException):
     def __init__(self, unit):
@@ -132,6 +156,48 @@ class YTUnitNotRecognized(YTException):
 
     def __str__(self):
         return "This parameter file doesn't recognize %s" % self.unit
+
+class YTUnitOperationError(YTException, ValueError):
+    def __init__(self, operation, unit1, unit2=None):
+        self.operation = operation
+        self.unit1 = unit1
+        self.unit2 = unit2
+        YTException.__init__(self)
+
+    def __str__(self):
+        err = "The %s operator for YTArrays with units (%s) " % (self.operation, self.unit1, )
+        if self.unit2 is not None:
+            err += "and (%s) " % self.unit2
+        err += "is not well defined."
+        return err
+
+class YTUnitConversionError(YTException):
+    def __init__(self, unit1, dimension1, unit2, dimension2):
+        self.unit1 = unit1
+        self.unit2 = unit2
+        self.dimension1 = dimension1
+        self.dimension2 = dimension2
+        YTException.__init__(self)
+
+    def __str__(self):
+        err = "Unit dimensionalities do not match. Tried to convert between " \
+          "%s (dim %s) and %s (dim %s)." \
+          % (self.unit1, self.dimension1, self.unit2, self.dimension2)
+        return err
+
+class YTUfuncUnitError(YTException):
+    def __init__(self, ufunc, unit1, unit2):
+        self.ufunc = ufunc
+        self.unit1 = unit1
+        self.unit2 = unit2
+        YTException.__init__(self)
+
+    def __str__(self):
+        err = "The NumPy %s operation is only allowed on objects with " \
+        "identical units. Convert one of the arrays to the other\'s " \
+        "units first. Received units (%s) and (%s)." % \
+        (self.ufunc, self.unit1, self.unit2)
+        return err
 
 class YTHubRegisterError(YTException):
     def __str__(self):
@@ -164,7 +230,7 @@ class YTCloudError(YTException):
 
 class YTEllipsoidOrdering(YTException):
     def __init__(self, pf, A, B, C):
-        YTException.__init__(self, pf)
+        YTException.__init__(self, pf=pf)
         self._A = A
         self._B = B
         self._C = C
@@ -206,6 +272,82 @@ class YTInvalidWidthError(YTException):
 
     def __str__(self):
         return str(self.error)
+
+class YTFieldNotParseable(YTException):
+    def __init__(self, field):
+        self.field = field
+
+    def __str__(self):
+        return "Cannot identify field %s" % (self.field,)
+
+class YTDataSelectorNotImplemented(YTException):
+    def __init__(self, class_name):
+        self.class_name = class_name
+
+    def __str__(self):
+        return "Data selector '%s' not implemented." % (self.class_name)
+
+class YTParticleDepositionNotImplemented(YTException):
+    def __init__(self, class_name):
+        self.class_name = class_name
+
+    def __str__(self):
+        return "Particle deposition method '%s' not implemented." % (self.class_name)
+
+class YTDomainOverflow(YTException):
+    def __init__(self, mi, ma, dle, dre):
+        self.mi = mi
+        self.ma = ma
+        self.dle = dle
+        self.dre = dre
+
+    def __str__(self):
+        return "Particle bounds %s and %s exceed domain bounds %s and %s" % (
+            self.mi, self.ma, self.dle, self.dre)
+
+class YTIllDefinedFilter(YTException):
+    def __init__(self, filter, s1, s2):
+        self.filter = filter
+        self.s1 = s1
+        self.s2 = s2
+
+    def __str__(self):
+        return "Filter '%s' ill-defined.  Applied to shape %s but is shape %s." % (
+            self.filter, self.s1, self.s2)
+
+class YTIllDefinedBounds(YTException):
+    def __init__(self, lb, ub):
+        self.lb = lb
+        self.ub = ub
+
+    def __str__(self):
+        v =  "The bounds %0.3e and %0.3e are ill-defined. " % (self.lb, self.ub)
+        v += "Typically this happens when a log binning is specified "
+        v += "and zero or negative values are given for the bounds."
+        return v
+
+class YTObjectNotImplemented(YTException):
+    def __init__(self, pf, obj_name):
+        self.pf = pf
+        self.obj_name = obj_name
+
+    def __str__(self):
+        v  = r"The object type '%s' is not implemented for the parameter file "
+        v += r"'%s'."
+        return v % (self.obj_name, self.pf)
+
+class YTRockstarMultiMassNotSupported(YTException):
+    def __init__(self, mi, ma, ptype):
+        self.mi = mi
+        self.ma = ma
+        self.ptype = ptype
+
+    def __str__(self):
+        v = "Particle type '%s' has minimum mass %0.3e and maximum " % (
+            self.ptype, self.mi)
+        v += "mass %0.3e.  Multi-mass particles are not currently supported." % (
+            self.ma)
+        return v
 
 class YTEmptyProfileData(Exception):
     pass

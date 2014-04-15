@@ -131,7 +131,7 @@ def check_for_dependencies(env, cfg, header, library):
     elif os.path.exists(cfg):
         return get_location_from_cfg(cfg)
     # Now we see if ctypes can help us
-    if os.name == 'posix':
+    if os.name == 'posix' or os.name == 'nt':
         target_inc, target_lib = get_location_from_ctypes(header, library)
     if None not in (target_inc, target_lib):
         print(
@@ -146,10 +146,6 @@ def check_for_dependencies(env, cfg, header, library):
     print("(ex: \"echo '/usr/local/' > %s\" )" % cfg)
     print("You can locate the path by looking for %s" % header)
     sys.exit(1)
-
-
-def check_for_hdf5():
-    return check_for_dependencies("HDF5_DIR", "hdf5.cfg", "hdf5.h", "hdf5")
 
 
 def configuration(parent_package='', top_path=None):
@@ -167,14 +163,6 @@ def configuration(parent_package='', top_path=None):
                          "yt/utilities/data_point_utilities.c",
                          libraries=["m"])
     config.add_subpackage("tests")
-    hdf5_inc, hdf5_lib = check_for_hdf5()
-    include_dirs = [hdf5_inc]
-    library_dirs = [hdf5_lib]
-    config.add_extension("hdf5_light_reader",
-                         "yt/utilities/hdf5_light_reader.c",
-                         define_macros=[("H5_USE_16_API", True)],
-                         libraries=["m", "hdf5"],
-                         library_dirs=library_dirs, include_dirs=include_dirs)
     config.make_config_py()  # installs __config__.py
     # config.make_svn_version_py()
     return config

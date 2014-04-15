@@ -24,10 +24,6 @@ from yt.utilities.definitions import \
     y_dict, y_names, \
     axis_names, \
     axis_labels
-from .plot_types import \
-    VMPlot, \
-    ProfilePlot
-from .plot_collection import PlotCollection
 from .plot_window import PlotWindow
 from .profile_plotter import PhasePlot
 from .plot_modifications import get_smallest_appropriate_unit
@@ -289,13 +285,11 @@ class DualEPS(object):
         """
         if isinstance(plot, (PlotWindow, PhasePlot)):
             plot.refresh()
-        elif isinstance(plot, (VMPlot, PlotWindow)):
-            if isinstance(plot, PlotWindow):
-                data = plot._frb
-                width = plot.width[0]
-            else:
-                data = plot.data
-                width = plot.width
+        else:
+            plot._redraw_image()
+        if isinstance(plot, PlotWindow):
+            data = plot._frb
+            width = plot.width[0]
             if units == None:
                 units = get_smallest_appropriate_unit(width, plot.pf)
             _xrange = (0, width * plot.pf[units])
@@ -475,11 +469,6 @@ class DualEPS(object):
             # hack to account for non-square display ratios (not sure why)
             if isinstance(plot, PlotWindow):
                 shift = 12.0 / 340
-        elif isinstance(plot, ProfilePlot):
-            plot._redraw_image()
-            # Remove colorbar
-            _p1 = plot._figure
-            _p1.delaxes(_p1.axes[1])
         elif isinstance(plot, np.ndarray):
             fig = plt.figure()
             iplot = plt.figimage(plot)

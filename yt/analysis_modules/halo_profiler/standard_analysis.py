@@ -20,14 +20,15 @@ from yt.funcs import *
 
 class StandardRadialAnalysis(object):
     def __init__(self, pf, center, radius, n_bins = 128, inner_radius = None):
+        raise NotImplementedError  # see TODO
         self.pf = pf
         # We actually don't want to replicate the handling of setting the
         # center here, so we will pass it to the sphere creator.
         # Note also that the sphere can handle (val, unit) for radius, so we
         # will grab that from the sphere as well
-        self.obj = pf.h.sphere(center, radius)
+        self.obj = pf.sphere(center, radius)
         if inner_radius is None:
-            inner_radius = pf.h.get_smallest_dx() * pf['cm']
+            inner_radius = pf.index.get_smallest_dx() * pf['cm']
         self.inner_radius = inner_radius
         self.outer_radius = self.obj.radius * pf['cm']
         self.n_bins = n_bins
@@ -41,16 +42,16 @@ class StandardRadialAnalysis(object):
         # inner_bound in cm, outer_bound in same
         # Note that in some cases, we will need to massage this object.
         prof = BinnedProfile1D(self.obj, self.n_bins, "Radius",
-                               self.inner_radius, self.outer_radius,
-                               lazy_reader = True)
+                               self.inner_radius, self.outer_radius)
         by_weights = defaultdict(list)
+        # TODO: analysis_field_list is undefined
         for fspec in analysis_field_list:
             if isinstance(fspec, types.TupleType) and len(fspec) == 2:
                 field, weight = fspec
             else:
                 field, weight = fspec, "CellMassMsun"
             by_weights[weight].append(field)
-        known_fields = set(self.pf.h.field_list + self.pf.h.derived_field_list)
+        known_fields = set(self.pf.field_list + self.pf.derived_field_list)
         for weight, fields in by_weights.items():
             fields = set(fields)
             fields.intersection_update(known_fields)

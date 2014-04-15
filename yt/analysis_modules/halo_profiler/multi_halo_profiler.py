@@ -31,10 +31,10 @@ from .halo_filters import \
     VirialFilter
 from .centering_methods import \
     centering_registry
-from yt.data_objects.field_info_container import \
+from yt.fields.local_fields import \
     add_field
 from yt.data_objects.static_output import \
-    StaticOutput
+    Dataset
 
 from yt.utilities.exceptions import \
     YTException
@@ -43,6 +43,10 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
     parallel_blocking_call, \
     parallel_root_only, \
     parallel_objects
+from yt.utilities.physical_constants import \
+    mass_sun_cgs
+from yt.utilities.physical_ratios import \
+    rho_crit_g_cm3_h2
 from yt.visualization.fixed_resolution import \
     FixedResolutionBuffer
 from yt.visualization.image_writer import write_image
@@ -267,7 +271,7 @@ class HaloProfiler(ParallelAnalysisInterface):
             return None
 
         # Create dataset object.
-        if isinstance(self.dataset, StaticOutput):
+        if isinstance(self.dataset, Dataset):
             self.pf = self.dataset
         else:
             self.pf = load(self.dataset)
@@ -572,7 +576,7 @@ class HaloProfiler(ParallelAnalysisInterface):
         newProfile = profile is None
         if newProfile:
 
-            r_min = 2 * self.pf.h.get_smallest_dx() * self.pf['mpc']
+            r_min = 2 * self.pf.index.get_smallest_dx() * self.pf['mpc']
             if (halo['r_max'] / r_min < PROFILE_RADIUS_THRESHOLD):
                 mylog.debug("Skipping halo with r_max / r_min = %f." % (halo['r_max']/r_min))
                 return None
@@ -584,10 +588,9 @@ class HaloProfiler(ParallelAnalysisInterface):
             try:
                 profile = BinnedProfile1D(sphere, self.n_profile_bins, "RadiusMpc",
                                                 r_min, halo['r_max'],
-                                                log_space=True, lazy_reader=True,
-                                                end_collect=True)
+                                                log_space=True, end_collect=True)
             except YTEmptyProfileData:
-                mylog.error("Caught YTEmptyProfileData exception, returning None for this halo.")
+                mylog.error("Caught EmptyProfileData exception, returning None for this halo.")
                 return None
             # Figure out which fields to add simultaneously
             field_groupings = defaultdict(lambda: defaultdict(list))
@@ -615,17 +618,6 @@ class HaloProfiler(ParallelAnalysisInterface):
             mylog.info("Re-writing halo %d" % halo['id'])
             self._write_profile(profile, filename, format='%0.6e')
 
-        if newProfile:
-            # Temporary solution to memory leak.
-            for g in self.pf.h.grids:
-                g.clear_data()
-            sphere.clear_data()
-            del sphere
-            # Currently, this seems to be the only way to prevent large 
-            # halo profiling runs from running out of ram.
-            # It would be good to track down the real cause at some point.
-            gc.collect()
-
         return profile
 
     def _get_halo_sphere(self, halo):
@@ -634,8 +626,7 @@ class HaloProfiler(ParallelAnalysisInterface):
         and calculates bulk velocities.
         """
 
-        sphere = self.pf.h.sphere(halo['center'], halo['r_max']/self.pf.units['mpc'])
-        if len(sphere._grids) == 0: return None
+        sphere = self.pf.sphere(halo['center'], halo['r_max']/self.pf.units['mpc'])
         new_sphere = False
 
         if self.recenter:
@@ -661,12 +652,7 @@ class HaloProfiler(ParallelAnalysisInterface):
             new_sphere = True
 
         if new_sphere:
-            # Temporary solution to memory leak.
-            for g in self.pf.h.grids:
-                g.clear_data()
-            sphere.clear_data()
-            del sphere
-            sphere = self.pf.h.sphere(halo['center'], halo['r_max']/self.pf.units['mpc'])
+            sphere = self.pf.sphere(halo['center'], halo['r_max']/self.pf.units['mpc'])
 
         if self._need_bulk_velocity:
             # Set bulk velocity to zero out radial velocity profiles.
@@ -676,16 +662,15 @@ class HaloProfiler(ParallelAnalysisInterface):
                 elif self.velocity_center[1] == 'sphere':
                     mylog.info('Calculating sphere bulk velocity.')
                     sphere.set_field_parameter('bulk_velocity',
-                                               sphere.quantities['BulkVelocity'](lazy_reader=True,
-                                                                                 preload=False))
+                                               sphere.quantities['BulkVelocity']())
                 else:
                     mylog.error("Invalid parameter: velocity_center.")
                     return None
             elif self.velocity_center[0] == 'max':
                 mylog.info('Setting bulk velocity with value at max %s.' % self.velocity_center[1])
-                max_val, maxi, mx, my, mz, mg = sphere.quantities['MaxLocation'](self.velocity_center[1],
-                                                                                 lazy_reader=True)
-                max_grid = self.pf.h.grids[mg]
+                max_val, maxi, mx, my, mz, mg = sphere.quantities['MaxLocation'](self.velocity_center[1])
+                                                                                 
+                max_grid = self.pf.index.grids[mg]
                 max_cell = np.unravel_index(maxi, max_grid.ActiveDimensions)
                 sphere.set_field_parameter('bulk_velocity', [max_grid['x-velocity'][max_cell],
                                                              max_grid['y-velocity'][max_cell],
@@ -800,10 +785,10 @@ class HaloProfiler(ParallelAnalysisInterface):
                     need_per = True
                     break
 
-            if need_per:
-                region = self.pf.h.periodic_region(halo['center'], leftEdge, rightEdge)
-            else:
-                region = self.pf.h.region(halo['center'], leftEdge, rightEdge)
+            # We use the same type of region regardless.  The selection will be
+            # correct, but we need the need_per variable for projection
+            # shifting.
+            region = self.pf.region(halo['center'], leftEdge, rightEdge)
 
             # Make projections.
             if not isinstance(axes, types.ListType): axes = list([axes])
@@ -816,10 +801,10 @@ class HaloProfiler(ParallelAnalysisInterface):
                 y_axis = coords[1]
 
                 for hp in self.projection_fields:
-                    projections.append(self.pf.h.proj(w, hp['field'],
+                    projections.append(self.pf.proj(hp['field'], w,
                                                       weight_field=hp['weight_field'],
-                                                      source=region, center=halo['center'],
-                                                      serialize=False))
+                                                      data_source=region,
+                                                      center=halo['center']))
 
                 # Set x and y limits, shift image if it overlaps domain boundary.
                 if need_per:
@@ -948,12 +933,11 @@ class HaloProfiler(ParallelAnalysisInterface):
         if 'ActualOverdensity' in profile.keys():
             return
 
-        rho_crit_now = 1.8788e-29 * self.pf.hubble_constant**2 # g cm^-3
-        Msun2g = 1.989e33
-        rho_crit = rho_crit_now * ((1.0 + self.pf.current_redshift)**3.0)
+        rhocritnow = rho_crit_g_cm3_h2 * self.pf.hubble_constant**2 # g cm^-3
+        rho_crit = rhocritnow * ((1.0 + self.pf.current_redshift)**3.0)
         if not self.use_critical_density: rho_crit *= self.pf.omega_matter
 
-        profile['ActualOverdensity'] = (Msun2g * profile['TotalMassMsun']) / \
+        profile['ActualOverdensity'] = (mass_sun_cgs * profile['TotalMassMsun']) / \
             profile['CellVolume'] / rho_crit
 
     def _check_for_needed_profile_fields(self):
