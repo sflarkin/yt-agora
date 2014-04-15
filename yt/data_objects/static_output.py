@@ -173,6 +173,7 @@ class Dataset(object):
         self._instantiated = time.time()
 
         self.min_level = 0
+        self.no_cgs_equiv_length = False
 
         self._create_unit_registry()
         self._parse_parameter_file()

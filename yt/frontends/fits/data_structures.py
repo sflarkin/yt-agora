@@ -13,10 +13,11 @@ FITS-specific data structures
 import stat
 import types
 import numpy as np
+import numpy.core.defchararray as np_char
 import weakref
 import warnings
+import re
 
-from yt.config import ytcfg
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
     AMRGridPatch
@@ -27,12 +28,13 @@ from yt.geometry.geometry_handler import \
 from yt.data_objects.static_output import \
     Dataset
 from yt.utilities.definitions import \
-    mpc_conversion, sec_conversion
+    mpc_conversion
 from yt.utilities.io_handler import \
     io_registry
 from .fields import FITSFieldInfo
 from yt.utilities.decompose import \
     decompose_array, get_psize
+from yt.units.unit_lookup_table import default_unit_symbol_lut
 
 class astropy_imports:
     _pyfits = None
@@ -74,8 +76,12 @@ class astropy_imports:
 
 ap = astropy_imports()
 
-angle_units = ["deg","arcsec","arcmin","mas"]
-all_units = angle_units + mpc_conversion.keys()
+known_units = dict([(unit.lower(),unit) for unit in default_unit_symbol_lut])
+axes_prefixes = ["RA","DEC","V","ENER","FREQ"]
+
+delimiters = ["*", "/", "-", "^"]
+delimiters += [str(i) for i in xrange(10)]
+regex_pattern = '|'.join(re.escape(_) for _ in delimiters)
 
 class FITSGrid(AMRGridPatch):
     _id_offset = 0
@@ -107,11 +113,71 @@ class FITSHierarchy(GridIndex):
     def _initialize_data_storage(self):
         pass
 
+    def _determine_image_units(self, fname, header):
+        try:
+            field_units = header["bunit"].lower().strip(" ")
+            # FITS units always return upper-case, so we need to get
+            # the right case by comparing against known units. This
+            # only really works for common units.
+            units = re.split(regex_pattern, field_units)
+            for unit in units:
+                if unit in known_units:
+                    field_units = field_units.replace(unit, known_units[unit])
+            self.parameter_file.field_units[fname] = field_units
+        except:
+            self.parameter_file.field_units[fname] = "dimensionless"
+
     def _detect_output_fields(self):
         self.field_list = []
-        for h in self._handle[self.parameter_file.first_image:]:
-            if h.is_image:
-                self.field_list.append(("fits", h.name.lower()))
+        self._axis_map = {}
+        self._file_map = {}
+        self._ext_map = {}
+        self._scale_map = {}
+        # We create a field from each slice on the 4th axis
+        if self.parameter_file.naxis == 4:
+            naxis4 = self.parameter_file.primary_header["naxis4"]
+        else:
+            naxis4 = 1
+        for i, fits_file in enumerate(self.parameter_file._fits_files):
+            for j, h in enumerate(fits_file):
+                if self.parameter_file.naxis >= 2:
+                    try:
+                        fname = h.header["btype"].lower()
+                    except:
+                        fname = h.name.lower()
+                    for k in xrange(naxis4):
+                        if naxis4 > 1:
+                            fname += "_%s_%d" % (h.header["CTYPE4"], k+1)
+                        if self.pf.num_files > 1:
+                            try:
+                                fname += "_%5.3fGHz" % (h.header["restfreq"]/1.0e9)
+                            except:
+                                fname += "_%5.3fGHz" % (h.header["restfrq"]/1.0e9)
+                            else:
+                                fname += "_field_%d" % (i)
+                        self._axis_map[fname] = k
+                        self._file_map[fname] = fits_file
+                        self._ext_map[fname] = j
+                        self._scale_map[fname] = [0.0,1.0]
+                        if "bzero" in h.header:
+                            self._scale_map[fname][0] = h.header["bzero"]
+                        if "bscale" in h.header:
+                            self._scale_map[fname][1] = h.header["bscale"]
+                        self.field_list.append((self.dataset_type, fname))
+                        mylog.info("Adding field %s to the list of fields." % (fname))
+                        self._determine_image_units(fname, h.header)
+
+        # For line fields, we still read the primary field. Not sure how to extend this
+        # For now, we pick off the first field from the field list.
+        line_db = self.parameter_file.line_database
+        primary_fname = self.field_list[0][1]
+        for k, v in line_db.iteritems():
+            mylog.info("Adding line field: %s at offset %i" % (k, v))
+            self.field_list.append((self.dataset_type, k))
+            self._ext_map[k] = self._ext_map[primary_fname]
+            self._axis_map[k] = self._axis_map[primary_fname]
+            self._file_map[k] = self._file_map[primary_fname]
+            self.parameter_file.field_units[k] = self.parameter_file.field_units[primary_fname]
 
     def _count_grids(self):
         self.num_grids = self.pf.nprocs
@@ -120,16 +186,15 @@ class FITSHierarchy(GridIndex):
         f = self._handle # shortcut
         pf = self.parameter_file # shortcut
 
+        # If nprocs > 1, decompose the domain into virtual grids
         if pf.nprocs > 1:
             bbox = np.array([[le,re] for le, re in zip(pf.domain_left_edge,
                                                        pf.domain_right_edge)])
             psize = get_psize(np.array(pf.domain_dimensions), pf.nprocs)
-            temp_arr = np.zeros(pf.domain_dimensions)
-            gle, gre, temp_arr = decompose_array(temp_arr, psize, bbox)
+            gle, gre, shapes, slices = decompose_array(pf.domain_dimensions, psize, bbox)
             self.grid_left_edge = self.pf.arr(gle, "code_length")
             self.grid_right_edge = self.pf.arr(gre, "code_length")
-            self.grid_dimensions = np.array([grid.shape for grid in temp_arr], dtype="int32")
-            del temp_arr
+            self.grid_dimensions = np.array([shape for shape in shapes], dtype="int32")
         else:
             self.grid_left_edge[0,:] = pf.domain_left_edge
             self.grid_right_edge[0,:] = pf.domain_right_edge
@@ -163,63 +228,83 @@ class FITSHierarchy(GridIndex):
     def _setup_data_io(self):
         self.io = io_registry[self.dataset_type](self.parameter_file)
 
+    def _chunk_io(self, dobj, cache = True, local_only = False):
+        # local_only is only useful for inline datasets and requires
+        # implementation by subclasses.
+        gfiles = defaultdict(list)
+        gobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
+        for g in gobjs:
+            gfiles[g.id].append(g)
+        for fn in sorted(gfiles):
+            gs = gfiles[fn]
+            yield YTDataChunk(dobj, "io", gs, self._count_selection(dobj, gs),
+                              cache = cache)
+
 class FITSDataset(Dataset):
     _index_class = FITSHierarchy
     _field_info_class = FITSFieldInfo
     _dataset_type = "fits"
     _handle = None
 
-    def __init__(self, filename, dataset_type='fits',
-                 primary_header = None,
-                 sky_conversion = None,
+    def __init__(self, filename,
+                 dataset_type = 'fits',
+                 slave_files = [],
+                 nprocs = None,
                  storage_filename = None,
-                 mask_nans = True,
-                 nprocs=1):
+                 mask_nans = False,
+                 folded_axis=None,
+                 folded_width=None,
+                 line_database=None,
+                 suppress_astropy_warnings = True
+                 ):
+        self.folded_axis = folded_axis
+        self.folded_width = folded_width
+        self._unfolded_domain_dimensions = None
+        if line_database is None:
+            line_database = {}
+        self.line_database = line_database
+
+        if suppress_astropy_warnings:
+            warnings.filterwarnings('ignore', module="astropy", append=True)
+        self.filenames = [filename] + slave_files
+        self.num_files = len(self.filenames)
         self.fluid_types += ("fits",)
         self.mask_nans = mask_nans
         self.nprocs = nprocs
-        if isinstance(filename, ap.pyfits.HDUList):
-            self._handle = filename
-            fname = filename.filename()
-        else:
-            self._handle = ap.pyfits.open(filename)
-            fname = filename
-        for i, h in enumerate(self._handle):
-            if h.is_image and h.data is not None:
-                self.first_image = i
-                break
-
-        if primary_header is None:
-            self.primary_header = self._handle[self.first_image].header
-        else:
-            self.primary_header = primary_header
+        self._handle = ap.pyfits.open(self.filenames[0],
+                                      memmap=True,
+                                      do_not_scale_image_data=True,
+                                      ignore_blank=True)
+        self._fits_files = [self._handle]
+        if self.num_files > 1:
+            for fits_file in slave_files:
+                self._fits_files.append(ap.pyfits.open(fits_file,
+                                                       memmap=True,
+                                                       do_not_scale_image_data=True))
+        self.first_image = 0 # Assumed for now
+        self.primary_header = self._handle[self.first_image].header
         self.shape = self._handle[self.first_image].shape
-
         self.wcs = ap.pywcs.WCS(header=self.primary_header)
-
+        self.axis_names = {}
+        self.naxis = self.primary_header["naxis"]
+        for i, ax in enumerate("xyz"[:self.naxis]):
+            self.axis_names[self.primary_header["CTYPE%d" % (i+1)]] = ax
         self.file_unit = None
         for i, unit in enumerate(self.wcs.wcs.cunit):
-            if unit in all_units:
+            if unit in mpc_conversion.keys():
                 self.file_unit = unit.name
                 idx = i
                 break
         self.new_unit = None
         self.pixel_scale = 1.0
-        if self.file_unit in angle_units:
-            if sky_conversion is not None:
-                self.new_unit = sky_conversion[1]
-                self.pixel_scale = np.abs(self.wcs.wcs.cdelt[idx])*sky_conversion[0]
-        elif self.file_unit in mpc_conversion:
+        if self.file_unit in mpc_conversion:
             self.new_unit = self.file_unit
             self.pixel_scale = self.wcs.wcs.cdelt[idx]
 
         self.refine_by = 2
 
-        Dataset.__init__(self, fname, dataset_type)
+        Dataset.__init__(self, filename, dataset_type)
         self.storage_filename = storage_filename
-
-        # For plotting to APLpy
-        self.hdu_list = self._handle
 
     def _set_code_unit_attributes(self):
         """
@@ -229,6 +314,7 @@ class FITSDataset(Dataset):
             length_factor = self.pixel_scale
             length_unit = str(self.new_unit)
         else:
+            self.no_cgs_equiv_length = True
             mylog.warning("No length conversion provided. Assuming 1 = 1 cm.")
             length_factor = 1.0
             length_unit = "cm"
@@ -248,7 +334,11 @@ class FITSDataset(Dataset):
         self.dimensionality = self.primary_header["naxis"]
         self.geometry = "cartesian"
 
-        dims = self._handle[self.first_image].shape[::-1]
+        # Sometimes a FITS file has a 4D datacube, in which case
+        # we take the 4th axis and assume it consists of different fields.
+        if self.dimensionality == 4: self.dimensionality = 3
+
+        dims = self._handle[self.first_image].shape[::-1][:self.dimensionality]
         self.domain_dimensions = np.array(dims)
         if self.dimensionality == 2:
             self.domain_dimensions = np.append(self.domain_dimensions,
@@ -256,6 +346,12 @@ class FITSDataset(Dataset):
 
         self.domain_left_edge = np.array([0.5]*3)
         self.domain_right_edge = np.array([float(dim)+0.5 for dim in self.domain_dimensions])
+
+        if self.folded_axis is not None:
+            self.domain_left_edge[self.folded_axis] = -self.folded_width/2.
+            self.domain_right_edge[self.folded_axis] = self.folded_width/2.
+            self._unfolded_domain_dimensions = self.domain_dimensions.copy()
+            self.domain_dimensions[self.folded_axis] = int(self.folded_width)
 
         if self.dimensionality == 2:
             self.domain_left_edge[-1] = 0.5
@@ -274,36 +370,79 @@ class FITSDataset(Dataset):
         self.current_redshift = self.omega_lambda = self.omega_matter = \
             self.hubble_constant = self.cosmological_simulation = 0.0
 
+        # If nprocs is None, do some automatic decomposition of the domain
+        if self.nprocs is None:
+            self.nprocs = np.around(np.prod(self.domain_dimensions) /
+                                    32**self.dimensionality).astype("int")
+            self.nprocs = min(self.nprocs, 512)
+
+        # Check to see if this data is in (RA,Dec,?) format
+        self.xyv_data = False
+        x = np.zeros((self.dimensionality), dtype="bool")
+        for ap in axes_prefixes:
+            x += np_char.startswith(self.axis_names.keys()[:self.dimensionality], ap)
+        if x.sum() == self.dimensionality: self._setup_xyv()
+
+    def _setup_xyv(self):
+
+        self.xyv_data = True
+
+        end = min(self.dimensionality+1,4)
+        ctypes = np.array([self.primary_header["CTYPE%d" % (i)] for i in xrange(1,end)])
+        self.ra_axis = np.where(np_char.startswith(ctypes, "RA"))[0][0]
+        self.dec_axis = np.where(np_char.startswith(ctypes, "DEC"))[0][0]
+
+        if self.wcs.naxis > 2:
+
+            self.vel_axis = np_char.startswith(ctypes, "V")
+            self.vel_axis += np_char.startswith(ctypes, "FREQ")
+            self.vel_axis += np_char.startswith(ctypes, "ENER")
+            self.vel_axis = np.where(self.vel_axis)[0][0]
+            self.vel_name = ctypes[self.vel_axis].lower()
+
+            self.wcs_2d = ap.pywcs.WCS(naxis=2)
+            self.wcs_2d.wcs.crpix = self.wcs.wcs.crpix[[self.ra_axis, self.dec_axis]]
+            self.wcs_2d.wcs.cdelt = self.wcs.wcs.cdelt[[self.ra_axis, self.dec_axis]]
+            self.wcs_2d.wcs.crval = self.wcs.wcs.crval[[self.ra_axis, self.dec_axis]]
+            self.wcs_2d.wcs.cunit = [str(self.wcs.wcs.cunit[self.ra_axis]),
+                                     str(self.wcs.wcs.cunit[self.dec_axis])]
+            self.wcs_2d.wcs.ctype = [self.wcs.wcs.ctype[self.ra_axis],
+                                     self.wcs.wcs.ctype[self.dec_axis]]
+
+            self.wcs_1d = ap.pywcs.WCS(naxis=1)
+            self.wcs_1d.wcs.crpix = [self.wcs.wcs.crpix[self.vel_axis]]
+            self.wcs_1d.wcs.cdelt = [self.wcs.wcs.cdelt[self.vel_axis]]
+            self.wcs_1d.wcs.crval = [self.wcs.wcs.crval[self.vel_axis]]
+            self.wcs_1d.wcs.cunit = [str(self.wcs.wcs.cunit[self.vel_axis])]
+            self.wcs_1d.wcs.ctype = [self.wcs.wcs.ctype[self.vel_axis]]
+
+        else:
+
+            self.wcs_2d = self.wcs
+            self.wcs_1d = None
+            self.vel_axis = 2
+            self.vel_name = "z"
+
     def __del__(self):
+        for file in self._fits_files:
+            file.close()
         self._handle.close()
 
     @classmethod
-    def _is_valid(self, *args, **kwargs):
-        if isinstance(args[0], types.StringTypes):
-            ext = args[0].rsplit(".", 1)[-1]
-            if ext.upper() == "GZ":
-                # We don't know for sure that there will be > 1
-                ext = args[0].rsplit(".", 1)[0].rsplit(".", 1)[-1]
-            if ext.upper() not in ("FITS", "FTS"):
-                return False
-        try:
-            if args[0].__class__.__name__ == "HDUList":
-                for h in args[0]:
-                    if h.is_image and h.data is not None:
-                        return True
-        except:
-            pass
+    def _is_valid(cls, *args, **kwargs):
+        ext = args[0].rsplit(".", 1)[-1]
+        if ext.upper() == "GZ":
+            # We don't know for sure that there will be > 1
+            ext = args[0].rsplit(".", 1)[0].rsplit(".", 1)[-1]
+        if ext.upper() not in ("FITS", "FTS"):
+            return False
         try:
             with warnings.catch_warnings():
                 warnings.filterwarnings('ignore', category=UserWarning, append=True)
                 fileh = ap.pyfits.open(args[0])
-            for h in fileh:
-                if h.is_image and h.data is not None:
-                    fileh.close()
-                    return True
+            valid = fileh[0].header["naxis"] >= 2
             fileh.close()
+            return valid
         except:
             pass
         return False
-
-
