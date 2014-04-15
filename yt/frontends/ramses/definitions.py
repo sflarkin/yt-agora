@@ -28,6 +28,7 @@ def ramses_header(hvals):
                ('nout', 3, 'I')
               )
     yield header
+    # TODO: REMOVE
     noutput, iout, ifout = hvals['nout']
     next_set = ( ('tout', noutput, 'd'),
                  ('aout', noutput, 'd'),
@@ -45,3 +46,18 @@ def ramses_header(hvals):
                     ('numbl', hvals['nlevelmax'] * hvals['ncpu'], 'i'),
                   )
     yield tree_header
+
+field_aliases = {
+    'standard_five':     ('Density',
+                          'x-velocity',
+                          'y-velocity',
+                          'z-velocity',
+                          'Pressure'),
+    'standard_six':      ('Density',
+                          'x-velocity',
+                          'y-velocity',
+                          'z-velocity',
+                          'Pressure',
+                          'Metallicity'),
+
+}

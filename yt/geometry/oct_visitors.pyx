@@ -176,10 +176,16 @@ cdef void count_by_domain(Oct *o, OctVisitorData *data, np.uint8_t selected):
     arr[o.domain - 1] += 1
 
 cdef void store_octree(Oct *o, OctVisitorData *data, np.uint8_t selected):
-    cdef np.uint8_t *arr, res, ii
+    cdef np.uint8_t *arr, res, ii, *always_descend
     ii = cind(data.ind[0], data.ind[1], data.ind[2])
-    arr = <np.uint8_t *> data.array
+    cdef void **p = <void **> data.array
+    always_descend = <np.uint8_t *> p[0]
+    arr = <np.uint8_t *> p[1]
+    if always_descend[0] == 1 and data.last == o.domain_ind:
+        return
+    data.last = o.domain_ind
     if o.children == NULL or o.children[ii] == NULL:
+        # Not refined.
         res = 0
     else:
         res = 1
@@ -202,15 +208,22 @@ cdef void load_octree(Oct *o, OctVisitorData *data, np.uint8_t selected):
             o.file_ind = nfinest[0]
             o.domain = 1
             nfinest[0] += 1
-    elif arr[data.index] == 1:
+    elif arr[data.index] > 0:
+        if arr[data.index] != 1 and arr[data.index] != 8:
+            print "ARRAY CLUE: ", arr[data.index], "UNKNOWN"
+            raise RuntimeError
         if o.children == NULL:
             o.children = <Oct **> malloc(sizeof(Oct *) * 8)
             for i in range(8):
                 o.children[i] = NULL
-        o.children[ii] = &octs[nocts[0]]
-        o.children[ii].domain_ind = nocts[0]
-        o.children[ii].file_ind = -1
-        o.children[ii].domain = -1
-        o.children[ii].children = NULL
-        nocts[0] += 1
+        for i in range(arr[data.index]):
+            o.children[ii + i] = &octs[nocts[0]]
+            o.children[ii + i].domain_ind = nocts[0]
+            o.children[ii + i].file_ind = -1
+            o.children[ii + i].domain = -1
+            o.children[ii + i].children = NULL
+            nocts[0] += 1
+    else:
+        print "SOMETHING IS AMISS", data.index
+        raise RuntimeError
     data.index += 1

@@ -30,11 +30,13 @@ yt/utilities/lib/FixedInterpolator.c
 yt/utilities/lib/fortran_reader.c
 yt/utilities/lib/freetype_writer.c
 yt/utilities/lib/geometry_utils.c
+yt/utilities/lib/image_utilities.c
 yt/utilities/lib/Interpolators.c
 yt/utilities/lib/kdtree.c
 yt/utilities/lib/mesh_utilities.c
 yt/utilities/lib/misc_utilities.c
 yt/utilities/lib/Octree.c
+yt/utilities/lib/origami.c
 yt/utilities/lib/png_writer.c
 yt/utilities/lib/PointsInVolume.c
 yt/utilities/lib/QuadTree.c
@@ -51,3 +53,7 @@ syntax: glob
 *.so
 .idea/*
 tests/results/*
+doc/build/*
+doc/source/reference/api/generated/*
+doc/_temp/*
+doc/source/bootcamp/.ipynb_checkpoints/

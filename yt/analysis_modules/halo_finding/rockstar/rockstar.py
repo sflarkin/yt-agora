@@ -13,11 +13,14 @@ Operations to get Rockstar loaded up
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
-from yt.mods import *
+from yt.config import ytcfg
+from yt.data_objects.time_series import \
+     DatasetSeries
+from yt.funcs import \
+     is_root
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelAnalysisInterface, ProcessorPool, Communicator
 from yt.analysis_modules.halo_finding.halo_objects import * #Halos & HaloLists
-from yt.config import ytcfg
 from yt.utilities.exceptions import YTRockstarMultiMassNotSupported
 
 import rockstar_interface
@@ -80,7 +83,7 @@ class StandardRunner(ParallelAnalysisInterface):
         else:
             self.num_writers = min(num_writers, psize)
         if self.num_readers + self.num_writers + 1 != psize:
-            mylog.error('%i reader + %i writers != %i mpi',
+            mylog.error('%i reader + %i writers + 1 server != %i mpi',
                     self.num_readers, self.num_writers, psize)
             raise RuntimeError
     
@@ -114,11 +117,11 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
 
     Parameters
     ----------
-    ts   : TimeSeriesData, StaticOutput
+    ts   : DatasetSeries, Dataset
         This is the data source containing the DM particles. Because 
         halo IDs may change from one snapshot to the next, the only
         way to keep a consistent halo ID across time is to feed 
-        Rockstar a set of snapshots, ie, via TimeSeriesData.
+        Rockstar a set of snapshots, ie, via DatasetSeries.
     num_readers: int
         The number of reader can be increased from the default
         of 1 in the event that a single snapshot is split among
@@ -143,7 +146,7 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
         the width of the smallest grid element in the simulation from the
         last data snapshot (i.e. the one where time has evolved the
         longest) in the time series:
-        ``pf_last.h.get_smallest_dx() * pf_last['mpch']``.
+        ``pf_last.index.get_smallest_dx().in_units("Mpc/h")``.
     total_particles : int
         If supplied, this is a pre-calculated total number of particles present
         in the simulation. For example, this is useful when analyzing a series
@@ -163,26 +166,42 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
 
     Examples
     --------
+    
     To use the script below you must run it using MPI:
-    mpirun -np 3 python test_rockstar.py --parallel
+    mpirun -np 4 python run_rockstar.py --parallel
 
-    test_rockstar.py:
+    run_rockstar.py:
 
-    from yt.analysis_modules.halo_finding.rockstar.api import RockstarHaloFinder
     from yt.mods import *
-    import sys
 
-    ts = TimeSeriesData.from_filenames('/u/cmoody3/data/a*')
-    pm = 7.81769027e+11
-    rh = RockstarHaloFinder(ts)
+    from yt.analysis_modules.halo_finding.rockstar.api import \
+        RockstarHaloFinder
+    from yt.data_objects.particle_filters import \
+        particle_filter
+
+    # create a particle filter to remove star particles
+    @particle_filter("dark_matter", requires=["creation_time"])
+    def _dm_filter(pfilter, data):
+        return data["creation_time"] <= 0.0
+
+    def setup_pf(pf):
+        pf.add_particle_filter("dark_matter")
+
+    es = simulation("enzo_tiny_cosmology/32Mpc_32.enzo", "Enzo")
+    es.get_time_series(setup_function=setup_pf, redshift_data=False)
+
+    rh = RockstarHaloFinder(es, num_readers=1, num_writers=2,
+                            particle_type="dark_matter")
     rh.run()
+
     """
     def __init__(self, ts, num_readers = 1, num_writers = None,
             outbase="rockstar_halos", particle_type="all",
             force_res=None, total_particles=None, dm_only=False,
             particle_mass=None):
-        mylog.warning("The citation for the Rockstar halo finder can be found at")
-        mylog.warning("http://adsabs.harvard.edu/abs/2013ApJ...762..109B")
+        if is_root():
+            mylog.info("The citation for the Rockstar halo finder can be found at")
+            mylog.info("http://adsabs.harvard.edu/abs/2013ApJ...762..109B")
         ParallelAnalysisInterface.__init__(self)
         # Decide how we're working.
         if ytcfg.getboolean("yt", "inline") == True:
@@ -196,15 +215,15 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
         # Note that Rockstar does not support subvolumes.
         # We assume that all of the snapshots in the time series
         # use the same domain info as the first snapshots.
-        if not isinstance(ts, TimeSeriesData):
-            ts = TimeSeriesData([ts])
+        if not isinstance(ts, DatasetSeries):
+            ts = DatasetSeries([ts])
         self.ts = ts
         self.particle_type = particle_type
         self.outbase = outbase
         if force_res is None:
             tpf = ts[-1] # Cache a reference
-            self.force_res = tpf.h.get_smallest_dx() * tpf['mpch']
-            # We have to delete now to wipe the hierarchy
+            self.force_res = tpf.index.get_smallest_dx().in_units("Mpc/h")
+            # We have to delete now to wipe the index
             del tpf
         else:
             self.force_res = force_res
@@ -222,34 +241,37 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
         if self.workgroup.name != "readers": return None
         tpf = ts[0]
         ptype = self.particle_type
+        if ptype not in tpf.particle_types and ptype != 'all':
+            has_particle_filter = tpf.add_particle_filter(ptype)
+            if not has_particle_filter:
+                raise RuntimeError("Particle type (filter) %s not found." % (ptype))
 
         dd = tpf.h.all_data()
         # Get DM particle mass.
-        all_fields = set(tpf.h.derived_field_list + tpf.h.field_list)
+        all_fields = set(tpf.derived_field_list + tpf.field_list)
         has_particle_type = ("particle_type" in all_fields)
 
         particle_mass = self.particle_mass
         if particle_mass is None:
-            pmass_min, pmass_max = dd.quantities["Extrema"](
-                (ptype, "ParticleMassMsun"), non_zero = True)[0]
-            if pmass_min != pmass_max:
+            pmass_min, pmass_max = dd.quantities.extrema(
+                (ptype, "particle_mass"), non_zero = True)
+            if np.abs(pmass_max - pmass_min) / pmass_max > 0.01:
                 raise YTRockstarMultiMassNotSupported(pmass_min, pmass_max,
                     ptype)
             particle_mass = pmass_min
-        # NOTE: We want to take our Msun and turn it into Msun/h .  Its value
-        # should be such that dividing by little h gives the original value.
-        particle_mass *= tpf.hubble_constant
 
         p = {}
         if self.total_particles is None:
             # Get total_particles in parallel.
-            tp = dd.quantities['TotalQuantity']((ptype, "particle_ones"))[0]
+            tp = dd.quantities.total_quantity((ptype, "particle_ones"))
             p['total_particles'] = int(tp)
             mylog.warning("Total Particle Count: %0.3e", int(tp))
         p['left_edge'] = tpf.domain_left_edge
         p['right_edge'] = tpf.domain_right_edge
         p['center'] = (tpf.domain_right_edge + tpf.domain_left_edge)/2.0
         p['particle_mass'] = self.particle_mass = particle_mass
+        p['particle_mass'].convert_to_units("Msun / h")
+        del tpf
         return p
 
     def __del__(self):
@@ -264,7 +286,14 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
 
     def _get_hosts(self):
         if self.comm.rank == 0 or self.comm.size == 1:
-            server_address = socket.gethostname()
+            
+            #Temporary mac hostname fix
+            try:
+                server_address = socket.gethostname()
+                socket.gethostbyname(server_address)
+            except socket.gaierror:
+                server_address = "localhost"
+
             sock = socket.socket()
             sock.bind(('', 0))
             port = sock.getsockname()[-1]
@@ -275,15 +304,37 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
             (server_address, port))
         self.port = str(self.port)
 
-    def run(self, block_ratio = 1, callbacks = None):
+    def run(self, block_ratio = 1, callbacks = None, restart = False):
         """
         
         """
         if block_ratio != 1:
             raise NotImplementedError
         self._get_hosts()
+        # Find restart output number
+        num_outputs = len(self.ts)
+        if restart:
+            restart_file = os.path.join(self.outbase, "restart.cfg")
+            if not os.path.exists(restart_file):
+                raise RuntimeError("Restart file %s not found" % (restart_file))
+            with open(restart_file) as restart_fh:
+                for l in restart_fh:
+                    if l.startswith("RESTART_SNAP"):
+                        restart_num = int(l.split("=")[1])
+                    if l.startswith("NUM_WRITERS"):
+                        num_writers = int(l.split("=")[1])
+            if num_writers != self.num_writers:
+                raise RuntimeError(
+                    "Number of writers in restart has changed from the original "
+                    "run (OLD = %d, NEW = %d).  To avoid problems in the "
+                    "restart, choose the same number of writers." % \
+                        (num_writers, self.num_writers))
+            # Remove the datasets that were already analyzed
+            self.ts._pre_outputs = self.ts._pre_outputs[restart_num:]
+        else:
+            restart_num = 0
         self.handler.setup_rockstar(self.server_address, self.port,
-                    len(self.ts), self.total_particles, 
+                    num_outputs, self.total_particles, 
                     self.particle_type,
                     particle_mass = self.particle_mass,
                     parallel = self.comm.size > 1,
@@ -293,11 +344,12 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
                     block_ratio = block_ratio,
                     outbase = self.outbase,
                     force_res = self.force_res,
-                    callbacks = callbacks)
+                    callbacks = callbacks,
+                    restart_num = restart_num)
         # Make the directory to store the halo lists in.
         if not self.outbase:
             self.outbase = os.getcwd()
-        if self.comm.rank == 0:
+        if self.comm.rank == 0 and not restart:
             if not os.path.exists(self.outbase):
                 os.makedirs(self.outbase)
             # Make a record of which dataset corresponds to which set of

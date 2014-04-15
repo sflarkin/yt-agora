@@ -37,7 +37,7 @@ def grid_sequences(grids):
 
 class IOHandlerFLASH(BaseIOHandler):
     _particle_reader = False
-    _data_style = "flash_hdf5"
+    _dataset_type = "flash_hdf5"
 
     def __init__(self, pf):
         super(IOHandlerFLASH, self).__init__(pf)
@@ -100,37 +100,17 @@ class IOHandlerFLASH(BaseIOHandler):
                     data = p_fields[start:end, fi]
                     yield (ptype, field), data[mask]
 
-    def _read_data_set(self, grid, field):
-        f = self._handle
-        f_part = self._particle_handle
-        if field in self._particle_fields:
-            if grid.NumberOfParticles == 0: return np.array([], dtype='float64')
-            start = self.pf.h._particle_indices[grid.id - grid._id_offset]
-            end = self.pf.h._particle_indices[grid.id - grid._id_offset + 1]
-            fi = self._particle_fields[field]
-            tr = f_part["/tracer particles"][start:end, fi]
-        else:
-            tr = f["/%s" % field][grid.id - grid._id_offset,:,:,:].transpose()
-        return tr.astype("float64")
-
-    def _read_data_slice(self, grid, field, axis, coord):
-        sl = [slice(None), slice(None), slice(None)]
-        sl[axis] = slice(coord, coord + 1)
-        f = self._handle
-        tr = f["/%s" % field][grid.id - grid._id_offset].transpose()[sl]
-        return tr.astype("float64")
-
     def _read_fluid_selection(self, chunks, selector, fields, size):
         chunks = list(chunks)
-        if any((ftype != "gas" for ftype, fname in fields)):
+        if any((ftype != "flash" for ftype, fname in fields)):
             raise NotImplementedError
         f = self._handle
         rv = {}
         for field in fields:
             ftype, fname = field
             dt = f["/%s" % fname].dtype
-            if dt == "float32": dt = "float64"
-            rv[field] = np.empty(size, dtype=dt)
+            # Always use *native* 64-bit float.
+            rv[field] = np.empty(size, dtype="=f8")
         ng = sum(len(c.objs) for c in chunks)
         mylog.debug("Reading %s cells of %s fields in %s blocks",
                     size, [f2 for f1, f2 in fields], ng)
@@ -161,6 +141,6 @@ class IOHandlerFLASH(BaseIOHandler):
                 end = gs[-1].id - gs[-1]._id_offset + 1
                 data = ds[start:end,:,:,:].transpose()
                 for i, g in enumerate(gs):
-                    rv[g.id][field] = data[...,i]
+                    rv[g.id][field] = np.asarray(data[...,i], "=f8")
         return rv
 
