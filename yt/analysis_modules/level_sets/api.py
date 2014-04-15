@@ -14,16 +14,15 @@ API for level_sets
 #-----------------------------------------------------------------------------
 
 from .contour_finder import \
-    coalesce_join_tree, \
     identify_contours
 
 from .clump_handling import \
     Clump, \
     find_clumps, \
     get_lowest_clumps, \
-    write_clump_hierarchy, \
+    write_clump_index, \
     write_clumps, \
-    write_old_clump_hierarchy, \
+    write_old_clump_index, \
     write_old_clumps, \
     write_old_clump_info, \
     _DistanceToMainClump

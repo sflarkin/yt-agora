@@ -17,11 +17,6 @@ from color_maps import \
     add_cmap, \
     show_colormaps
 
-from plot_collection import \
-    PlotCollection, \
-    PlotCollectionInteractive, \
-    concatenate_pdfs
-
 from fixed_resolution import \
     FixedResolutionBuffer, \
     ObliqueFixedResolutionBuffer
@@ -32,11 +27,9 @@ from image_writer import \
     write_image, \
     map_to_colors, \
     splat_points, \
-    annotate_image, \
     apply_colormap, \
     scale_image, \
-    write_projection, \
-    write_fits
+    write_projection
 
 from plot_modifications import \
     PlotCallback, \
@@ -50,6 +43,7 @@ from streamlines import \
 
 from plot_window import \
     SlicePlot, \
+    AxisAlignedSlicePlot, \
     OffAxisSlicePlot, \
     ProjectionPlot, \
     OffAxisProjectionPlot

@@ -31,8 +31,12 @@ from yt.config import ytcfg
 from yt.utilities.performance_counters import \
     yt_counters, time_function
 from yt.utilities.math_utils import periodic_dist, get_rotation_matrix
-from yt.utilities.physical_constants import rho_crit_now, mass_sun_cgs
-
+from yt.utilities.physical_constants import \
+    mass_sun_cgs, \
+    TINY
+from yt.utilities.physical_ratios import \
+     rho_crit_g_cm3_h2
+    
 from .hop.EnzoHop import RunHOP
 from .fof.EnzoFOF import RunFOF
 try:
@@ -45,8 +49,6 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelDummy, \
     ParallelAnalysisInterface, \
     parallel_blocking_call
-
-TINY = 1.e-40
 
 class Halo(object):
     """
@@ -106,9 +108,9 @@ class Halo(object):
         pid = self.__getitem__('particle_index')
         # This is from the sphere.
         if self._name == "RockstarHalo":
-            ds = self.pf.h.sphere(self.CoM, self._radjust * self.max_radius)
+            ds = self.pf.sphere(self.CoM, self._radjust * self.max_radius)
         elif self._name == "LoadedHalo":
-            ds = self.pf.h.sphere(self.CoM, self._radjust * self.max_radius)
+            ds = self.pf.sphere(self.CoM, self._radjust * self.max_radius)
         sp_pid = ds['particle_index']
         self._ds_sort = sp_pid.argsort()
         sp_pid = sp_pid[self._ds_sort]
@@ -148,8 +150,10 @@ class Halo(object):
             sel = (c[i] <= (self.pf.domain_width[i]/2))
             c[i][sel] += self.pf.domain_width[i]
             com.append(c[i])
-        com = np.array(com)
+
         c = (com * pm).sum(axis=1) / pm.sum()
+        c = self.pf.arr(c, 'code_length')
+
         return c%self.pf.domain_width + self.pf.domain_left_edge
 
     def maximum_density(self):
@@ -299,7 +303,7 @@ class Halo(object):
 
         Returns
         -------
-        sphere : `yt.data_objects.api.AMRSphereBase`
+        sphere : `yt.data_objects.api.YTSphereBase`
             The empty data source.
 
         Examples
@@ -312,7 +316,7 @@ class Halo(object):
             center = self.maximum_density_location()
         radius = self.maximum_radius()
         # A bit of a long-reach here...
-        sphere = self.data.hierarchy.sphere(
+        sphere = self.data.index.sphere(
                         center, radius=radius)
         return sphere
 
@@ -329,7 +333,7 @@ class Halo(object):
                    + ["particle_velocity_%s" % ax for ax in 'xyz'] \
                    + ["particle_index"] + ["ParticleMassMsun"]:
             handle.create_dataset("/%s/%s" % (gn, field), data=self[field])
-        if 'creation_time' in self.data.pf.h.field_list:
+        if 'creation_time' in self.data.pf.field_list:
             handle.create_dataset("/%s/creation_time" % gn,
                 data=self['creation_time'])
         n = handle["/%s" % gn]
@@ -433,13 +437,12 @@ class Halo(object):
         z = self.pf.current_redshift
         period = self.pf.domain_right_edge - \
             self.pf.domain_left_edge
-        cm = self.pf["cm"]
         thissize = self.get_size()
-        rho_crit = rho_crit_now * h ** 2.0 * Om_matter  # g cm^-3
+        rho_crit = rho_crit_g_cm3_h2 * h ** 2.0 * Om_matter  # g cm^-3
         Msun2g = mass_sun_cgs
         rho_crit = rho_crit * ((1.0 + z) ** 3.0)
         # Get some pertinent information about the halo.
-        self.mass_bins = np.zeros(self.bin_count + 1, dtype='float64')
+        self.mass_bins = YTArray(np.zeros(self.bin_count + 1, dtype='float64'),'Msun')
         dist = np.empty(thissize, dtype='float64')
         cen = self.center_of_mass()
         mark = 0
@@ -454,6 +457,7 @@ class Halo(object):
         # Multiply min and max to prevent issues with digitize below.
         self.radial_bins = np.logspace(math.log10(min(dist) * .99 + TINY),
             math.log10(max(dist) * 1.01 + 2 * TINY), num=self.bin_count + 1)
+        self.radial_bins = self.pf.arr(self.radial_bins,'code_length')
         # Find out which bin each particle goes into, and add the particle
         # mass to that bin.
         inds = np.digitize(dist, self.radial_bins) - 1
@@ -466,8 +470,8 @@ class Halo(object):
             self.mass_bins[i + 1] += self.mass_bins[i]
         # Calculate the over densities in the bins.
         self.overdensity = self.mass_bins * Msun2g / \
-        (4./3. * math.pi * rho_crit * \
-        (self.radial_bins * cm)**3.0)
+            (4./3. * math.pi * rho_crit * \
+            (self.radial_bins )**3.0)
         
     def _get_ellipsoid_parameters_basic(self):
         np.seterr(all='ignore')
@@ -604,7 +608,7 @@ class RockstarHalo(Halo):
         # We won't store this field below in saved_fields because
         # that would mean keeping two copies of it, one in the yt
         # machinery and one here.
-        ds = self.pf.h.sphere(self.CoM, 4 * self.max_radius)
+        ds = self.pf.sphere(self.CoM, 4 * self.max_radius)
         return np.take(ds[key][self._ds_sort], self.particle_mask)
 
     def _get_particle_data(self, halo, fnames, size, field):
@@ -675,7 +679,7 @@ class RockstarHalo(Halo):
         >>> ell = halos[0].get_ellipsoid()
         """
         ep = self.get_ellipsoid_parameters()
-        ell = self.data.hierarchy.ellipsoid(ep[0], ep[1], ep[2], ep[3],
+        ell = self.data.index.ellipsoid(ep[0], ep[1], ep[2], ep[3],
             ep[4], ep[5])
         return ell
     
@@ -709,7 +713,7 @@ class parallelHOPHalo(Halo, ParallelAnalysisInterface):
         h = self.data.pf.hubble_constant
         Om_matter = self.data.pf.omega_matter
         z = self.data.pf.current_redshift
-        rho_crit = rho_crit_now * h ** 2.0 * Om_matter  # g cm^-3
+        rho_crit = rho_crit_g_cm3_h2 * h ** 2.0 * Om_matter  # g cm^-3
         Msun2g = mass_sun_cgs
         rho_crit = rho_crit * ((1.0 + z) ** 3.0)
         # If I own some of this halo operate on the particles.
@@ -738,6 +742,8 @@ class parallelHOPHalo(Halo, ParallelAnalysisInterface):
         # Multiply min and max to prevent issues with digitize below.
         self.radial_bins = np.logspace(math.log10(dist_min * .99 + TINY),
             math.log10(dist_max * 1.01 + 2 * TINY), num=self.bin_count + 1)
+        self.radial_bins = pf.arr(self.radial_bins, 'code_length')
+
         if self.indices is not None and self.indices.size > 1:
             # Find out which bin each particle goes into, and add the particle
             # mass to that bin.
@@ -753,7 +759,7 @@ class parallelHOPHalo(Halo, ParallelAnalysisInterface):
         # Calculate the over densities in the bins.
         self.overdensity = self.mass_bins * Msun2g / \
         (4. / 3. * math.pi * rho_crit * \
-        (self.radial_bins * self.data.pf["cm"]) ** 3.0)
+        (self.radial_bins) ** 3.0)
 
     def _get_ellipsoid_parameters_basic(self):
         mylog.error("Ellipsoid calculation does not work for parallelHF halos." + \
@@ -865,7 +871,7 @@ class LoadedHalo(Halo):
         # We won't store this field below in saved_fields because
         # that would mean keeping two copies of it, one in the yt
         # machinery and one here.
-        ds = self.pf.h.sphere(self.CoM, 1.05 * self.max_radius)
+        ds = self.pf.sphere(self.CoM, 1.05 * self.max_radius)
         return np.take(ds[key][self._ds_sort], self.particle_mask)
 
     def _get_particle_data(self, halo, fnames, size, field):
@@ -958,7 +964,7 @@ class LoadedHalo(Halo):
         >>> ell = halos[0].get_ellipsoid()
         """
         ep = self.get_ellipsoid_parameters()
-        ell = self.pf.hierarchy.ellipsoid(ep[0], ep[1], ep[2], ep[3],
+        ell = self.pf.index.ellipsoid(ep[0], ep[1], ep[2], ep[3],
             ep[4], ep[5])
         return ell
 
@@ -980,7 +986,7 @@ class LoadedHalo(Halo):
 
         Returns
         -------
-        sphere : `yt.data_objects.api.AMRSphereBase`
+        sphere : `yt.data_objects.api.YTSphereBase`
             The empty data source.
 
         Examples
@@ -989,7 +995,7 @@ class LoadedHalo(Halo):
         """
         cen = self.center_of_mass()
         r = self.maximum_radius()
-        return self.pf.h.sphere(cen, r)
+        return self.pf.sphere(cen, r)
 
 class TextHalo(LoadedHalo):
     def __init__(self, pf, id, size=None, CoM=None,
@@ -1081,10 +1087,10 @@ class HaloList(object):
         gc.collect()
 
     def _get_dm_indices(self):
-        if 'creation_time' in self._data_source.hierarchy.field_list:
+        if 'creation_time' in self._data_source.index.field_list:
             mylog.debug("Differentiating based on creation time")
             return (self._data_source["creation_time"] <= 0)
-        elif 'particle_type' in self._data_source.hierarchy.field_list:
+        elif 'particle_type' in self._data_source.index.field_list:
             mylog.debug("Differentiating based on particle type")
             return (self._data_source["particle_type"] == 1)
         else:
@@ -1122,106 +1128,6 @@ class HaloList(object):
 
     def __getitem__(self, key):
         return self._groups[key]
-
-    def nearest_neighbors_3D(self, haloID, num_neighbors=7, search_radius=.2):
-        r"""For a halo its nearest neighbors in 3D using the kd tree.
-
-        This will calculate the nearest neighbors of a halo, using the kD tree.
-        Returns a list of the neighbors distances and ID with format
-        [distance,haloID].
-
-        Parameters
-        ----------
-        haloID : integer
-            The halo to find neighbors for.
-        num_neighbors : integer
-            How many neighbors to search for. Default = 7.
-        search_radius : float
-            How far away to look for neighbors in code units. Default = 0.2.
-
-        Examples
-        --------
-        >>> neighbors = halos.nearest_neighbors_3D(0)
-        """
-        period = self.pf.domain_right_edge - self.pf.domain_left_edge
-        # Initialize the dataset of points from all the haloes
-        dataset = []
-        for group in self:
-            p = Point()
-            p.data = group.center_of_mass().tolist()
-            p.haloID = group.id
-            dataset.append(p)
-        mylog.info('Building kd tree...')
-        kd = buildKdHyperRectTree(dataset[:], 2 * num_neighbors)
-        # make the neighbors object
-        neighbors = Neighbors()
-        neighbors.k = num_neighbors
-        neighbors.points = []
-        neighbors.minDistanceSquared = search_radius * search_radius
-        mylog.info('Finding nearest neighbors...')
-        getKNN(self[haloID].center_of_mass().tolist(), kd, neighbors, 0.,
-            period.tolist())
-        # convert the data in order to return something less perverse than a
-        # Neighbors object, also root the distances
-        n_points = []
-        for n in neighbors.points:
-            n_points.append([math.sqrt(n[0]), n[1].haloID])
-        return n_points
-
-    def nearest_neighbors_2D(self, haloID, num_neighbors=7, search_radius=.2,
-        proj_dim=0):
-        r"""For a halo its nearest neighbors in 2D using the kd tree.
-
-        This will strip a dimension from consideration in the kD-tree, and then
-        calculate all the nearest projected neighbors of a halo.  Returns a
-        list of the neighbors distances and ID with format [distance,haloID].
-
-        Parameters
-        ----------
-        haloID : int
-            The halo to find neighbors for.
-        num_neighbors : int
-            How many neighbors to search for. Default = 7.
-        search_radius : float
-            How far away to look for neighbors in code units. Default = 0.2.
-        proj_dim : int
-            Which dimension (0, 1, or 2) to project the halos into 2D.
-            Default = 0.
-
-        Examples
-        --------
-        >>> neighbors = halos.nearest_neighbors_2D(0)
-        """
-        # Set up a vector to multiply other
-        # vectors by to project along proj_dim
-        vec = np.array([1., 1., 1.])
-        vec[proj_dim] = 0.
-        period = self.pf.domain_right_edge - self.pf.domain_left_edge
-        period = period * vec
-        # Initialize the dataset of points from all the haloes
-        dataset = []
-        for group in self:
-            p = Point()
-            cm = group.center_of_mass() * vec
-            p.data = cm.tolist()
-            p.haloID = group.id
-            dataset.append(p)
-        mylog.info('Building kd tree...')
-        kd = buildKdHyperRectTree(dataset[:], 2 * num_neighbors)
-        # make the neighbors object
-        neighbors = Neighbors()
-        neighbors.k = num_neighbors
-        neighbors.points = []
-        neighbors.minDistanceSquared = search_radius * search_radius
-        mylog.info('Finding nearest neighbors...')
-        cm = self[haloID].center_of_mass() * vec
-        getKNN(cm.tolist(), kd, neighbors, 0., period.tolist())
-        # convert the data in order to return something less perverse than a
-        # Neighbors object, also root the distances
-        n_points = []
-        for n in neighbors.points:
-            n_points.append([math.sqrt(n[0]), n[1].haloID])
-        return n_points
 
     def write_out(self, filename, ellipsoid_data=False):
         r"""Write out standard halo information to a text file.
@@ -1415,7 +1321,7 @@ class RockstarHaloList(HaloList):
         fglob = path.join(basedir, 'halos_%d.*.bin' % n)
         files = glob.glob(fglob)
         halos = self._get_halos_binary(files)
-        #Jc = 1.98892e33/pf['mpchcm']*1e5
+        #Jc = mass_sun_cgs/ pf['mpchcm'] * 1e5
         Jc = 1.0
         length = 1.0 / pf['mpchcm']
         conv = dict(pos = np.array([length, length, length,
@@ -1891,7 +1797,7 @@ class GenericHaloFinder(HaloList, ParallelAnalysisInterface):
     def __init__(self, pf, ds, dm_only=True, padding=0.0):
         ParallelAnalysisInterface.__init__(self)
         self.pf = pf
-        self.hierarchy = pf.h
+        self.index = pf.h
         self.center = (np.array(ds.right_edge) + np.array(ds.left_edge)) / 2.0
 
     def _parse_halolist(self, threshold_adjustment):
@@ -2102,7 +2008,7 @@ class parallelHF(GenericHaloFinder, parallelHOPHaloList):
 
     Parameters
     ----------
-    pf : `StaticOutput`
+    pf : `Dataset`
         The parameter file on which halo finding will be conducted.
     threshold : float
         The density threshold used when building halos. Default = 160.0.
@@ -2181,7 +2087,7 @@ class parallelHF(GenericHaloFinder, parallelHOPHaloList):
         topbounds = np.array([[0., 0., 0.], period])
         # Cut up the volume evenly initially, with no padding.
         padded, LE, RE, self._data_source = \
-            self.partition_hierarchy_3d(ds=self._data_source,
+            self.partition_index_3d(ds=self._data_source,
             padding=self.padding)
         # also get the total mass of particles
         yt_counters("Reading Data")
@@ -2192,7 +2098,7 @@ class parallelHF(GenericHaloFinder, parallelHOPHaloList):
         if ytcfg.getboolean("yt", "inline") == False and \
             resize and self.comm.size != 1 and subvolume is None:
             random.seed(self.comm.rank)
-            cut_list = self.partition_hierarchy_3d_bisection_list()
+            cut_list = self.partition_index_3d_bisection_list()
             root_points = self._subsample_points()
             self.bucket_bounds = []
             if self.comm.rank == 0:
@@ -2201,11 +2107,11 @@ class parallelHF(GenericHaloFinder, parallelHOPHaloList):
                 self.comm.mpi_bcast(self.bucket_bounds)
             my_bounds = self.bucket_bounds[self.comm.rank]
             LE, RE = my_bounds[0], my_bounds[1]
-            self._data_source = self.hierarchy.region_strict([0.] * 3, LE, RE)
+            self._data_source = self.index.region([0.] * 3, LE, RE)
         # If this isn't parallel, define the region as an AMRRegionStrict so
         # particle IO works.
         if self.comm.size == 1:
-            self._data_source = self.hierarchy.periodic_region_strict([0.5] * 3,
+            self._data_source = self.index.region([0.5] * 3,
                 LE, RE)
         # get the average spacing between particles for this region
         # The except is for the serial case where the full box is what we want.
@@ -2291,11 +2197,10 @@ class parallelHF(GenericHaloFinder, parallelHOPHaloList):
                 np.zeros(3, dtype='float64'))
         # If we're using a subvolume, we now re-divide.
         if subvolume is not None:
-            self._data_source = pf.h.periodic_region_strict([0.] * 3, ds_LE,
-                ds_RE)
+            self._data_source = pf.region([0.] * 3, ds_LE, ds_RE)
             # Cut up the volume.
             padded, LE, RE, self._data_source = \
-                self.partition_hierarchy_3d(ds=self._data_source,
+                self.partition_index_3d(ds=self._data_source,
                 padding=0.)
         self.bounds = (LE, RE)
         (LE_padding, RE_padding) = self.padding
@@ -2427,7 +2332,7 @@ class HOPHaloFinder(GenericHaloFinder, HOPHaloList):
 
     Parameters
     ----------
-    pf : `StaticOutput`
+    pf : `Dataset`
         The parameter file on which halo finding will be conducted.
     subvolume : `yt.data_objects.api.AMRData`, optional
         A region over which HOP will be run, which can be used to run HOP
@@ -2474,14 +2379,14 @@ class HOPHaloFinder(GenericHaloFinder, HOPHaloList):
         # a small part is actually going to be used.
         self.padding = 0.0
         padded, LE, RE, self._data_source = \
-            self.partition_hierarchy_3d(ds=self._data_source,
+            self.partition_index_3d(ds=self._data_source,
                 padding=self.padding)
         # For scaling the threshold, note that it's a passthrough
         if total_mass is None:
             if dm_only:
                 select = self._get_dm_indices()
                 total_mass = \
-                    self.comm.mpi_allreduce((self._data_source["ParticleMassMsun"][select]).sum(dtype='float64'), op='sum')
+                    self.comm.mpi_allreduce((self._data_source['all', "ParticleMassMsun"][select]).sum(dtype='float64'), op='sum')
             else:
                 total_mass = self.comm.mpi_allreduce(self._data_source.quantities["TotalQuantity"]("ParticleMassMsun")[0], op='sum')
         # MJT: Note that instead of this, if we are assuming that the particles
@@ -2489,12 +2394,12 @@ class HOPHaloFinder(GenericHaloFinder, HOPHaloList):
         # object representing the entire domain and sum it "lazily" with
         # Derived Quantities.
         if subvolume is not None:
-            self._data_source = pf.h.periodic_region_strict([0.] * 3, ds_LE, ds_RE)
+            self._data_source = pf.region([0.] * 3, ds_LE, ds_RE)
         else:
             self._data_source = pf.h.all_data()
         self.padding = padding  # * pf["unitary"] # This should be clevererer
         padded, LE, RE, self._data_source = \
-            self.partition_hierarchy_3d(ds=self._data_source,
+            self.partition_index_3d(ds=self._data_source,
             padding=self.padding)
         self.bounds = (LE, RE)
         # sub_mass can be skipped if subvolume is not used and this is not
@@ -2529,7 +2434,7 @@ class FOFHaloFinder(GenericHaloFinder, FOFHaloList):
 
     Parameters
     ----------
-    pf : `StaticOutput`
+    pf : `Dataset`
         The parameter file on which halo finding will be conducted.
     subvolume : `yt.data_objects.api.AMRData`, optional
         A region over which HOP will be run, which can be used to run HOP
@@ -2561,7 +2466,7 @@ class FOFHaloFinder(GenericHaloFinder, FOFHaloList):
             ds_RE = np.array(subvolume.right_edge)
         self.period = pf.domain_right_edge - pf.domain_left_edge
         self.pf = pf
-        self.hierarchy = pf.h
+        self.index = pf.h
         self.redshift = pf.current_redshift
         self._data_source = pf.h.all_data()
         GenericHaloFinder.__init__(self, pf, self._data_source, dm_only,
@@ -2569,7 +2474,7 @@ class FOFHaloFinder(GenericHaloFinder, FOFHaloList):
         self.padding = 0.0  # * pf["unitary"] # This should be clevererer
         # get the total number of particles across all procs, with no padding
         padded, LE, RE, self._data_source = \
-            self.partition_hierarchy_3d(ds=self._data_source,
+            self.partition_index_3d(ds=self._data_source,
             padding=self.padding)
         if link > 0.0:
             n_parts = self.comm.mpi_allreduce(self._data_source["particle_position_x"].size, op='sum')
@@ -2585,12 +2490,12 @@ class FOFHaloFinder(GenericHaloFinder, FOFHaloList):
             linking_length = np.abs(link)
         self.padding = padding
         if subvolume is not None:
-            self._data_source = pf.h.periodic_region_strict([0.] * 3, ds_LE,
+            self._data_source = pf.region([0.] * 3, ds_LE,
                 ds_RE)
         else:
             self._data_source = pf.h.all_data()
         padded, LE, RE, self._data_source = \
-            self.partition_hierarchy_3d(ds=self._data_source,
+            self.partition_index_3d(ds=self._data_source,
             padding=self.padding)
         self.bounds = (LE, RE)
         # reflect particles around the periodic boundary

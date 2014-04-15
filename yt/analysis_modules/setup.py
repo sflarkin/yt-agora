@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-
 def configuration(parent_package='', top_path=None):
     from numpy.distutils.misc_util import Configuration
     config = Configuration('analysis_modules', parent_package, top_path)
@@ -12,7 +11,6 @@ def configuration(parent_package='', top_path=None):
     config.add_subpackage("halo_mass_function")
     config.add_subpackage("halo_merger_tree")
     config.add_subpackage("halo_profiler")
-    config.add_subpackage("hierarchy_subset")
     config.add_subpackage("level_sets")
     config.add_subpackage("particle_trajectories")
     config.add_subpackage("photon_simulator")
