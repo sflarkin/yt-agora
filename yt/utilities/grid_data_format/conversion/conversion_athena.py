@@ -86,7 +86,7 @@ class AthenaDistributedConverter(Converter):
         
 
 
-    def read_and_write_hierarchy(self,basename, ddn, gdf_name):
+    def read_and_write_index(self,basename, ddn, gdf_name):
         """ Read Athena legacy vtk file from multiple cpus """
         proc_names = glob(self.source_dir+'id*')
         #print 'Reading a dataset from %i Processor Files' % len(proc_names)
@@ -291,10 +291,10 @@ class AthenaDistributedConverter(Converter):
                 this_field.attrs['field_to_cgs'] = np.float64('1.0') # For Now
             
 
-    def convert(self, hierarchy=True, data=True):
+    def convert(self, index=True, data=True):
         self.handle = h5.File(self.outname, 'a')
-        if hierarchy:
-            self.read_and_write_hierarchy(self.basename, self.ddn ,self.outname)
+        if index:
+            self.read_and_write_index(self.basename, self.ddn ,self.outname)
         if data:
             self.read_and_write_data(self.basename, self.ddn ,self.outname)
         self.handle.close()
@@ -430,7 +430,7 @@ class AthenaConverter(Converter):
 
         ## --------- Done with top level nodes --------- ##
 
-        f.create_group('hierarchy')
+        f.create_group('index')
 
         ## --------- Store Grid Data --------- ##
 

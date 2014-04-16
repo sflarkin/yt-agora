@@ -14,7 +14,7 @@ Utilities for flagging zones for refinement in a dataset
 #-----------------------------------------------------------------------------
 
 import numpy as np # For modern purposes
-from yt.utilities.lib import grow_flagging_field
+from yt.utilities.lib.misc_utilities import grow_flagging_field
 from yt.extern.six import add_metaclass
 
 flagging_method_registry = {}
@@ -35,7 +35,7 @@ class OverDensity(FlaggingMethod):
         self.over_density = over_density
 
     def __call__(self, grid):
-        rho = grid["Density"] / (grid.pf.refine_by**grid.Level)
+        rho = grid["density"] / (grid.pf.refine_by**grid.Level)
         return (rho > self.over_density)
 
 class FlaggingGrid(object):
@@ -155,6 +155,9 @@ class ProtoSubgrid(object):
                 # Note that sd is offset by one
                 if sd[i-1] * sd[i] < 0:
                     strength = np.abs(sd[i-1] - sd[i])
+                    # TODO this differs from what I could find in ENZO
+                    # there's |center - i| < |center - zero_cross| instead
+                    # additionally zero_cross is undefined in first pass  
                     if strength > zero_strength or \
                        (strength == zero_strength and np.abs(center - i) < np.abs(zero_cross -i )):
                         zero_strength = strength

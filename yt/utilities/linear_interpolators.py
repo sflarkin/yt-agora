@@ -17,7 +17,7 @@ that SciPy doesn't have that I expected it to
 import numpy as np
 
 from yt.funcs import *
-import yt.utilities.lib as lib
+import yt.utilities.lib.Interpolators as lib
 
 class UnilinearFieldInterpolator:
     def __init__(self, table, boundaries, field_names, truncate=False):
@@ -75,7 +75,8 @@ class UnilinearFieldInterpolator:
 
         my_vals = np.zeros(x_vals.shape, dtype='float64')
         lib.UnilinearlyInterpolate(self.table, x_vals, self.x_bins, x_i, my_vals)
-        return my_vals.reshape(orig_shape)
+        my_vals.shape = orig_shape
+        return my_vals
 
 class BilinearFieldInterpolator:
     def __init__(self, table, boundaries, field_names, truncate=False):
@@ -147,7 +148,8 @@ class BilinearFieldInterpolator:
         lib.BilinearlyInterpolate(self.table,
                                  x_vals, y_vals, self.x_bins, self.y_bins,
                                  x_i, y_i, my_vals)
-        return my_vals.reshape(orig_shape)
+        my_vals.shape = orig_shape
+        return my_vals
 
 class TrilinearFieldInterpolator:
     def __init__(self, table, boundaries, field_names, truncate = False):
@@ -209,9 +211,9 @@ class TrilinearFieldInterpolator:
         y_vals = data_object[self.y_name].ravel().astype('float64')
         z_vals = data_object[self.z_name].ravel().astype('float64')
 
-        x_i = np.digitize(x_vals, self.x_bins) - 1
-        y_i = np.digitize(y_vals, self.y_bins) - 1
-        z_i = np.digitize(z_vals, self.z_bins) - 1
+        x_i = np.digitize(x_vals, self.x_bins).astype("int") - 1
+        y_i = np.digitize(y_vals, self.y_bins).astype("int") - 1
+        z_i = np.digitize(z_vals, self.z_bins).astype("int") - 1
         if np.any((x_i == -1) | (x_i == len(self.x_bins)-1)) \
             or np.any((y_i == -1) | (y_i == len(self.y_bins)-1)) \
             or np.any((z_i == -1) | (z_i == len(self.z_bins)-1)):
@@ -230,31 +232,8 @@ class TrilinearFieldInterpolator:
                                  x_vals, y_vals, z_vals,
                                  self.x_bins, self.y_bins, self.z_bins,
                                  x_i, y_i, z_i, my_vals)
-        return my_vals.reshape(orig_shape)
-
-        # Use notation from Paul Bourke's page on interpolation
-        # http://local.wasp.uwa.edu.au/~pbourke/other/interpolation/
-        x = (x_vals - self.x_bins[x_i]) / (self.x_bins[x_i+1] - self.x_bins[x_i])
-        y = (y_vals - self.y_bins[y_i]) / (self.y_bins[y_i+1] - self.y_bins[y_i])
-        z = (z_vals - self.z_bins[z_i]) / (self.z_bins[z_i+1] - self.z_bins[z_i])
-        xm = (self.x_bins[x_i+1] - x_vals) / (self.x_bins[x_i+1] - self.x_bins[x_i])
-        ym = (self.y_bins[y_i+1] - y_vals) / (self.y_bins[y_i+1] - self.y_bins[y_i])
-        zm = (self.z_bins[z_i+1] - z_vals) / (self.z_bins[z_i+1] - self.z_bins[z_i])
-        if np.any(np.isnan(self.table)):
-            raise ValueError
-        if np.any(np.isnan(x) | np.isnan(y) | np.isnan(z)):
-            raise ValueError
-        if np.any(np.isnan(xm) | np.isnan(ym) | np.isnan(zm)):
-            raise ValueError
-        my_vals  = self.table[x_i  ,y_i  ,z_i  ] * (xm*ym*zm)
-        my_vals += self.table[x_i+1,y_i  ,z_i  ] * (x *ym*zm)
-        my_vals += self.table[x_i  ,y_i+1,z_i  ] * (xm*y *zm)
-        my_vals += self.table[x_i  ,y_i  ,z_i+1] * (xm*ym*z )
-        my_vals += self.table[x_i+1,y_i  ,z_i+1] * (x *ym*z )
-        my_vals += self.table[x_i  ,y_i+1,z_i+1] * (xm*y *z )
-        my_vals += self.table[x_i+1,y_i+1,z_i  ] * (x *y *zm)
-        my_vals += self.table[x_i+1,y_i+1,z_i+1] * (x *y *z )
-        return my_vals.reshape(orig_shape)
+        my_vals.shape = orig_shape
+        return my_vals
 
 def get_centers(pf, filename, center_cols, radius_col, unit='1'):
     """
@@ -267,4 +246,4 @@ def get_centers(pf, filename, center_cols, radius_col, unit='1'):
         vals = line.split()
         x,y,z = [float(vals[i]) for i in center_cols]
         r = float(vals[radius_col])
-        yield pf.h.sphere([x,y,z], r/pf[unit])
+        yield pf.sphere([x,y,z], r/pf[unit])

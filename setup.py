@@ -87,7 +87,7 @@ REASON_DIRS = [
 ]
 
 for subdir in REASON_DIRS:
-    dir_name = "yt/gui/reason/html/%s/" % (subdir)
+    dir_name = os.path.join("yt", "gui", "reason", "html", subdir)
     files = []
     for ext in ["js", "html", "css", "png", "ico", "gif"]:
         files += glob.glob("%s/*.%s" % (dir_name, ext))
@@ -160,7 +160,7 @@ build_src.build_src.generate_a_pyrex_source = generate_a_pyrex_source
 # End snippet
 ######
 
-VERSION = "2.7dev"
+VERSION = "3.0dev"
 
 if os.path.exists('MANIFEST'):
     os.remove('MANIFEST')
