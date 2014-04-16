@@ -114,3 +114,6 @@ from .photon_simulator.api import \
      TableAbsorbModel, \
      PhotonModel, \
      ThermalPhotonModel
+
+from .xyv_cube.api import \
+    XYVCube
