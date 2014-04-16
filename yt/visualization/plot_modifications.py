@@ -16,7 +16,6 @@ Callbacks to add additional functionality on to plots.
 import numpy as np
 
 from yt.funcs import *
-from yt.extern.six import add_metaclass
 from _mpl_imports import *
 from yt.utilities.definitions import \
     x_dict, x_names, \
@@ -29,17 +28,16 @@ from yt.utilities.physical_constants import \
     sec_per_day, sec_per_hr
 from yt.visualization.image_writer import apply_colormap
 
-from . import _MPL
+import _MPL
 
 callback_registry = {}
 
-class RegisteredCallback(type):
-    def __init__(cls, name, b, d):
-        type.__init__(cls, name, b, d)
-        callback_registry[name] = cls
-
-@add_metaclass(RegisteredCallback)
 class PlotCallback(object):
+    class __metaclass__(type):
+        def __init__(cls, name, b, d):
+            type.__init__(cls, name, b, d)
+            callback_registry[name] = cls
+
     def __init__(self, *args, **kwargs):
         pass
 
@@ -751,8 +749,10 @@ class ArrowCallback(PlotCallback):
         from matplotlib.patches import Arrow
         # Now convert the pixels to code information
         x, y = self.convert_to_plot(plot, pos)
-        dx, dy = self.convert_to_plot(plot, self.code_size, False)
-        arrow = Arrow(x, y, dx, dy, **self.plot_args)
+        x1, y1 = pos[0]+self.code_size[0], pos[1]+self.code_size[1]
+        x1, y1 = self.convert_to_plot(plot, (x1, y1), False)
+        dx, dy = x1 - x, y1 - y
+        arrow = Arrow(x-dx, y-dy, dx, dy, **self.plot_args)
         plot._axes.add_patch(arrow)
 
 class PointAnnotateCallback(PlotCallback):
@@ -980,7 +980,7 @@ class CoordAxesCallback(PlotCallback):
         unit_conversion = plot.pf[plot.im["Unit"]]
         aspect = (plot.xlim[1]-plot.xlim[0])/(plot.ylim[1]-plot.ylim[0])
 
-        print ("aspect ratio = %s" % aspect)
+        print "aspect ratio = ", aspect
 
         # if coords is False, label axes relative to the center of the
         # display. if coords is True, label axes with the absolute

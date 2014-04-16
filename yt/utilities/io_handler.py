@@ -16,26 +16,25 @@ The data-file handling functions
 from collections import defaultdict
 
 import yt.utilities.lib as au
+import exceptions
 import cPickle
 import os
 import h5py
-from yt.extern.six import add_metaclass
 
 _axis_ids = {0:2,1:1,2:0}
 
 io_registry = {}
 
-class RegisteredIOHandler(type):
-    def __init__(cls, name, b, d):
-        type.__init__(cls, name, b, d)
-        if hasattr(cls, "_data_style"):
-            io_registry[cls._data_style] = cls
-
-@add_metaclass(RegisteredIOHandler)
 class BaseIOHandler(object):
 
     _data_style = None
     _particle_reader = False
+
+    class __metaclass__(type):
+        def __init__(cls, name, b, d):
+            type.__init__(cls, name, b, d)
+            if hasattr(cls, "_data_style"):
+                io_registry[cls._data_style] = cls
 
     def __init__(self):
         self.queue = defaultdict(dict)

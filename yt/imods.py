@@ -1,8 +1,8 @@
 # This custom importer for yt will set up some IPython notebook-specific
 # helpers.  For instance, it will eventually add items to the menubar.
 
-from yt.extern.six.moves import builtins
-if "__IPYTHON__" not in dir(builtins):
+import __builtin__
+if "__IPYTHON__" not in dir(__builtin__):
     raise ImportError
 
 from IPython.core.interactiveshell import InteractiveShell

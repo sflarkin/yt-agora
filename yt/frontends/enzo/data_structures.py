@@ -225,6 +225,7 @@ class EnzoHierarchy(AMRHierarchy):
         self.object_types.sort()
 
     def _count_grids(self):
+        self.num_grids = None
         test_grid = test_grid_id = None
         self.num_stars = 0
         for line in rlines(open(self.hierarchy_filename, "rb")):
@@ -235,8 +236,11 @@ class EnzoHierarchy(AMRHierarchy):
             if line.startswith("NumberOfStarParticles"):
                 self.num_stars = int(line.split("=")[-1])
             if line.startswith("Grid "):
-                self.num_grids = test_grid_id = int(line.split("=")[-1])
-                break
+                if self.num_grids is None:
+                    self.num_grids = int(line.split("=")[-1])
+                test_grid_id = int(line.split("=")[-1])
+                if test_grid is not None:
+                    break
         self._guess_data_style(self.pf.dimensionality, test_grid, test_grid_id)
 
     def _guess_data_style(self, rank, test_grid, test_grid_id):
@@ -288,12 +292,12 @@ class EnzoHierarchy(AMRHierarchy):
         t1 = time.time()
         pattern = r"Pointer: Grid\[(\d*)\]->NextGrid(Next|This)Level = (\d*)\s+$"
         patt = re.compile(pattern)
-        f = open(self.hierarchy_filename, "rt")
+        f = open(self.hierarchy_filename, "rb")
         self.grids = [self.grid(1, self)]
         self.grids[0].Level = 0
         si, ei, LE, RE, fn, npart = [], [], [], [], [], []
         all = [si, ei, LE, RE, fn]
-        pbar = get_pbar("Parsing Hierarchy", self.num_grids)
+        pbar = get_pbar("Parsing Hierarchy ", self.num_grids)
         for grid_id in xrange(self.num_grids):
             pbar.update(grid_id)
             # We will unroll this list
@@ -477,7 +481,7 @@ class EnzoHierarchy(AMRHierarchy):
             field_list = None
         field_list = self.comm.mpi_bcast(field_list)
         self.save_data(list(field_list),"/","DataFields",passthrough=True)
-        self.field_list = [f.decode("ascii") for f in field_list]
+        self.field_list = list(field_list)
 
     def _generate_random_grids(self):
         if self.num_grids > 40:
@@ -1063,11 +1067,11 @@ def rblocks(f, blocksize=4096):
     # the rest aligned on a blocksize boundary.  This may be more 
     # efficient than having the last (first in file) block be short
     f.seek(-lastblock,2)
-    yield f.read(lastblock).decode('ascii')
+    yield f.read(lastblock)
 
     for i in range(fullblocks-1,-1, -1):
         f.seek(i * blocksize)
-        yield f.read(blocksize).decode('ascii')
+        yield f.read(blocksize)
 
 def rlines(f, keepends=False):
     """Iterate through the lines of a file in reverse order.

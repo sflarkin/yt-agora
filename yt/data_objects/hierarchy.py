@@ -19,6 +19,7 @@ import string, re, gc, time, cPickle, pdb
 import weakref
 
 from itertools import chain, izip
+from new import classobj
 
 from yt.funcs import *
 
@@ -318,7 +319,11 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
         obj = self.get_data("/Objects", name)
         if obj is None:
             return
-        obj = cPickle.loads(obj.value)
+        if isinstance(obj, np.ndarray):
+            obj = obj.tostring()
+        elif hasattr(obj, 'value'):
+            obj = obj.value
+        obj = cPickle.loads(obj)
         if iterable(obj) and len(obj) == 2:
             obj = obj[1] # Just the object, not the pf
         if hasattr(obj, '_fix_pickle'): obj._fix_pickle()
@@ -362,7 +367,7 @@ class AMRHierarchy(ObjectFindingMixin, ParallelAnalysisInterface):
 
     def _add_object_class(self, name, class_name, base, dd):
         self.object_types.append(name)
-        obj = type(class_name, (base,), dd)
+        obj = classobj(class_name, (base,), dd)
         setattr(self, name, obj)
 
     def _initialize_level_stats(self):

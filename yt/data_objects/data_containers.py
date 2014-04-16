@@ -18,15 +18,15 @@ data_object_registry = {}
 import numpy as np
 import math
 import weakref
+import exceptions
 import itertools
 import shelve
-from yt.extern.six.moves import StringIO
+import cStringIO
 import fileinput
 from re import finditer
 
 from yt.funcs import *
 from yt.config import ytcfg
-from yt.extern.six import add_metaclass
 
 from yt.data_objects.derived_quantities import GridChildMaskWrapper
 from yt.data_objects.particle_io import particle_handler_registry
@@ -183,13 +183,6 @@ class FakeGridForParticles(object):
         else: tr = self.field_data[field]
         return tr
 
-class RegisteredDataObject(type):
-    def __init__(cls, name, b, d):
-        type.__init__(cls, name, b, d)
-        if hasattr(cls, "_type_name") and not cls._skip_add:
-            data_object_registry[cls._type_name] = cls
-
-@add_metaclass(RegisteredDataObject)
 class AMRData(object):
     """
     Generic AMRData container.  By itself, will attempt to
@@ -200,6 +193,12 @@ class AMRData(object):
     _num_ghost_zones = 0
     _con_args = ()
     _skip_add = False
+
+    class __metaclass__(type):
+        def __init__(cls, name, b, d):
+            type.__init__(cls, name, b, d)
+            if hasattr(cls, "_type_name") and not cls._skip_add:
+                data_object_registry[cls._type_name] = cls
 
     def __init__(self, pf, fields, **kwargs):
         """
@@ -341,7 +340,7 @@ class AMRData(object):
             # First we check the validator
             try:
                 self.pf.field_info[field].check_available(self)
-            except NeedsGridType as ngt_exception:
+            except NeedsGridType, ngt_exception:
                 # We leave this to be implementation-specific
                 self._generate_field_in_grids(field, ngt_exception.ghost_zones)
                 return False
@@ -643,7 +642,7 @@ class AMRRayBase(AMR1DData):
     --------
 
     >>> pf = load("RedshiftOutput0005")
-    >>> ray = pf.h._ray((0.2, 0.74, 0.11), (0.4, 0.91, 0.31))
+    >>> ray = pf.h.ray((0.2, 0.74, 0.11), (0.4, 0.91, 0.31))
     >>> print ray["Density"], ray["t"], ray["dts"]
     """
     _type_name = "ray"
@@ -834,7 +833,7 @@ class AMR2DData(AMRData, GridPropertiesMixin, ParallelAnalysisInterface):
         # We take a 3-tuple of the coordinate we want to slice through, as well
         # as the axis we're slicing along
         self._get_list_of_grids()
-        if 'pdx' not in self.field_data:
+        if not self.has_key('pdx'):
             self._generate_coords()
         if fields == None:
             fields_to_get = self.fields[:]
@@ -875,7 +874,8 @@ class AMR2DData(AMRData, GridPropertiesMixin, ParallelAnalysisInterface):
         pw.set_axes_unit(axes_unit)
         return pw
 
-    def to_frb(self, width, resolution, center=None, height=None):
+    def to_frb(self, width, resolution, center=None, height=None,
+               periodic = False):
         r"""This function returns a FixedResolutionBuffer generated from this
         object.
 
@@ -900,6 +900,9 @@ class AMR2DData(AMRData, GridPropertiesMixin, ParallelAnalysisInterface):
         center : array-like of floats, optional
             The center of the FRB.  If not specified, defaults to the center of
             the current object.
+        periodic : bool
+            Should the returned Fixed Resolution Buffer be periodic?  (default:
+            False).
 
         Returns
         -------
@@ -933,7 +936,8 @@ class AMR2DData(AMRData, GridPropertiesMixin, ParallelAnalysisInterface):
         yax = y_dict[self.axis]
         bounds = (center[xax] - width*0.5, center[xax] + width*0.5,
                   center[yax] - height*0.5, center[yax] + height*0.5)
-        frb = FixedResolutionBuffer(self, bounds, resolution)
+        frb = FixedResolutionBuffer(self, bounds, resolution,
+                                    periodic = periodic)
         return frb
 
     def interpolate_discretize(self, LE, RE, field, side, log_spacing=True):
@@ -1162,7 +1166,7 @@ class AMRSliceBase(AMR2DData):
             return grid[field]
         elif field in self.pf.field_info and self.pf.field_info[field].not_in_all:
             dv = grid[field][sl]
-        elif field not in grid.field_data:
+        elif not grid.has_key(field):
             conv_factor = 1.0
             if self.pf.field_info.has_key(field):
                 conv_factor = self.pf.field_info[field]._convert_function(self)
@@ -1606,7 +1610,7 @@ class AMRFixedResCuttingPlaneBase(AMR2DData):
         Iterates over the list of fields and generates/reads them all.
         """
         self._get_list_of_grids()
-        if 'pdx' not in self.field_data:
+        if not self.has_key('pdx'):
             self._generate_coords()
         if fields == None:
             fields_to_get = self.fields[:]
@@ -1768,6 +1772,9 @@ class AMRQuadTreeProjBase(AMR2DData):
             self._distributed = False
             self._okay_to_serialize = False
             self._check_region = True
+            for k, v in source.field_parameters.items():
+                if k not in self.field_parameters:
+                    self.set_field_parameter(k,v)
         self.source = source
         if self._field_cuts is not None:
             # Override if field cuts are around; we don't want to serialize!
@@ -1832,9 +1839,9 @@ class AMRQuadTreeProjBase(AMR2DData):
         # It is probably faster, as it consolidates IO, but if we did it in
         # _project_level, then it would be more memory conservative
         if self.preload_style == 'all':
-            dependencies = self.get_dependencies(fields, ghost_zones = False)
+            dependencies = self.get_dependencies(fields)
             mylog.debug("Preloading %s grids and getting %s",
-                            len(self.source._get_grid_objs()),
+                            len([g for g in self.source._get_grid_objs()]),
                             dependencies)
             self.comm.preload([g for g in self._get_grid_objs()],
                           dependencies, self.hierarchy.io)
@@ -1951,7 +1958,7 @@ class AMRQuadTreeProjBase(AMR2DData):
         grids_to_initialize = [g for g in self._grids if (g.Level == level)]
         zero_out = (level != self._max_level)
         if len(grids_to_initialize) == 0: return
-        pbar = get_pbar('Initializing tree % 2i / % 2i' \
+        pbar = get_pbar('Initializing tree % 2i / % 2i ' \
                           % (level, self._max_level), len(grids_to_initialize))
         start_index = np.empty(2, dtype="int64")
         dims = np.empty(2, dtype="int64")
@@ -2107,6 +2114,9 @@ class AMRProjBase(AMR2DData):
             self._distributed = False
             self._okay_to_serialize = False
             self._check_region = True
+            for k, v in source.field_parameters.items():
+                if k not in self.field_parameters:
+                    self.set_field_parameter(k,v)
         self.source = source
         if self._field_cuts is not None:
             # Override if field cuts are around; we don't want to serialize!
@@ -2485,7 +2495,7 @@ class AMRFixedResProjectionBase(AMR2DData):
         Iterates over the list of fields and generates/reads them all.
         """
         self._get_list_of_grids()
-        if 'pdx' not in self.field_data():
+        if not self.has_key('pdx'):
             self._generate_coords()
         if fields == None:
             fields_to_get = [f for f in self.fields if f not in self._key_fields]
@@ -2652,7 +2662,7 @@ class AMR3DData(AMRData, GridPropertiesMixin, ParallelAnalysisInterface):
         for grid in self._grids:
             pointI = self._get_point_indices(grid)
             np = pointI[0].ravel().size
-            if field in grid.field_data:
+            if grid.has_key(field):
                 new_field = grid[field]
             else:
                 new_field = np.ones(grid.ActiveDimensions, dtype=dtype) * default_val
@@ -3664,8 +3674,7 @@ class AMREllipsoidBase(AMR3DData):
 
 
 class AMRCoveringGridBase(AMR3DData):
-    """A 3D region with all data extracted to a single, specified
-    resolution.
+    """A 3D region with all data extracted to a single, specified resolution.
 
     Parameters
     ----------
@@ -3809,10 +3818,8 @@ class AMRCoveringGridBase(AMR3DData):
         ref_ratio = self.pf.refine_by**(self.level - grid.Level)
         g_fields = []
         for field in fields:
-            if field not in grid.field_data:
-                grid[field] = \
-                    np.zeros(grid.ActiveDimensions,
-                        dtype=self[field].dtype)
+            if not grid.has_key(field): grid[field] = \
+               np.zeros(grid.ActiveDimensions, dtype=self[field].dtype)
             g_fields.append(grid[field])
         c_fields = [self[field] for field in fields]
         FillRegion(ref_ratio,
@@ -4028,11 +4035,11 @@ class AMRBooleanRegionBase(AMR3DData):
         # Before anything, we simply find out which regions are involved in all
         # of this process, uniquely.
         for item in self.regions:
-            if isinstance(item, (str, types.StringType)): continue
-            if item not in self._all_regions:
-                self._all_regions.append(item)
+            if isinstance(item, types.StringType): continue
+            self._all_regions.append(item)
             # So cut_masks don't get messed up.
             item._boolean_touched = True
+        self._all_regions = np.unique(self._all_regions)
 
     def _make_overlaps(self):
         # Using the processed cut_masks, we'll figure out what grids

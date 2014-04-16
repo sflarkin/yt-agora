@@ -173,37 +173,14 @@ static PyMethodDef _FOFMethods[] = {
 __declspec(dllexport)
 #endif
 
-PyMODINIT_FUNC
-#if PY_MAJOR_VERSION >= 3
-#define _RETVAL m
-PyInit_EnzoFOF(void)
-#else
-#define _RETVAL 
-initEnzoFOF(void)
-#endif
+void initEnzoFOF(void)
 {
     PyObject *m, *d;
-#if PY_MAJOR_VERSION >= 3
-    static struct PyModuleDef moduledef = {
-        PyModuleDef_HEAD_INIT,
-        "EnzoFOF",           /* m_name */
-        "EnzoFOF Module",    /* m_doc */
-        -1,                  /* m_size */
-        _FOFMethods,          /* m_methods */
-        NULL,                /* m_reload */
-        NULL,                /* m_traverse */
-        NULL,                /* m_clear */
-        NULL,                /* m_free */
-    };
-    m = PyModule_Create(&moduledef); 
-#else
     m = Py_InitModule("EnzoFOF", _FOFMethods);
-#endif
     d = PyModule_GetDict(m);
     _FOFerror = PyErr_NewException("EnzoFOF.FOFerror", NULL, NULL);
     PyDict_SetItemString(d, "error", _FOFerror);
     import_array();
-    return _RETVAL;
 }
 
 /*

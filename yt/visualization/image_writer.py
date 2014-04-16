@@ -17,9 +17,10 @@ import os
 import numpy as np
 
 from yt.funcs import *
+from yt.utilities.exceptions import YTNotInsideNotebook
 import _colormap_data as cmd
 import yt.utilities.lib as au
-from yt.extern.six.moves import builtins
+import __builtin__
 
 def scale_image(image, mi=None, ma=None):
     r"""Scale an image ([NxNxM] where M = 1-4) to be uint8 and values scaled 
@@ -151,7 +152,7 @@ def write_bitmap(bitmap_array, filename, max_val = None, transpose=False):
     if transpose:
         bitmap_array = bitmap_array.swapaxes(0,1)
     if filename is not None:
-        au.write_png(bitmap_array.copy(), filename.encode('ascii'))
+        au.write_png(bitmap_array.copy(), filename)
     else:
         return au.write_png_to_string(bitmap_array.copy())
     return bitmap_array
@@ -288,7 +289,7 @@ def annotate_image(image, text, xpos, ypos, font_name = "Vera",
 
 def map_to_colors(buff, cmap_name):
     if cmap_name not in cmd.color_map_luts:
-        print ("Your color map was not found in the extracted colormap file.")
+        print "Your color map was not found in the extracted colormap file."
         raise KeyError(cmap_name)
     lut = cmd.color_map_luts[cmap_name]
     x = np.mgrid[0.0:1.0:lut[0].shape[0]*1j]
@@ -438,17 +439,8 @@ def write_projection(data, filename, colorbar=True, colorbar_label=None,
     return filename
 
 
-def write_fits(image, filename_prefix, clobber=True, coords=None,
+def write_fits(image, filename, clobber=True, coords=None,
                other_keys=None):
-    """
-    This will export a FITS image of a floating point array. The output filename is
-    *filename_prefix*. If clobber is set to True, this will overwrite any existing
-    FITS file.
-    
-    This requires the *pyfits* module, which is a standalone module
-    provided by STSci to interface with FITS-format files, and is also part of
-    AstroPy.
-    """
     r"""Write out floating point arrays directly to a FITS file, optionally
     adding coordinates and header keywords.
         
@@ -457,8 +449,8 @@ def write_fits(image, filename_prefix, clobber=True, coords=None,
     image : array_like, or dict of array_like objects
         This is either an (unscaled) array of floating point values, or a dict of
         such arrays, shape (N,N,) to save in a FITS file. 
-    filename_prefix : string
-        This prefix will be prepended to every FITS file name.
+    filename : string
+        This name of the FITS file to be written.
     clobber : boolean
         If the file exists, this governs whether we will overwrite.
     coords : dictionary, optional
@@ -473,14 +465,10 @@ def write_fits(image, filename_prefix, clobber=True, coords=None,
     """
 
     try:
-        import pyfits
-    except ImportError:
-        try:
-            import astropy.io.fits as pyfits
-        except:
-            raise ImportError("You don't have pyFITS or AstroPy installed.")
-    
-    from os import system
+        import astropy.io.fits as pyfits
+    except:
+        mylog.error("You don't have AstroPy installed!")
+        raise ImportError
     
     try:
         image.keys()
@@ -497,9 +485,7 @@ def write_fits(image, filename_prefix, clobber=True, coords=None,
         hdu.update_ext_name(key)
         
         if coords is not None:
-
             nx, ny = image_dict[key].shape
-
             hdu.header.update('CUNIT1', coords["units"])
             hdu.header.update('CUNIT2', coords["units"])
             hdu.header.update('CRPIX1', 0.5*(nx+1))
@@ -520,7 +506,7 @@ def write_fits(image, filename_prefix, clobber=True, coords=None,
         hdulist.append(hdu)
 
     hdulist = pyfits.HDUList(hdulist)
-    hdulist.writeto("%s.fits" % (filename_prefix), clobber=clobber)                    
+    hdulist.writeto(filename, clobber=clobber)                    
 
 def display_in_notebook(image, max_val=None):
     """
@@ -540,7 +526,7 @@ def display_in_notebook(image, max_val=None):
         three channels.
     """
  
-    if "__IPYTHON__" in dir(builtins):
+    if "__IPYTHON__" in dir(__builtin__):
         from IPython.core.displaypub import publish_display_data
         data = write_bitmap(image, None, max_val=max_val)
         publish_display_data(

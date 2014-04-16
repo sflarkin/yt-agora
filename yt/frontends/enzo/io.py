@@ -20,6 +20,7 @@ try:
 except ImportError:
     pass
 
+import exceptions
 import os
 
 from yt.utilities import hdf5_light_reader
@@ -150,7 +151,7 @@ class IOHandlerPackedHDF5(BaseIOHandler):
 
     @property
     def _read_exception(self):
-        return (KeyError, hdf5_light_reader.ReadingError)
+        return (exceptions.KeyError, hdf5_light_reader.ReadingError)
 
 class IOHandlerPackedHDF5GhostZones(IOHandlerPackedHDF5):
     _data_style = "enzo_packed_3d_gz"

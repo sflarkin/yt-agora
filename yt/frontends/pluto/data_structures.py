@@ -21,6 +21,9 @@ import numpy as np
 
 from collections import \
      defaultdict
+from string import \
+     strip, \
+     rstrip
 from stat import \
      ST_CTIME
 
@@ -241,8 +244,7 @@ class PlutoStaticOutput(StaticOutput):
         # read the file line by line, storing important parameters
         for lineI, line in enumerate(lines):
             try:
-                param, sep, vals = [v.rstrip() for v in line.partition(' ')]
-                #param, sep, vals = map(rstrip,line.partition(' '))
+                param, sep, vals = map(rstrip,line.partition(' '))
             except ValueError:
                 mylog.error("ValueError: '%s'", line)
             if pluto2enzoDict.has_key(param):

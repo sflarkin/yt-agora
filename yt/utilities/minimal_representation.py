@@ -20,7 +20,6 @@ import urllib2
 from tempfile import TemporaryFile
 from yt.config import ytcfg
 from yt.funcs import *
-from yt.extern.six import add_metaclass
 from yt.utilities.exceptions import *
 
 from .poster.streaminghttp import register_openers
@@ -42,8 +41,8 @@ class UploaderBar(object):
 class ContainerClass(object):
     pass
 
-@add_metaclass(abc.ABCMeta)
 class MinimalRepresentation(object):
+    __metaclass__ = abc.ABCMeta
 
     def _update_attrs(self, obj, attr_list):
         for attr in attr_list:

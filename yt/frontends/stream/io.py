@@ -15,6 +15,7 @@ Enzo-specific IO functions
 
 from collections import defaultdict
 
+import exceptions
 import os
 
 from yt.utilities.io_handler import \

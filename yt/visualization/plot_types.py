@@ -18,8 +18,8 @@ data that is "hidden" in deeper levels of refinement.
 import numpy as np
 
 from yt.funcs import *
-from ._mpl_imports import *
-from . import _MPL
+from _mpl_imports import *
+import _MPL
 from .plot_modifications import callback_registry
 from yt.utilities.definitions import \
     x_dict, \

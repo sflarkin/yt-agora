@@ -13,11 +13,11 @@ Time series analysis functions.
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
-import inspect, functools, weakref, glob, types
+import inspect, functools, weakref, glob, types, os
 
 from yt.funcs import *
-from yt.extern.six import add_metaclass
 from yt.convenience import load
+from yt.config import ytcfg
 from .data_containers import data_object_registry
 from .analyzer_objects import create_quantity_proxy, \
     analysis_task_registry, AnalysisTask
@@ -251,10 +251,17 @@ class TimeSeriesData(object):
         """
         
         if isinstance(filenames, types.StringTypes):
-            filenames = glob.glob(filenames)
+            if len(glob.glob(filenames)) == 0:
+                data_dir = ytcfg.get("yt", "test_data_dir")
+                pattern = os.path.join(data_dir, filenames)
+                td_filenames = glob.glob(pattern)
+                if len(td_filenames) > 0:
+                    filenames = td_filenames
+                else:
+                    raise YTOutputNotIdentified(filenames, {})
+            else:
+                filenames = glob.glob(filenames)
             filenames.sort()
-        if len(filenames) == 0:
-            raise YTOutputNotIdentified(filenames, {})
         obj = cls(filenames[:], parallel = parallel, **kwargs)
         return obj
 
@@ -306,16 +313,15 @@ class TimeSeriesDataObject(object):
         return cls(*self._args, **self._kwargs)
 
 
-class RegisteredSimulationTimeSeries(type):
-    def __init__(cls, name, b, d):
-        type.__init__(cls, name, b, d)
-        code_name = name[:name.find('Simulation')]
-        if code_name:
-            simulation_time_series_registry[code_name] = cls
-            mylog.debug("Registering simulation: %s as %s", code_name, cls)
-
-@add_metaclass(RegisteredSimulationTimeSeries)
 class SimulationTimeSeries(TimeSeriesData):
+    class __metaclass__(type):
+        def __init__(cls, name, b, d):
+            type.__init__(cls, name, b, d)
+            code_name = name[:name.find('Simulation')]
+            if code_name:
+                simulation_time_series_registry[code_name] = cls
+                mylog.debug("Registering simulation: %s as %s", code_name, cls)
+
     def __init__(self, parameter_filename, find_outputs=False):
         """
         Base class for generating simulation time series types.

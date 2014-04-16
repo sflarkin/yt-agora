@@ -23,12 +23,12 @@ Delaunay triangulation:
 """
 
 from kdtree import *
-from .ckdtree import *
+from ckdtree import *
 #from qhull import *
 
 __all__ = filter(lambda s: not s.startswith('_'), dir())
 __all__ += ['distance']
 
-from . import distance
+import distance
 from numpy.testing import Tester
 test = Tester().test

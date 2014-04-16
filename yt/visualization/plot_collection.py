@@ -20,7 +20,6 @@ import numpy as np
 import os
 
 from yt.funcs import *
-from yt.extern.six import add_metaclass
 
 from yt.config import ytcfg
 from yt.data_objects.profiles import \
@@ -1635,8 +1634,8 @@ class _Interactify(type):
                     elif attrname.startswith("set_"):
                         setattr(cls, attrname, wrap_pylab_show(attr))
 
-@add_metaclass(_Interactify)
 class PlotCollectionInteractive(PlotCollection):
+    __metaclass__ = _Interactify
 
     autoscale = wrap_pylab_show(PlotCollection.autoscale)
     switch_field = wrap_pylab_show(PlotCollection.switch_field)
@@ -1687,7 +1686,7 @@ class PlotCollectionInteractive(PlotCollection):
         Returns:
         width: (float) The final width of the plot collection
         """
-        print ('Enter Zoom Factor, 0 to exit, -1 to reset to width=1.0')
+        print 'Enter Zoom Factor, 0 to exit, -1 to reset to width=1.0'
         zfactor = 1.0
         while(True):
             new_zoom = raw_input('zoom:')
@@ -1705,7 +1704,7 @@ class PlotCollectionInteractive(PlotCollection):
                 self.set_width(1.0,'1')
             else:
                 self.set_width(self.plots[0].__dict__['width']/zfactor,'1')
-        print ('Returning final width of %e' % self.plots[0].width)
+        print 'Returning final width of %e' % self.plots[0].width
         return self.plots[0].width
 
 class PlotCollectionIPython(PlotCollection):

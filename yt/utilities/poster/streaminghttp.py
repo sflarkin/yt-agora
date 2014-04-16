@@ -26,7 +26,6 @@ Example usage:
 ...                       {'Content-Length': str(len(s))})
 """
 
-import httplib as httplib # hack for py3
 import httplib, urllib2, socket
 from httplib import NotConnected
 

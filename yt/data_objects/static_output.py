@@ -17,7 +17,6 @@ Presumably at some point EnzoRun will be absorbed into here.
 import string, re, gc, time, os, os.path, weakref
 
 from yt.funcs import *
-from yt.extern.six import add_metaclass
 
 from yt.config import ytcfg
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
@@ -38,14 +37,13 @@ from yt.utilities.minimal_representation import \
 _cached_pfs = weakref.WeakValueDictionary()
 _pf_store = ParameterFileStore()
 
-class RegisteredStaticOutput(type):
-    def __init__(cls, name, b, d):
-        type.__init__(cls, name, b, d)
-        output_type_registry[name] = cls
-        mylog.debug("Registering: %s as %s", name, cls)
-
-@add_metaclass(RegisteredStaticOutput)
 class StaticOutput(object):
+    class __metaclass__(type):
+        def __init__(cls, name, b, d):
+            type.__init__(cls, name, b, d)
+            output_type_registry[name] = cls
+            mylog.debug("Registering: %s as %s", name, cls)
+
     def __new__(cls, filename=None, *args, **kwargs):
         if not isinstance(filename, types.StringTypes):
             obj = object.__new__(cls)
@@ -124,7 +122,7 @@ class StaticOutput(object):
             self.current_time, self.unique_identifier)
         try:
             import hashlib
-            return hashlib.md5(s.encode('utf-8')).hexdigest()
+            return hashlib.md5(s).hexdigest()
         except ImportError:
             return s.replace(";", "*")
 

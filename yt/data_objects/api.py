@@ -1,8 +1,5 @@
 """
 API for yt.data_objects
-
-
-
 """
 
 #-----------------------------------------------------------------------------
@@ -13,47 +10,48 @@ API for yt.data_objects
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
-from .grid_patch import \
+from grid_patch import \
     AMRGridPatch
 
-from .hierarchy import \
+from hierarchy import \
     AMRHierarchy
 
-from .static_output import \
+from static_output import \
     StaticOutput
 
-from .object_finding_mixin import \
+from object_finding_mixin import \
     ObjectFindingMixin
 
-from .particle_io import \
+from particle_io import \
     ParticleIOHandler, \
     particle_handler_registry
 
-from .profiles import \
-    EmptyProfileData, \
+from profiles import \
+    YTEmptyProfileData, \
     BinnedProfile, \
     BinnedProfile1D, \
     BinnedProfile2D, \
-    BinnedProfile3D
+    BinnedProfile3D, \
+    create_profile
 
-from .time_series import \
+from time_series import \
     TimeSeriesData, \
     TimeSeriesDataObject
 
-from .analyzer_objects import \
+from analyzer_objects import \
     AnalysisTask, analysis_task
 
-from .data_containers import \
+from data_containers import \
     data_object_registry
 
-from .derived_quantities import \
+from derived_quantities import \
     quantity_info, \
     add_quantity
 
-from .image_array import \
+from image_array import \
     ImageArray
 
-from .field_info_container import \
+from field_info_container import \
     FieldInfoContainer, \
     FieldInfo, \
     NeedsGridType, \
@@ -72,5 +70,3 @@ from .field_info_container import \
     add_grad, \
     derived_field
 
-from .particle_trajectories import \
-    ParticleTrajectoryCollection

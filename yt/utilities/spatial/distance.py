@@ -114,7 +114,7 @@ import warnings
 import numpy as np
 from numpy.linalg import norm
 
-from . import _distance_wrap
+import _distance_wrap
 
 
 def _copy_array_if_base_present(a):
