@@ -318,7 +318,8 @@ class SZProjection(object):
             center = sky_center
             units = "deg"
             deltas *= sky_scale
-            
+            deltas[0] *= -1.
+
         from yt.utilities.fits_image import FITSImageBuffer
         fib = FITSImageBuffer(self.data, fields=self.data.keys(),
                               center=center, units=units,
