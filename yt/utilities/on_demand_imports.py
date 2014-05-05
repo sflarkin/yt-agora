@@ -59,4 +59,16 @@ class astropy_imports:
             self._units = units
         return self._units
 
+    _conv = None
+    @property
+    def conv(self):
+        if self._conv is None:
+            try:
+                import astropy.convolution as conv
+                self.log
+            except ImportError:
+                conv = None
+            self._conv = conv
+        return self._conv
+
 ap = astropy_imports()

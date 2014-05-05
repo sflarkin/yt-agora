@@ -88,7 +88,7 @@ default_unit_symbol_lut = {
     "me": (mass_electron_grams, dimensions.mass),
     "angstrom": (cm_per_ang, dimensions.length),
     "Jy": (jansky_cgs, dimensions.specific_flux),
-    "beam": (1.0, dimensions.dimensionless),
+    "counts": (1.0, dimensions.dimensionless),
 
     # for AstroPy compatibility
     "solMass": (mass_sun_grams, dimensions.mass),
@@ -108,6 +108,7 @@ default_unit_symbol_lut = {
 # Add LaTeX representations for units with trivial representations.
 latex_symbol_lut = {
     "unitary" : "",
+    "dimensionless" : "",
     "code_length" : "\\rm{code}\/\\rm{length}",
     "code_time" : "\\rm{code}\/\\rm{time}",
     "code_mass" : "\\rm{code}\/\\rm{mass}",

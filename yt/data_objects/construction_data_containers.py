@@ -41,7 +41,6 @@ from yt.utilities.lib.marching_cubes import \
     march_cubes_grid, march_cubes_grid_flux
 from yt.utilities.data_point_utilities import CombineGrids,\
     DataCubeRefine, DataCubeReplace, FillRegion, FillBuffer
-from yt.utilities.definitions import axis_names, x_dict, y_dict
 from yt.utilities.minimal_representation import \
     MinimalProjectionData
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
@@ -252,8 +251,8 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         self._mrep.upload()
 
     def _get_tree(self, nvals):
-        xax = x_dict[self.axis]
-        yax = y_dict[self.axis]
+        xax = self.pf.coordinates.x_axis[self.axis]
+        yax = self.pf.coordinates.y_axis[self.axis]
         xd = self.pf.domain_dimensions[xax]
         yd = self.pf.domain_dimensions[yax]
         bounds = (self.pf.domain_left_edge[xax],
@@ -292,18 +291,20 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         else:
             raise NotImplementedError
         # TODO: Add the combine operation
-        ox = self.pf.domain_left_edge[x_dict[self.axis]]
-        oy = self.pf.domain_left_edge[y_dict[self.axis]]
+        xax = self.pf.coordinates.x_axis[self.axis]
+        yax = self.pf.coordinates.y_axis[self.axis]
+        ox = self.pf.domain_left_edge[xax]
+        oy = self.pf.domain_left_edge[yax]
         px, py, pdx, pdy, nvals, nwvals = tree.get_all(False, merge_style)
         nvals = self.comm.mpi_allreduce(nvals, op=op)
         nwvals = self.comm.mpi_allreduce(nwvals, op=op)
-        np.multiply(px, self.pf.domain_width[x_dict[self.axis]], px)
+        np.multiply(px, self.pf.domain_width[xax], px)
         np.add(px, ox, px)
-        np.multiply(pdx, self.pf.domain_width[x_dict[self.axis]], pdx)
+        np.multiply(pdx, self.pf.domain_width[xax], pdx)
 
-        np.multiply(py, self.pf.domain_width[y_dict[self.axis]], py)
+        np.multiply(py, self.pf.domain_width[yax], py)
         np.add(py, oy, py)
-        np.multiply(pdy, self.pf.domain_width[y_dict[self.axis]], pdy)
+        np.multiply(pdy, self.pf.domain_width[yax], pdy)
         if self.weight_field is not None:
             np.divide(nvals, nwvals[:,None], nvals)
         # We now convert to half-widths and center-points
@@ -337,7 +338,8 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
                                   registry=self.pf.unit_registry)
             if self.weight_field is None:
                 u_obj = Unit(units, registry=self.pf.unit_registry)
-                if u_obj.is_code_unit and input_units != units:
+                if u_obj.is_code_unit and input_units != units \
+                    or self.pf.no_cgs_equiv_length:
                     if units is '':
                         final_unit = "code_length"
                     else:
@@ -348,8 +350,10 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
 
     def _initialize_chunk(self, chunk, tree):
         icoords = chunk.icoords
-        i1 = icoords[:,x_dict[self.axis]]
-        i2 = icoords[:,y_dict[self.axis]]
+        xax = self.pf.coordinates.x_axis[self.axis]
+        yax = self.pf.coordinates.y_axis[self.axis]
+        i1 = icoords[:,xax]
+        i2 = icoords[:,yax]
         ilevel = chunk.ires * self.pf.ires_factor
         tree.initialize_chunk(i1, i2, ilevel)
 
@@ -370,8 +374,10 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         else:
             w = np.ones(chunk.ires.size, dtype="float64")
         icoords = chunk.icoords
-        i1 = icoords[:,x_dict[self.axis]]
-        i2 = icoords[:,y_dict[self.axis]]
+        xax = self.pf.coordinates.x_axis[self.axis]
+        yax = self.pf.coordinates.y_axis[self.axis]
+        i1 = icoords[:,xax]
+        i2 = icoords[:,yax]
         ilevel = chunk.ires * self.pf.ires_factor
         tree.add_chunk_to_tree(i1, i2, ilevel, v, w)
 
@@ -478,9 +484,14 @@ class YTCoveringGridBase(YTSelectionContainer3D):
         return tuple(self.ActiveDimensions.tolist())
 
     def _setup_data_source(self):
-        self._data_source = self.pf.region(self.center,
-            self.left_edge - self.base_dds,
-            self.right_edge + self.base_dds)
+        LE = self.left_edge - self.base_dds
+        RE = self.right_edge + self.base_dds
+        if not all(self.pf.periodicity):
+            for i in range(3):
+                if self.pf.periodicity[i]: continue
+                LE[i] = max(LE[i], self.pf.domain_left_edge[i])
+                RE[i] = min(RE[i], self.pf.domain_right_edge[i])
+        self._data_source = self.pf.region(self.center, LE, RE)
         self._data_source.min_level = 0
         self._data_source.max_level = self.level
         self._pdata_source = self.pf.region(self.center,
