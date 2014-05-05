@@ -1,5 +1,6 @@
 """
-Various definitions for various other modules and routines
+__init__ for yt.frontends.sdf
+
 
 
 
@@ -12,5 +13,3 @@ Various definitions for various other modules and routines
 #
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
-
-
