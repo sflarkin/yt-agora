@@ -35,6 +35,8 @@ from yt.utilities.exceptions import \
     YTUnitOperationError, YTUnitConversionError, \
     YTUfuncUnitError
 from numbers import Number as numeric_type
+from yt.utilities.on_demand_imports import _astropy
+from sympy import Rational
 
 # redefine this here to avoid a circular import from yt.funcs
 def iterable(obj):
@@ -249,6 +251,22 @@ class YTArray(np.ndarray):
                     "Perhaps you meant to do something like this instead: \n"
                     "ds.arr(%s, \"%s\")" % (input_array, input_units)
                     )
+        if _astropy.units is not None:
+            if isinstance(input_array, _astropy.units.quantity.Quantity):
+                # Converting from AstroPy Quantity
+                u = input_array.unit
+                ap_units = []
+                for base, power in zip(u.bases, u.powers):
+                    unit_str = base.to_string()
+                    # we have to do this because AstroPy is silly and defines
+                    # hour as "h"
+                    if unit_str == "h": unit_str = "hr"
+                    ap_units.append("%s**(%s)" % (unit_str, Rational(power)))
+                ap_units = "*".join(ap_units)
+                if isinstance(input_array.value, np.ndarray):
+                    return YTArray(input_array.value, ap_units)
+                else:
+                    return YTQuantity(input_array.value, ap_units)
         if isinstance(input_array, YTArray):
             if input_units is None:
                 if registry is None:
@@ -423,6 +441,16 @@ class YTArray(np.ndarray):
 
         """
         return np.array(self)
+
+    def to_astropy(self, **kwargs):
+        """
+        Creates a new AstroPy quantity with the same unit information.
+        """
+        if _astropy.units is None:
+            raise ImportError("You don't have AstroPy installed, so you can't convert to " +
+                              "an AstroPy quantity.")
+        return self.value*_astropy.units.Unit(str(self.units), **kwargs)
+
     #
     # End unit conversion methods
     #

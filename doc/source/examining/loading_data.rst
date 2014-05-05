@@ -459,6 +459,67 @@ by specifying the window in seconds, ``spread=1.0e7*265*24*3600``.
 
    pf = load("/u/cmoody3/data/art_snapshots/SFG1/10MpcBox_csf512_a0.460.d")
 
+.. _loading_athena_data:
+
+Athena Data
+-----------
+
+Athena 4.x VTK data is *mostly* supported and cared for by John
+ZuHone. Both uniform grid and SMR datasets are supported.
+
+Loading Athena datasets is slightly different depending on whether
+your dataset came from a serial or a parallel run. If the data came
+from a serial run or you have joined the VTK files together using the
+Athena tool ``join_vtk``, you can load the data like this:
+
+.. code-block:: python
+
+   from yt.mods import *
+   pf = load("kh.0010.vtk")
+
+The filename corresponds to the file on SMR level 0, whereas if there
+are multiple levels the corresponding files will be picked up
+automatically, assuming they are laid out in ``lev*`` subdirectories
+under the directory where the base file is located.
+
+For parallel datasets, yt assumes that they are laid out in
+directories named ``id*``, one for each processor number, each with
+``lev*`` subdirectories for additional refinement levels. To load this
+data, call ``load`` with the base file in the ``id0`` directory:
+
+.. code-block:: python
+
+   from yt.mods import *
+   pf = load("id0/kh.0010.vtk")
+
+which will pick up all of the files in the different ``id*`` directories for
+the entire dataset.
+
+yt works in cgs ("Gaussian") units by default, but Athena data is not
+normally stored in these units. If you would like to convert data to
+cgs units, you may supply conversions for length, time, and mass to ``load``:
+
+.. code-block:: python
+
+   from yt.mods import *
+   pf = load("id0/cluster_merger.0250.vtk",
+             parameters={"length_unit":(1.0,"Mpc"),
+                         "time_unit"(1.0,"Myr"),
+                         "mass_unit":(1.0e14,"Msun")})
+
+This means that the yt fields, e.g. ``("gas","density")``, ``("gas","x-velocity")``,
+``("gas","magnetic_field_x")``, will be in cgs units, but the Athena fields, e.g.,
+``("athena","density")``, ``("athena","velocity_x")``, ``("athena","cell_centered_B_x")``, will be
+in code units.
+
+.. rubric:: Caveats
+
+* yt primarily works with primitive variables. If the Athena
+  dataset contains conservative variables, the yt primitive fields will be generated from the
+  conserved variables on disk.
+* Domains may be visualized assuming periodicity.
+* Particle list data is currently unsupported.
+
 .. _loading-fits-data:
 
 FITS Data
@@ -474,6 +535,9 @@ can read FITS image files that have the following (case-insensitive) suffixes:
 * fits.gz
 * fts.gz
 
+yt can read two kinds of FITS files: FITS image files and FITS binary table files containing
+positions, times, and energies of X-ray events.
+
 .. note::
 
   AstroPy is necessary due to the requirements of both FITS file reading and
@@ -482,8 +546,8 @@ can read FITS image files that have the following (case-insensitive) suffixes:
   installations of this package and the `PyWCS <http://stsdas.stsci
   .edu/astrolib/pywcs/>`_ package are not supported.
 
-Though FITS datasets are composed of one data cube in the FITS file,
-upon being loaded into yt they are automatically decomposed into grids:
+Though FITS a image is composed of one data cube in the FITS file,
+upon being loaded into yt it is automatically decomposed into grids:
 
 .. code-block:: python
 
@@ -506,6 +570,33 @@ set manually by passing the ``nprocs`` parameter to the ``load`` call:
 
   ds = load("m33_hi.fits", nprocs=1024)
 
+Making the Most of `yt` for FITS Data
++++++++++++++++++++++++++++++++++++++
+
+yt will load data without WCS information and/or some missing header keywords, but the resulting
+field information will necessarily be incomplete. For example, field names may not be descriptive,
+and units will not be correct. To get the full use out of yt for FITS files, make sure that for
+each image the following header keywords have sensible values:
+
+* ``CDELTx``: The pixel width in along axis ``x``
+* ``CRVALx``: The coordinate value at the reference position along axis ``x``
+* ``CRPIXx``: The the reference pixel along axis ``x``
+* ``CTYPEx``: The projection type of axis ``x``
+* ``CUNITx``: The units of the coordinate along axis ``x``
+* ``BTYPE``: The type of the image
+* ``BUNIT``: The units of the image
+
+FITS header keywords can easily be updated using AstroPy. For example,
+to set the ``BTYPE`` and ``BUNIT`` keywords:
+
+.. code-block:: python
+
+    import astropy.io.fits as pyfits
+    f = pyfits.open("xray_flux_image.fits", mode="update")
+    f[0].header["BUNIT"] = "cts/s/pixel"
+    f[0].header["BTYPE"] = "flux"
+    f.flush()
+    f.close()
 
 FITS Coordinates
 ++++++++++++++++
@@ -519,7 +610,7 @@ the following dataset types:
    etc.) defined in the ``CUNITx`` keywords
 2. 2D images in some celestial coordinate systems (RA/Dec,
    galactic latitude/longitude, defined in the ``CTYPEx``
-   keywords)
+   keywords), and X-ray binary table event files
 3. 3D images with celestial coordinates and a third axis for another
    quantity, such as velocity, frequency, wavelength, etc.
 4. 4D images with the first three axes like Case 3, where the slices
@@ -551,15 +642,36 @@ and the index of the slice. So, for example, if ``BTYPE`` = ``"intensity"`` and
 ``CTYPE4`` = ``"stokes"``, then the fields will be named
 ``"intensity_stokes_1"``, ``"intensity_stokes_2"``, and so on.
 
+The third way is if auxiliary files are included along with the main file, like so:
+
+.. code-block:: python
+
+    ds = load("flux.fits", auxiliary_files=["temp.fits","metal.fits"])
+
+The image blocks in each of these files will be loaded as a separate field,
+provided they have the same dimensions as the image blocks in the main file.
+
 Additionally, fields corresponding to the WCS coordinates will be generated.
 based on the corresponding ``CTYPEx`` keywords. When queried, these fields
 will be generated from the pixel coordinates in the file using the WCS
 transformations provided by AstroPy.
 
+X-ray event data will be loaded as particle fields in yt, but a grid will be constructed from the
+WCS information in the FITS header. There is a helper function, ``setup_counts_fields``,
+which may be used to make deposited image fields from the event data for different energy bands
+(for an example see :ref:`xray_fits`).
+
+.. note::
+
+  Each FITS image from a single dataset, whether from one file or from one of
+  multiple files, must have the same dimensions and WCS information as the
+  first image in the primary file. If this is not the case,
+  yt will raise a warning and will not load this field.
+
 Additional Options
 ++++++++++++++++++
 
-FITS data may include ``NaNs``. If you wish to mask this data out,
+FITS image data may include ``NaNs``. If you wish to mask this data out,
 you may supply a ``nan_mask`` parameter to ``load``, which may either be a
 single floating-point number (applies to all fields) or a Python dictionary
 containing different mask values for different fields:
@@ -576,26 +688,13 @@ Generally, AstroPy may generate a lot of warnings about individual FITS
 files, many of which you may want to ignore. If you want to see these
 warnings, set ``suppress_astropy_warnings = False`` in the call to ``load``.
 
-Limitations
-+++++++++++
+Examples of Using FITS Data
++++++++++++++++++++++++++++
 
-* Each FITS image from a single dataset, whether from one file or from one of
-  multiple files, must have the same dimensions and WCS information as the
-  first image in the primary file. If this is not the case,
-  yt will raise a warning and will not load this field.
-* yt will load data without WCS information and/or some missing header
-  keywords, but the resulting field information will necessarily be incomplete.
-  For example, field names may not be descriptive, and units will not be
-  correct. To get the full use out of yt for FITS files,
-  make sure that for each image the following header keywords have sensible values:
+The following IPython notebooks show examples of working with FITS data in yt:
 
-  - ``CDELTx``: The pixel width in along axis ``x``
-  - ``CRVALx``: The coordinate value at the reference position along axis ``x``
-  - ``CRPIXx``: The the reference pixel along axis ``x``
-  - ``CTYPEx``: The projection type of axis ``x``
-  - ``CUNITx``: The units of the coordinate along axis ``x``
-  - ``BTYPE``: The type of the image
-  - ``BUNIT``: The units of the image
+* :ref:`radio_cubes`
+* :ref:`xray_fits`
 
 .. _loading-moab-data:
 
