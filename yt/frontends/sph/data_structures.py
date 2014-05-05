@@ -38,11 +38,13 @@ from yt.utilities.physical_constants import \
     mass_sun_cgs
 from yt.utilities.cosmology import Cosmology
 from .fields import \
-    SPHFieldInfo
+    SPHFieldInfo, OWLSFieldInfo, TipsyFieldInfo
 from .definitions import \
     gadget_header_specs, \
     gadget_field_specs, \
     gadget_ptype_specs
+from .io import \
+    IOHandlerTipsyBinary
 
 try:
     import requests
@@ -93,6 +95,7 @@ class GadgetDataset(ParticleDataset):
                  header_spec = "default",
                  field_spec = "default",
                  ptype_spec = "default"):
+        if self._instantiated: return
         self._header_spec = self._setup_binary_spec(
             header_spec, gadget_header_specs)
         self._field_spec = self._setup_binary_spec(
@@ -209,7 +212,10 @@ class GadgetDataset(ParticleDataset):
         if "length" in unit_base:
             length_unit = unit_base["length"]
         elif "UnitLength_in_cm" in unit_base:
-            length_unit = (unit_base["UnitLength_in_cm"], "cm")
+            if self.cosmological_simulation == 0:
+                length_unit = (unit_base["UnitLength_in_cm"], "cm")
+            else:
+                length_unit = (unit_base["UnitLength_in_cm"], "cmcm/h")
         else:
             raise RuntimeError
         length_unit = _fix_unit_ordering(length_unit)
@@ -229,7 +235,10 @@ class GadgetDataset(ParticleDataset):
         if "mass" in unit_base:
             mass_unit = unit_base["mass"]
         elif "UnitMass_in_g" in unit_base:
-            mass_unit = (unit_base["UnitMass_in_g"], "g")
+            if self.cosmological_simulation == 0:
+                mass_unit = (unit_base["UnitMass_in_g"], "g")
+            else:
+                mass_unit = (unit_base["UnitMass_in_g"], "g/h")
         else:
             # Sane default
             mass_unit = (1.0, "1e10*Msun/h")
@@ -284,6 +293,9 @@ class GadgetHDF5Dataset(GadgetDataset):
 
 class OWLSDataset(GadgetHDF5Dataset):
     _particle_mass_name = "Mass"
+    _field_info_class = OWLSFieldInfo
+
+
 
     def _parse_parameter_file(self):
         handle = h5py.File(self.parameter_filename, mode="r")
@@ -331,7 +343,8 @@ class OWLSDataset(GadgetHDF5Dataset):
         try:
             fileh = h5py.File(args[0], mode='r')
             if "Constants" in fileh["/"].keys() and \
-               "Header" in fileh["/"].keys():
+               "Header" in fileh["/"].keys() and \
+               "SUBFIND" not in fileh["/"].keys():
                 fileh.close()
                 return True
             fileh.close()
@@ -350,12 +363,13 @@ class TipsyFile(ParticleFile):
         assert file_id == 0
         super(TipsyFile, self).__init__(pf, io, filename, file_id)
         io._create_dtypes(self)
+        io._update_domain(self)#Check automatically what the domain size is
 
 
 class TipsyDataset(ParticleDataset):
     _index_class = ParticleIndex
     _file_class = TipsyFile
-    _field_info_class = SPHFieldInfo
+    _field_info_class = TipsyFieldInfo
     _particle_mass_name = "Mass"
     _particle_coordinates_name = "Coordinates"
     _header_spec = (('time',    'd'),
@@ -367,30 +381,31 @@ class TipsyDataset(ParticleDataset):
                     ('dummy',   'i'))
 
     def __init__(self, filename, dataset_type="tipsy",
-                 endian=">",
                  field_dtypes=None,
-                 domain_left_edge=None,
-                 domain_right_edge=None,
                  unit_base=None,
-                 cosmology_parameters=None,
                  parameter_file=None,
+                 cosmology_parameters=None,
                  n_ref=64, over_refine_factor=1):
         self.n_ref = n_ref
         self.over_refine_factor = over_refine_factor
-        self.endian = endian
+        if field_dtypes is None:
+            field_dtypes = {}
+        success, self.endian = self._validate_header(filename)
+        if not success:
+            print "SOMETHING HAS GONE WRONG.  NBODIES != SUM PARTICLES."
+            print "%s != (%s == %s + %s + %s)" % (
+                self.parameters['nbodies'],
+                tot,
+                self.parameters['nsph'],
+                self.parameters['ndark'],
+                self.parameters['nstar'])
+            print "Often this can be fixed by changing the 'endian' parameter."
+            print "This defaults to '>' but may in fact be '<'."
+            raise RuntimeError
         self.storage_filename = None
-        if domain_left_edge is None:
-            domain_left_edge = np.zeros(3, "float64") - 0.5
-        if domain_right_edge is None:
-            domain_right_edge = np.zeros(3, "float64") + 0.5
-
-        self.domain_left_edge = np.array(domain_left_edge, dtype="float64")
-        self.domain_right_edge = np.array(domain_right_edge, dtype="float64")
 
         # My understanding is that dtypes are set on a field by field basis,
         # not on a (particle type, field) basis
-        if field_dtypes is None:
-            field_dtypes = {}
         self._field_dtypes = field_dtypes
 
         self._unit_base = unit_base or {}
@@ -421,6 +436,7 @@ class TipsyDataset(ParticleDataset):
         self.refine_by = 2
         self.parameters["HydroMethod"] = "sph"
 
+
         self.unique_identifier = \
             int(os.stat(self.parameter_filename)[stat.ST_CTIME])
 
@@ -444,6 +460,7 @@ class TipsyDataset(ParticleDataset):
                     continue
                 # parse parameters according to tipsy parameter type
                 param, val = (i.strip() for i in line.split('=', 1))
+                val = val.split('#')[0]
                 if param.startswith('n') or param.startswith('i'):
                     val = long(val)
                 elif param.startswith('d'):
@@ -455,33 +472,29 @@ class TipsyDataset(ParticleDataset):
         self.current_time = hvals["time"]
         nz = 1 << self.over_refine_factor
         self.domain_dimensions = np.ones(3, "int32") * nz
-        if self.parameters.get('bPeriodic', True):
-            self.periodicity = (True, True, True)
+        periodic = self.parameters.get('bPeriodic', True)
+        period = self.parameters.get('dPeriod', None)
+        comoving = self.parameters.get('bComove', False)
+        self.periodicity = (periodic, periodic, periodic)
+        if comoving and period is None:
+            period = 1.0
+        if periodic and period is not None:
+            # If we are periodic, that sets our domain width to either 1 or dPeriod.
+            self.domain_left_edge = np.zeros(3, "float64") - 0.5*period
+            self.domain_right_edge = np.zeros(3, "float64") + 0.5*period
         else:
-            self.periodicity = (False, False, False)
-        tot = sum(self.parameters[ptype] for ptype
-                  in ('nsph', 'ndark', 'nstar'))
-        if tot != self.parameters['nbodies']:
-            print "SOMETHING HAS GONE WRONG.  NBODIES != SUM PARTICLES."
-            print "%s != (%s == %s + %s + %s)" % (
-                self.parameters['nbodies'],
-                tot,
-                self.parameters['nsph'],
-                self.parameters['ndark'],
-                self.parameters['nstar'])
-            print "Often this can be fixed by changing the 'endian' parameter."
-            print "This defaults to '>' but may in fact be '<'."
-            raise RuntimeError
-        if self.parameters.get('bComove', True):
-            self.cosmological_simulation = 1
+            self.domain_left_edge = None
+            self.domain_right_edge = None
+        if comoving:
             cosm = self._cosmology_parameters or {}
-            dcosm = dict(current_redshift=0.0,
-                         omega_lambda=0.0,
-                         omega_matter=0.0,
-                         hubble_constant=1.0)
-            for param in ['current_redshift', 'omega_lambda',
-                          'omega_matter', 'hubble_constant']:
-                pval = cosm.get(param, dcosm[param])
+            self.scale_factor = hvals["time"]#In comoving simulations, time stores the scale factor a
+            self.cosmological_simulation = 1
+            dcosm = dict(current_redshift=(1.0/self.scale_factor)-1.0,
+                         omega_lambda=self.parameters.get('dLambda', cosm.get('omega_lambda',0.0)),
+                         omega_matter=self.parameters.get('dOmega0', cosm.get('omega_matter',0.0)),
+                         hubble_constant=self.parameters.get('dHubble0', cosm.get('hubble_constant',1.0)))
+            for param in dcosm.keys():
+                pval = dcosm[param]
                 setattr(self, param, pval)
         else:
             self.cosmological_simulation = 0.0
@@ -494,18 +507,18 @@ class TipsyDataset(ParticleDataset):
         f.close()
 
     def _set_code_unit_attributes(self):
-        # Set a sane default for cosmological simulations.
-        if self._unit_base is None and self.cosmological_simulation == 1:
-            mylog.info("Assuming length units are in Mpc/h (comoving)")
-            self._unit_base.update(dict(length = (1.0, "Mpccm/h")))
         if self.cosmological_simulation:
-            length_units = self._unit_base['length']
-            DW = self.quan(1./length_units[1], length_units[0])
-            cosmo = Cosmology(self.hubble_constant * 100.0,
+            mu = self.parameters.get('dMsolUnit', 1.)
+            lu = self.parameters.get('dKpcUnit', 1000.)
+            # In cosmological runs, lengths are stored as length*scale_factor
+            self.length_unit = self.quan(lu, 'kpc')*self.scale_factor
+            self.mass_unit = self.quan(mu, 'Msun')
+            density_unit = self.mass_unit/ (self.length_unit/self.scale_factor)**3
+            # Gasoline's hubble constant, dHubble0, is stored units of proper code time.
+            self.hubble_constant *= np.sqrt(G.in_units('kpc**3*Msun**-1*s**-2')*density_unit).value/(3.2407793e-18)  
+            cosmo = Cosmology(self.hubble_constant,
                               self.omega_matter, self.omega_lambda)
-            self.length_unit = DW
-            density_unit = cosmo.critical_density(self.current_redshift)
-            self.mass_unit = density_unit * self.length_unit ** 3
+            self.current_time = cosmo.hubble_time(self.current_redshift)
         else:
             mu = self.parameters.get('dMsolUnit', 1.0)
             self.mass_unit = self.quan(mu, 'Msun')
@@ -514,10 +527,47 @@ class TipsyDataset(ParticleDataset):
             density_unit = self.mass_unit / self.length_unit**3
         self.time_unit = 1.0 / np.sqrt(G * density_unit)
 
+    @staticmethod
+    def _validate_header(filename):
+        '''
+        This method automatically detects whether the tipsy file is big/little endian
+        and is not corrupt/invalid.  It returns a tuple of (Valid, endianswap) where
+        Valid is a boolean that is true if the file is a tipsy file, and endianswap is 
+        the endianness character '>' or '<'.
+        '''
+        try:
+            f = open(filename,'rb')
+        except:
+            return False, 1
+        try:
+            f.seek(0, os.SEEK_END)
+            fs = f.tell()
+            f.seek(0, os.SEEK_SET)
+        except IOError:
+            return False, 1
+        #Read in the header
+        t, n, ndim, ng, nd, ns = struct.unpack("<diiiii", f.read(28))
+        endianswap = "<"
+        #Check Endianness
+        if (ndim < 1 or ndim > 3):
+            endianswap = ">"
+            f.seek(0)
+            t, n, ndim, ng, nd, ns = struct.unpack(">diiiii", f.read(28))
+        # File is borked if this is true.  The header is 28 bytes, and may
+        # Be followed by a 4 byte pad.  Next comes gas particles, which use
+        # 48 bytes, followed by 36 bytes per dark matter particle, and 44 bytes
+        # per star particle.  If positions are stored as doubles, each of these
+        # sizes is increased by 12 bytes.
+        if (fs != 28+48*ng+36*nd+44*ns and fs != 28+60*ng+48*nd+56*ns and
+                fs != 32+48*ng+36*nd+44*ns and fs != 32+60*ng+48*nd+56*ns):
+            f.close()
+            return False, 0
+        f.close()
+        return True, endianswap
+
     @classmethod
     def _is_valid(self, *args, **kwargs):
-        # We do not allow load() of these files.
-        return False
+        return TipsyDataset._validate_header(args[0])[0]
 
 class HTTPParticleFile(ParticleFile):
     pass

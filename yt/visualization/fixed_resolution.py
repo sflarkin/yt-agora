@@ -14,10 +14,6 @@ Fixed resolution buffer support, along with a primitive image analysis tool.
 #-----------------------------------------------------------------------------
 
 from yt.funcs import *
-from yt.utilities.definitions import \
-    x_dict, \
-    y_dict, \
-    axis_names
 from .volume_rendering.api import off_axis_projection
 from yt.data_objects.image_array import ImageArray
 from yt.utilities.lib.misc_utilities import \
@@ -25,6 +21,8 @@ from yt.utilities.lib.misc_utilities import \
 import _MPL
 import numpy as np
 import weakref
+import re
+import string
 
 class FixedResolutionBuffer(object):
     r"""
@@ -102,8 +100,8 @@ class FixedResolutionBuffer(object):
             DRE = self.pf.domain_right_edge
             DD = float(self.periodic)*(DRE - DLE)
             axis = self.data_source.axis
-            xax = x_dict[axis]
-            yax = y_dict[axis]
+            xax = self.pf.coordinates.x_axis[axis]
+            yax = self.pf.coordinates.y_axis[axis]
             self._period = (DD[xax], DD[yax])
             self._edges = ( (DLE[xax], DRE[xax]), (DLE[yax], DRE[yax]) )
         
@@ -122,15 +120,11 @@ class FixedResolutionBuffer(object):
             if hasattr(b, "in_units"):
                 b = float(b.in_units("code_length"))
             bounds.append(b)
-        buff = _MPL.Pixelize(self.data_source['px'],
-                             self.data_source['py'],
-                             self.data_source['pdx'],
-                             self.data_source['pdy'],
-                             self.data_source[item],
-                             self.buff_size[0], self.buff_size[1],
-                             bounds, int(self.antialias),
-                             self._period, int(self.periodic),
-                             ).transpose()
+        buff = self.pf.coordinates.pixelize(self.data_source.axis,
+            self.data_source, item, bounds, self.buff_size,
+            int(self.antialias))
+        # Need to add _period and self.periodic
+        # self._period, int(self.periodic)
         ia = ImageArray(buff, input_units=self.data_source[item].units,
                         info=self._get_info(item))
         self.data[item] = ia
@@ -146,6 +140,41 @@ class FixedResolutionBuffer(object):
         for f in fields:
             if f not in exclude and f[0] not in self.data_source.pf.particle_types:
                 self[f]
+
+
+    def _is_ion( self, fname ):
+        p = re.compile("_p[0-9]+_")
+        result = False
+        if p.search( fname ) != None:
+            result = True
+        return result
+
+    def _ion_to_label( self, fname ):
+        pnum2rom = {
+            "0":"I", "1":"II", "2":"III", "3":"IV", "4":"V",
+            "5":"VI", "6":"VII", "7":"VIII", "8":"IX", "9":"X",
+            "10":"XI", "11":"XII", "12":"XIII", "13":"XIV", "14":"XV",
+            "15":"XVI", "16":"XVII", "17":"XVIII", "18":"XIX", "19":"XX"}
+
+        p = re.compile("_p[0-9]+_")
+        m = p.search( fname )
+        if m != None:
+            pstr = m.string[m.start()+1:m.end()-1]
+            segments = fname.split("_")
+            for i,s in enumerate(segments):
+                segments[i] = string.capitalize(s)
+                if s == pstr:
+                    ipstr = i
+            element = segments[ipstr-1]
+            roman = pnum2rom[pstr[1:]] 
+            label = element + '\/' + roman + '\/' + \
+                string.join( segments[ipstr+1:], '\/' ) 
+        else:
+            label = fname
+        return label
+
+
+
 
     def _get_info(self, item):
         info = {}
@@ -172,8 +201,13 @@ class FixedResolutionBuffer(object):
         
         info['label'] = finfo.display_name
         if info['label'] is None:
-            info['label'] = r'$\rm{'+fname+r'}$'
-            info['label'] = r'$\rm{'+fname.replace('_','\/').title()+r'}$'
+            if self._is_ion( fname ):
+                fname = self._ion_to_label( fname )
+                info['label'] = r'$\rm{'+fname+r'}$'
+                info['label'] = r'$\rm{'+fname.replace('_','\/')+r'}$'
+            else:    
+                info['label'] = r'$\rm{'+fname+r'}$'
+                info['label'] = r'$\rm{'+fname.replace('_','\/').title()+r'}$'
         elif info['label'].find('$') == -1:
             info['label'] = info['label'].replace(' ','\/')
             info['label'] = r'$\rm{'+info['label']+r'}$'
@@ -280,16 +314,11 @@ class FixedResolutionBuffer(object):
             requested.
         """
 
-        try:
-            import astropy.io.fits as pyfits
-        except:
-            mylog.error("You don't have AstroPy installed!")
-            raise ImportError
         from yt.utilities.fits_image import FITSImageBuffer
 
         extra_fields = ['x','y','z','px','py','pz','pdx','pdy','pdz','weight_field']
         if fields is None: 
-            fields = [field for field in self.data_source.fields 
+            fields = [field[-1] for field in self.data_source.field_data
                       if field not in extra_fields]
 
         fib = FITSImageBuffer(self, fields=fields, units=units)
@@ -301,10 +330,10 @@ class FixedResolutionBuffer(object):
     @property
     def limits(self):
         rv = dict(x = None, y = None, z = None)
-        xax = x_dict[self.axis]
-        yax = y_dict[self.axis]
-        xn = axis_names[xax]
-        yn = axis_names[yax]
+        xax = self.pf.coordinates.x_axis[self.axis]
+        yax = self.pf.coordinates.y_axis[self.axis]
+        xn = self.pf.coordinates.axis_name[xax]
+        yn = self.pf.coordinates.axis_name[yax]
         rv[xn] = (self.bounds[0], self.bounds[1])
         rv[yn] = (self.bounds[2], self.bounds[3])
         return rv

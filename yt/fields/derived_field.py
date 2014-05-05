@@ -78,14 +78,11 @@ class DerivedField(object):
        Used for baryon fields from the data that are not in all the grids
     display_name : str
        A name used in the plots
-    projection_conversion : unit
-       which unit should we multiply by in a projection?
     """
     def __init__(self, name, function, units=None,
                  take_log=True, validators=None,
                  particle_type=False, vector_field=False, display_field=True,
-                 not_in_all=False, display_name=None,
-                 projection_conversion="cm"):
+                 not_in_all=False, display_name=None):
         self.name = name
         self.take_log = take_log
         self.display_name = display_name
@@ -124,7 +121,6 @@ class DerivedField(object):
         dd['display_field'] = True
         dd['not_in_all'] = self.not_in_all
         dd['display_name'] = self.display_name
-        dd['projection_conversion'] = self.projection_conversion
         return dd
 
     def get_units(self):
@@ -176,7 +172,8 @@ class DerivedField(object):
         original_fields = data.keys() # Copy
         if self._function is NullFunc:
             raise RuntimeError(
-                "Something has gone terribly wrong, _function is NullFunc")
+                "Something has gone terribly wrong, _function is NullFunc " +
+                "for %s" % (self.name,))
         with self.unit_registry(data):
             dd = self._function(self, data)
         for field_name in data.keys():
@@ -194,7 +191,7 @@ class DerivedField(object):
         """
         Return a data label for the given field, inluding units.
         """
-        name = self.name
+        name = self.name[1]
         if self.display_name is not None:
             name = self.display_name
 
@@ -205,7 +202,7 @@ class DerivedField(object):
         if projected:
             raise NotImplementedError
         else:
-            units = self.units
+            units = Unit(self.units)
         # Add unit label
         if not units.is_dimensionless:
             data_label += r"\/\/ (%s)" % (units)

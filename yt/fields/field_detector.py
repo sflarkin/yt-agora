@@ -128,7 +128,9 @@ class FieldDetector(defaultdict):
                 return self[item]
         elif finfo is not None and finfo.particle_type:
             if "particle_position" in (item, item[1]) or \
-               "particle_velocity" in (item, item[1]):
+               "particle_velocity" in (item, item[1]) or \
+               "Velocity" in (item, item[1]) or \
+               "Coordinates" in (item, item[1]):
                 # A vector
                 self[item] = \
                   YTArray(np.ones((self.NumberOfParticles, 3)),
@@ -171,21 +173,31 @@ class FieldDetector(defaultdict):
         'cp_x_vec': '',
         'cp_y_vec': '',
         'cp_z_vec': '',
+        'x_hat': '',
+        'y_hat': '',
+        'z_hat': '',
         }
 
     def get_field_parameter(self, param, default = None):
         self.requested_parameters.append(param)
         if param in ['bulk_velocity', 'center', 'normal']:
-            return YTArray(np.random.random(3) * 1e-2, self.fp_units[param])
+            return self.pf.arr(np.random.random(3) * 1e-2, self.fp_units[param])
         elif param in ['axis']:
             return 0
         elif param.startswith("cp_"):
             ax = param[3]
+            rv = self.pf.arr((0.0, 0.0, 0.0), self.fp_units[param])
+            rv['xyz'.index(ax)] = 1.0
+            return rv
+        elif param.endswith("_hat"):
+            ax = param[0]
             rv = YTArray((0.0, 0.0, 0.0), self.fp_units[param])
             rv['xyz'.index(ax)] = 1.0
             return rv
         elif param == "fof_groups":
             return None
+        elif param == "mu":
+            return 1.0
         else:
             return 0.0
 
@@ -193,7 +205,7 @@ class FieldDetector(defaultdict):
     id = 1
 
     def apply_units(self, arr, units):
-        return YTArray(arr, input_units = units)
+        return self.pf.arr(arr, input_units = units)
 
     def has_field_parameter(self, param):
         return True
@@ -207,7 +219,7 @@ class FieldDetector(defaultdict):
             fc.shape = (self.nd*self.nd*self.nd, 3)
         else:
             fc = fc.transpose()
-        return YTArray(fc, input_units = "code_length")
+        return self.pf.arr(fc, input_units = "code_length")
 
     @property
     def icoords(self):
@@ -232,5 +244,5 @@ class FieldDetector(defaultdict):
         fw = np.ones((self.nd**3, 3), dtype="float64") / self.nd
         if not self.flat:
             fw.shape = (self.nd, self.nd, self.nd, 3)
-        return YTArray(fw, input_units = "code_length")
+        return self.pf.arr(fw, input_units = "code_length")
 

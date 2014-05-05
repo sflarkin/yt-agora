@@ -50,6 +50,10 @@ from yt.geometry.polar_coordinates import \
     PolarCoordinateHandler
 from yt.geometry.cylindrical_coordinates import \
     CylindricalCoordinateHandler
+from yt.geometry.spherical_coordinates import \
+    SphericalCoordinateHandler
+from yt.geometry.geographic_coordinates import \
+    GeographicCoordinateHandler
 
 # We want to support the movie format in the future.
 # When such a thing comes to pass, I'll move all the stuff that is contant up
@@ -81,6 +85,20 @@ class IndexProxy(object):
             return getattr(self.ds.index, name)
         raise AttributeError
 
+def requires_index(attr_name):
+    @property
+    def ireq(self):
+        self.index
+        # By now it should have been set
+        attr = self.__dict__[attr_name]
+        return attr
+
+    @ireq.setter
+    def ireq(self, value):
+        self.__dict__[attr_name] = value
+
+    return ireq
+
 class Dataset(object):
 
     default_fluid_type = "gas"
@@ -95,6 +113,8 @@ class Dataset(object):
     known_filters = None
     _index_class = None
     field_units = None
+    derived_field_list = requires_index("derived_field_list")
+    _instantiated = False
 
     class __metaclass__(type):
         def __init__(cls, name, b, d):
@@ -128,6 +148,9 @@ class Dataset(object):
         Base class for generating new output types.  Principally consists of
         a *filename* and a *dataset_type* which will be passed on to children.
         """
+        # We return early and do NOT initialize a second time if this file has
+        # already been initialized.
+        if self._instantiated: return
         self.dataset_type = dataset_type
         self.file_style = file_style
         self.conversion_factors = {}
@@ -152,9 +175,11 @@ class Dataset(object):
         self._instantiated = time.time()
 
         self.min_level = 0
+        self.no_cgs_equiv_length = False
 
         self._create_unit_registry()
         self._parse_parameter_file()
+        self.set_units()
         self._setup_coordinate_handler()
 
         # Because we need an instantiated class to check the pf's existence in
@@ -166,19 +191,18 @@ class Dataset(object):
             pass
         self.print_key_parameters()
 
-        self.set_units()
         self._set_derived_attrs()
         self._setup_classes()
 
     def _set_derived_attrs(self):
-        self.domain_center = 0.5 * (self.domain_right_edge + self.domain_left_edge)
-        self.domain_width = self.domain_right_edge - self.domain_left_edge
+        if self.domain_left_edge is None or self.domain_right_edge is None:
+            self.domain_center = np.zeros(3)
+            self.domain_width = np.zeros(3)
+        else:
+            self.domain_center = 0.5 * (self.domain_right_edge + self.domain_left_edge)
+            self.domain_width = self.domain_right_edge - self.domain_left_edge
         if not isinstance(self.current_time, YTQuantity):
             self.current_time = self.quan(self.current_time, "code_time")
-        # need to do this if current_time was set before units were set
-        elif self.current_time.units.registry.lut["code_time"] != \
-          self.unit_registry.lut["code_time"]:
-            self.current_time.units.registry = self.unit_registry
         for attr in ("center", "width", "left_edge", "right_edge"):
             n = "domain_%s" % attr
             v = getattr(self, n)
@@ -239,7 +263,7 @@ class Dataset(object):
     def get_smallest_appropriate_unit(self, v):
         max_nu = 1e30
         good_u = None
-        for unit in ['mpc', 'kpc', 'pc', 'au', 'rsun', 'km', 'cm']:
+        for unit in ['Mpc', 'kpc', 'pc', 'au', 'rsun', 'km', 'cm']:
             vv = v * self.length_unit.in_units(unit)
             if vv < max_nu and vv > 1.0:
                 good_u = unit
@@ -264,9 +288,12 @@ class Dataset(object):
                 self, dataset_type=self.dataset_type)
             # Now we do things that we need an instantiated index for
             # ...first off, we create our field_info now.
+            oldsettings = np.geterr()
+            np.seterr(all='ignore')
             self.create_field_info()
+            np.seterr(**oldsettings)
         return self._instantiated_index
-    
+
     _index_proxy = None
     @property
     def h(self):
@@ -339,6 +366,10 @@ class Dataset(object):
             self.coordinates = CylindricalCoordinateHandler(self)
         elif self.geometry == "polar":
             self.coordinates = PolarCoordinateHandler(self)
+        elif self.geometry == "spherical":
+            self.coordinates = SphericalCoordinateHandler(self)
+        elif self.geometry == "geographic":
+            self.coordinates = GeographicCoordinateHandler(self)
         else:
             raise YTGeometryNotSupported(self.geometry)
 
@@ -346,11 +377,16 @@ class Dataset(object):
         # No string lookups here, we need an actual union.
         f = self.particle_fields_by_type
         fields = set_intersection([f[s] for s in union
-                                   if s in self.particle_types_raw])
+                                   if s in self.particle_types_raw
+                                   and len(f[s]) > 0])
         for field in fields:
             units = set([])
             for s in union:
-                units.add(self.field_units.get((s, field), ""))
+                # First we check our existing fields for units
+                funits = self._get_field_info(s, field).units
+                # Then we override with field_units settings.
+                funits = self.field_units.get((s, field), funits)
+                units.add(funits)
             if len(units) == 1:
                 self.field_units[union.name, field] = list(units)[0]
         self.particle_types += (union.name,)
@@ -363,6 +399,8 @@ class Dataset(object):
         rv = self.field_info.find_dependencies(new_fields)
 
     def add_particle_filter(self, filter):
+        # This requires an index
+        self.index
         # This is a dummy, which we set up to enable passthrough of "all"
         # concatenation fields.
         n = getattr(filter, "name", filter)
@@ -494,13 +532,13 @@ class Dataset(object):
         source = self.all_data()
         max_val, maxi, mx, my, mz = \
             source.quantities["MaxLocation"](field)
-        mylog.info("Max Value is %0.5e at %0.16f %0.16f %0.16f", 
+        mylog.info("Max Value is %0.5e at %0.16f %0.16f %0.16f",
               max_val, mx, my, mz)
         return max_val, np.array([mx, my, mz], dtype="float64")
 
     # Now all the object related stuff
     def all_data(self, find_max=False):
-        if find_max: c = self.find_max("Density")[1]
+        if find_max: c = self.find_max("density")[1]
         else: c = (self.domain_right_edge + self.domain_left_edge)/2.0
         return self.region(c,
             self.domain_left_edge, self.domain_right_edge)
@@ -531,12 +569,14 @@ class Dataset(object):
     def _create_unit_registry(self):
         self.unit_registry = UnitRegistry()
         import yt.units.dimensions as dimensions
-        self.unit_registry.lut["code_length"] = (1.0, dimensions.length)
-        self.unit_registry.lut["code_mass"] = (1.0, dimensions.mass)
-        self.unit_registry.lut["code_time"] = (1.0, dimensions.time)
-        self.unit_registry.lut["code_magnetic"] = (1.0, dimensions.magnetic_field)
-        self.unit_registry.lut["code_temperature"] = (1.0, dimensions.temperature)
-        self.unit_registry.lut["code_velocity"] = (1.0, dimensions.velocity)
+        self.unit_registry.add("code_length", 1.0, dimensions.length)
+        self.unit_registry.add("code_mass", 1.0, dimensions.mass)
+        self.unit_registry.add("code_time", 1.0, dimensions.time)
+        self.unit_registry.add("code_magnetic", 1.0, dimensions.magnetic_field)
+        self.unit_registry.add("code_temperature", 1.0, dimensions.temperature)
+        self.unit_registry.add("code_velocity", 1.0, dimensions.velocity)
+        self.unit_registry.add("code_metallicity", 1.0,
+                               dimensions.dimensionless)
 
     def set_units(self):
         """
@@ -587,12 +627,14 @@ class Dataset(object):
         self.unit_registry.modify("code_length", self.length_unit)
         self.unit_registry.modify("code_mass", self.mass_unit)
         self.unit_registry.modify("code_time", self.time_unit)
-        vel_unit = getattr(self, "code_velocity",
+        vel_unit = getattr(self, "velocity_unit",
                     self.length_unit / self.time_unit)
         self.unit_registry.modify("code_velocity", vel_unit)
         # domain_width does not yet exist
-        DW = self.arr(self.domain_right_edge - self.domain_left_edge, "code_length")
-        self.unit_registry.modify("unitary", DW.max())
+        if None not in (self.domain_left_edge, self.domain_right_edge):
+            DW = self.arr(self.domain_right_edge - self.domain_left_edge, "code_length")
+            self.unit_registry.add("unitary", float(DW.max() * DW.units.cgs_value),
+                                   DW.units.dimensions)
 
     _arr = None
     @property
