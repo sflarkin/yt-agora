@@ -18,6 +18,7 @@ import weakref
 import warnings
 import re
 
+from yt.config import ytcfg
 from yt.funcs import *
 from yt.data_objects.grid_patch import \
     AMRGridPatch
@@ -37,49 +38,11 @@ from yt.units.unit_lookup_table import \
     prefixable_units, \
     unit_prefixes
 from yt.units import dimensions
+from yt.units.yt_array import YTQuantity
+from yt.utilities.on_demand_imports import _astropy
 
-class astropy_imports:
-    _pyfits = None
-    @property
-    def pyfits(self):
-        if self._pyfits is None:
-            try:
-                import astropy.io.fits as pyfits
-                self.log
-            except ImportError:
-                pyfits = None
-            self._pyfits = pyfits
-        return self._pyfits
-
-    _pywcs = None
-    @property
-    def pywcs(self):
-        if self._pywcs is None:
-            try:
-                import astropy.wcs as pywcs
-                self.log
-            except ImportError:
-                pywcs = None
-            self._pywcs = pywcs
-        return self._pywcs
-
-    _log = None
-    @property
-    def log(self):
-        if self._log is None:
-            try:
-                from astropy import log
-                if log.exception_logging_enabled():
-                    log.disable_exception_logging()
-            except ImportError:
-                log = None
-            self._log = log
-        return self._log
-
-ap = astropy_imports()
-
-lat_prefixes = ["DEC","GLAT"]
-lon_prefixes = ["RA","GLON"]
+lon_prefixes = ["X","RA","GLON"]
+lat_prefixes = ["Y","DEC","GLAT"]
 vel_prefixes = ["V","ENER","FREQ","WAV"]
 delimiters = ["*", "/", "-", "^"]
 delimiters += [str(i) for i in xrange(10)]
@@ -131,7 +94,8 @@ class FITSHierarchy(GridIndex):
             # FITS units always return upper-case, so we need to get
             # the right case by comparing against known units. This
             # only really works for common units.
-            units = re.split(regex_pattern, field_units)
+            units = set(re.split(regex_pattern, field_units))
+            units.remove('')
             n = int(0)
             for unit in units:
                 if unit in known_units:
@@ -139,7 +103,7 @@ class FITSHierarchy(GridIndex):
                     n += 1
             if n != len(units): field_units = "dimensionless"
             return field_units
-        except:
+        except KeyError:
             return "dimensionless"
 
     def _ensure_same_dims(self, hdu):
@@ -190,7 +154,7 @@ class FITSHierarchy(GridIndex):
                     try:
                         # Grab field name from btype
                         fname = hdu.header["btype"].lower()
-                    except:
+                    except KeyError:
                         # Try to guess the name from the units
                         fname = self._guess_name_from_units(units)
                         # When all else fails
@@ -215,6 +179,9 @@ class FITSHierarchy(GridIndex):
                         self.field_list.append(("fits", fname))
                         self.parameter_file.field_units[fname] = units
                         mylog.info("Adding field %s to the list of fields." % (fname))
+                        if units == "dimensionless":
+                            mylog.warning("Could not determine dimensions for field %s, " % (fname) +
+                                          "setting to dimensionless.")
                 else:
                     mylog.warning("Image block %s does not have " % (hdu.name.lower()) +
                                   "the same dimensions as the primary and will not be " +
@@ -225,7 +192,7 @@ class FITSHierarchy(GridIndex):
         line_db = self.parameter_file.line_database
         primary_fname = self.field_list[0][1]
         for k, v in line_db.iteritems():
-            mylog.info("Adding line field: %s at offset %i" % (k, v))
+            mylog.info("Adding line field: %s at frequency %g GHz" % (k, v))
             self.field_list.append((self.dataset_type, k))
             self._ext_map[k] = self._ext_map[primary_fname]
             self._axis_map[k] = self._axis_map[primary_fname]
@@ -243,11 +210,21 @@ class FITSHierarchy(GridIndex):
         if pf.nprocs > 1:
             bbox = np.array([[le,re] for le, re in zip(pf.domain_left_edge,
                                                        pf.domain_right_edge)])
-            psize = get_psize(np.array(pf.domain_dimensions), pf.nprocs)
-            gle, gre, shapes, slices = decompose_array(pf.domain_dimensions, psize, bbox)
+            dims = np.array(pf.domain_dimensions)
+            # If we are creating a dataset of lines, only decompose along the position axes
+            if len(pf.line_database) > 0:
+                dims[pf.vel_axis] = 1
+            psize = get_psize(dims, pf.nprocs)
+            gle, gre, shapes, slices = decompose_array(dims, psize, bbox)
             self.grid_left_edge = self.pf.arr(gle, "code_length")
             self.grid_right_edge = self.pf.arr(gre, "code_length")
             self.grid_dimensions = np.array([shape for shape in shapes], dtype="int32")
+            # If we are creating a dataset of lines, only decompose along the position axes
+            if len(pf.line_database) > 0:
+                self.grid_left_edge[:,pf.vel_axis] = pf.domain_left_edge[pf.vel_axis]
+                self.grid_right_edge[:,pf.vel_axis] = pf.domain_right_edge[pf.vel_axis]
+                self.grid_dimensions[:,pf.vel_axis] = pf.domain_dimensions[pf.vel_axis]
+
         else:
             self.grid_left_edge[0,:] = pf.domain_left_edge
             self.grid_right_edge[0,:] = pf.domain_right_edge
@@ -309,13 +286,12 @@ class FITSDataset(Dataset):
 
     def __init__(self, filename,
                  dataset_type = 'fits',
-                 slave_files = [],
+                 auxiliary_files = [],
                  nprocs = None,
                  storage_filename = None,
                  nan_mask = None,
-                 folded_axis = None,
-                 folded_width = None,
                  line_database = None,
+                 line_width = None,
                  suppress_astropy_warnings = True,
                  parameters = None):
 
@@ -323,17 +299,21 @@ class FITSDataset(Dataset):
             parameters = {}
         self.specified_parameters = parameters
 
-        self.folded_axis = folded_axis
-        self.folded_width = folded_width
-        self._unfolded_domain_dimensions = None
-        if line_database is None:
-            line_database = {}
-        self.line_database = line_database
+        if line_width is not None:
+            self.line_width = YTQuantity(line_width[0], line_width[1])
+            self.line_units = line_width[1]
+        else:
+            self.line_width = None
+
+        self.line_database = {}
+        if line_database is not None:
+            for k in line_database:
+                self.line_database[k] = YTQuantity(line_database[k], self.line_units)
 
         if suppress_astropy_warnings:
             warnings.filterwarnings('ignore', module="astropy", append=True)
-        slave_files = ensure_list(slave_files)
-        self.filenames = [filename] + slave_files
+        auxiliary_files = ensure_list(auxiliary_files)
+        self.filenames = [filename] + auxiliary_files
         self.num_files = len(self.filenames)
         self.fluid_types += ("fits",)
         if nan_mask is None:
@@ -343,14 +323,18 @@ class FITSDataset(Dataset):
         elif isinstance(nan_mask, dict):
             self.nan_mask = nan_mask
         self.nprocs = nprocs
-        self._handle = ap.pyfits.open(self.filenames[0],
+        self._handle = _astropy.pyfits.open(self.filenames[0],
                                       memmap=True,
                                       do_not_scale_image_data=True,
                                       ignore_blank=True)
         self._fits_files = [self._handle]
         if self.num_files > 1:
-            for fits_file in slave_files:
-                f = ap.pyfits.open(fits_file, memmap=True,
+            for fits_file in auxiliary_files:
+                if os.path.exists(fits_file):
+                    fn = fits_file
+                else:
+                    fn = os.path.join(ytcfg.get("yt","test_data_dir"),fits_file)
+                f = _astropy.pyfits.open(fn, memmap=True,
                                    do_not_scale_image_data=True,
                                    ignore_blank=True)
                 self._fits_files.append(f)
@@ -360,7 +344,7 @@ class FITSDataset(Dataset):
             self.first_image = 1
             self.primary_header = self._handle[self.first_image].header
             self.naxis = 2
-            self.wcs = ap.pywcs.WCS(naxis=2)
+            self.wcs = _astropy.pywcs.WCS(naxis=2)
             self.events_info = {}
             for k,v in self.primary_header.items():
                 if k.startswith("TTYP"):
@@ -378,18 +362,23 @@ class FITSDataset(Dataset):
                         if unit.endswith("ev"): unit = unit.replace("ev","eV")
                         self.events_info[v.lower()] = unit
             self.axis_names = [self.events_info[ax][2] for ax in ["x","y"]]
-            self.wcs.wcs.cdelt = [self.events_info["x"][4],self.events_info["y"][4]]
-            self.wcs.wcs.crpix = [self.events_info["x"][5],self.events_info["y"][5]]
+            self.reblock = 1
+            if "reblock" in self.specified_parameters:
+                self.reblock = self.specified_parameters["reblock"]
+            self.wcs.wcs.cdelt = [self.events_info["x"][4]*self.reblock,
+                                  self.events_info["y"][4]*self.reblock]
+            self.wcs.wcs.crpix = [(self.events_info["x"][5]-0.5)/self.reblock+0.5,
+                                  (self.events_info["y"][5]-0.5)/self.reblock+0.5]
             self.wcs.wcs.ctype = [self.events_info["x"][2],self.events_info["y"][2]]
             self.wcs.wcs.cunit = ["deg","deg"]
             self.wcs.wcs.crval = [self.events_info["x"][3],self.events_info["y"][3]]
-            self.dims = [self.events_info["x"][1]-self.events_info["x"][0],
-                         self.events_info["y"][1]-self.events_info["y"][0]]
+            self.dims = [(self.events_info["x"][1]-self.events_info["x"][0])/self.reblock,
+                         (self.events_info["y"][1]-self.events_info["y"][0])/self.reblock]
         else:
             self.events_data = False
             self.first_image = 0
             self.primary_header = self._handle[self.first_image].header
-            self.wcs = ap.pywcs.WCS(header=self.primary_header)
+            self.wcs = _astropy.pywcs.WCS(header=self.primary_header)
             self.naxis = self.primary_header["naxis"]
             self.axis_names = [self.primary_header["ctype%d" % (i+1)]
                                for i in xrange(self.naxis)]
@@ -440,9 +429,9 @@ class FITSDataset(Dataset):
             if units == "deg": units = "degree"
             if units == "rad": units = "radian"
             pixel_area = np.prod(np.abs(self.wcs_2d.wcs.cdelt))
-            pixel_area = float(self.quan(pixel_area, "%s**2" % (units)).in_cgs().value)
-            pixel_dims = dimensions.solid_angle
-            self.unit_registry.add("pixel",pixel_area,dimensions=pixel_dims)
+            pixel_area = self.quan(pixel_area, "%s**2" % (units)).in_cgs()
+            pixel_dims = pixel_area.units.dimensions
+            self.unit_registry.add("pixel",float(pixel_area.value),dimensions=pixel_dims)
 
     def _parse_parameter_file(self):
 
@@ -465,12 +454,6 @@ class FITSDataset(Dataset):
 
         self.domain_left_edge = np.array([0.5]*3)
         self.domain_right_edge = np.array([float(dim)+0.5 for dim in self.domain_dimensions])
-
-        if self.folded_axis is not None:
-            self.domain_left_edge[self.folded_axis] = -self.folded_width/2.
-            self.domain_right_edge[self.folded_axis] = self.folded_width/2.
-            self._unfolded_domain_dimensions = self.domain_dimensions.copy()
-            self.domain_dimensions[self.folded_axis] = int(self.folded_width)
 
         if self.dimensionality == 2:
             self.domain_left_edge[-1] = 0.5
@@ -497,6 +480,8 @@ class FITSDataset(Dataset):
             self.nprocs = np.around(np.prod(self.domain_dimensions) /
                                     32**self.dimensionality).astype("int")
             self.nprocs = max(min(self.nprocs, 512), 1)
+
+        self.reversed = False
 
         # Check to see if this data is in some kind of (Lat,Lon,Vel) format
         self.ppv_data = False
@@ -541,7 +526,7 @@ class FITSDataset(Dataset):
             self.vel_axis = np.where(self.vel_axis)[0][0]
             self.vel_name = ctypes[self.vel_axis].split("-")[0].lower()
 
-            self.wcs_2d = ap.pywcs.WCS(naxis=2)
+            self.wcs_2d = _astropy.pywcs.WCS(naxis=2)
             self.wcs_2d.wcs.crpix = self.wcs.wcs.crpix[[self.lon_axis, self.lat_axis]]
             self.wcs_2d.wcs.cdelt = self.wcs.wcs.cdelt[[self.lon_axis, self.lat_axis]]
             self.wcs_2d.wcs.crval = self.wcs.wcs.crval[[self.lon_axis, self.lat_axis]]
@@ -555,10 +540,25 @@ class FITSDataset(Dataset):
             z0 = self.wcs.wcs.crval[self.vel_axis]
             self.vel_unit = str(self.wcs.wcs.cunit[self.vel_axis])
 
-            self.domain_left_edge[self.vel_axis] = \
-                (self.domain_left_edge[self.vel_axis]-x0)*dz + z0
-            self.domain_right_edge[self.vel_axis] = \
-                (self.domain_right_edge[self.vel_axis]-x0)*dz + z0
+            if dz < 0.0:
+                self.reversed = True
+                le = self.dims[self.vel_axis]+0.5
+                re = 0.5
+            else:
+                le = 0.5
+                re = self.dims[self.vel_axis]+0.5
+            self.domain_left_edge[self.vel_axis] = (le-x0)*dz + z0
+            self.domain_right_edge[self.vel_axis] = (re-x0)*dz + z0
+            if self.reversed: dz *= -1
+
+            if self.line_width is not None:
+                self.line_width = self.line_width.in_units(self.vel_unit)
+                self.freq_begin = self.domain_left_edge[self.vel_axis]
+                nz = np.rint(self.line_width.value/dz).astype("int")
+                self.line_width = dz*nz
+                self.domain_left_edge[self.vel_axis] = -self.line_width/2.
+                self.domain_right_edge[self.vel_axis] = self.line_width/2.
+                self.domain_dimensions[self.vel_axis] = nz
 
         else:
 
@@ -570,7 +570,9 @@ class FITSDataset(Dataset):
     def __del__(self):
         for file in self._fits_files:
             file.close()
+            del file
         self._handle.close()
+        del self._handle
 
     @classmethod
     def _is_valid(cls, *args, **kwargs):
@@ -583,7 +585,7 @@ class FITSDataset(Dataset):
         try:
             with warnings.catch_warnings():
                 warnings.filterwarnings('ignore', category=UserWarning, append=True)
-                fileh = ap.pyfits.open(args[0])
+                fileh = _astropy.pyfits.open(args[0])
             valid = fileh[0].header["naxis"] >= 2
             if len(fileh) > 1 and fileh[1].name == "EVENTS":
                 valid = fileh[1].header["naxis"] >= 2
