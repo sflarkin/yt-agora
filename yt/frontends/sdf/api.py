@@ -1,5 +1,6 @@
 """
-Various definitions for various other modules and routines
+API for yt.frontends.sdf
+
 
 
 
@@ -13,4 +14,11 @@ Various definitions for various other modules and routines
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
+from .data_structures import \
+      SDFDataset
 
+from .io import \
+      IOHandlerSDF
+
+from .fields import \
+      SDFFieldInfo
