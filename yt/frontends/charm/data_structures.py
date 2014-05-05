@@ -1,5 +1,5 @@
 """
-Data structures for Chombo.
+Data structures for Charm.
 
 
 
@@ -28,8 +28,8 @@ from stat import \
      ST_CTIME
 
 from .definitions import \
-     chombo2enzoDict, \
-     yt2chomboFieldsDict, \
+     charm2enzoDict, \
+     yt2charmFieldsDict, \
      parameterDict \
 
 from yt.funcs import *
@@ -48,9 +48,12 @@ from yt.utilities.io_handler import \
 
 from yt.data_objects.field_info_container import \
     FieldInfoContainer, NullFunc
-from .fields import ChomboFieldInfo, KnownChomboFields
+from .fields import \
+    CharmFieldInfo, Charm2DFieldInfo, Charm1DFieldInfo, \
+    add_charm_field, add_charm_2d_field, add_charm_1d_field, \
+    KnownCharmFields
 
-class ChomboGrid(AMRGridPatch):
+class CharmGrid(AMRGridPatch):
     _id_offset = 0
     __slots__ = ["_level_id", "stop_index"]
     def __init__(self, id, hierarchy, level, start, stop):
@@ -84,14 +87,21 @@ class ChomboGrid(AMRGridPatch):
         self.dds = self.hierarchy.dds_list[self.Level]
         self.field_data['dx'], self.field_data['dy'], self.field_data['dz'] = self.dds
 
-class ChomboHierarchy(AMRHierarchy):
+class CharmHierarchy(AMRHierarchy):
 
-    grid = ChomboGrid
+    grid = CharmGrid
+    _data_file = None
 
-    def __init__(self,pf,data_style='chombo_hdf5'):
+    def __init__(self,pf,data_style='charm_hdf5'):
         self.domain_left_edge = pf.domain_left_edge
         self.domain_right_edge = pf.domain_right_edge
         self.data_style = data_style
+
+        if pf.dimensionality == 1:
+            self.data_style = "charm1d_hdf5"
+        if pf.dimensionality == 2:
+            self.data_style = "charm2d_hdf5"
+
         self.field_indexes = {}
         self.parameter_file = weakref.proxy(pf)
         # for now, the hierarchy file is the parameter file!
@@ -100,42 +110,32 @@ class ChomboHierarchy(AMRHierarchy):
         self.directory = pf.fullpath
         self._handle = pf._handle
 
-        self.float_type = self._handle['/level_0']['data:datatype=0'].dtype.name
-        self._levels = self._handle.keys()[1:]
+        self.float_type = self._handle['Chombo_global'].attrs['testReal'].dtype.name
+        self._levels = [key for key in self._handle.keys() if key.startswith('level')]
         AMRHierarchy.__init__(self,pf,data_style)
         self._read_particles()
 
     def _read_particles(self):
-        self.particle_filename = self.hierarchy_filename[:-4] + 'sink'
-        if not os.path.exists(self.particle_filename): return
-        with open(self.particle_filename, 'r') as f:
-            lines = f.readlines()
-            self.num_stars = int(lines[0].strip().split(' ')[0])
-            for line in lines[1:]:
-                particle_position_x = float(line.split(' ')[1])
-                particle_position_y = float(line.split(' ')[2])
-                particle_position_z = float(line.split(' ')[3])
-                coord = [particle_position_x, particle_position_y, particle_position_z]
-                # for each particle, determine which grids contain it
-                # copied from object_finding_mixin.py
-                mask=np.ones(self.num_grids)
-                for i in xrange(len(coord)):
-                    np.choose(np.greater(self.grid_left_edge[:,i],coord[i]), (mask,0), mask)
-                    np.choose(np.greater(self.grid_right_edge[:,i],coord[i]), (0,mask), mask)
-                ind = np.where(mask == 1)
-                selected_grids = self.grids[ind]
-                # in orion, particles always live on the finest level.
-                # so, we want to assign the particle to the finest of
-                # the grids we just found
-                if len(selected_grids) != 0:
-                    grid = sorted(selected_grids, key=lambda grid: grid.Level)[-1]
-                    ind = np.where(self.grids == grid)[0][0]
-                    self.grid_particle_count[ind] += 1
-                    self.grids[ind].NumberOfParticles += 1
+        
+        self.num_particles = 0
+        particles_per_grid = []
+        for key, val in self._handle.items():
+            if key.startswith('level'):
+                level_particles = val['particles:offsets'][:]
+                self.num_particles += level_particles.sum()
+                particles_per_grid = np.concatenate((particles_per_grid, level_particles))
+
+        for i, grid in enumerate(self.grids):
+            self.grids[i].NumberOfParticles = particles_per_grid[i]
+            self.grid_particle_count[i] = particles_per_grid[i]
+
+        assert(self.num_particles == self.grid_particle_count.sum())
 
     def _detect_fields(self):
-        ncomp = int(self._handle['/'].attrs['num_components'])
-        self.field_list = [c[1] for c in self._handle['/'].attrs.items()[-ncomp:]]
+        self.field_list = []
+        for key, val in self._handle.attrs.items():
+            if key.startswith("component"):
+                self.field_list.append(val)
           
     def _setup_classes(self):
         dd = self._get_data_reader_dict()
@@ -150,32 +150,49 @@ class ChomboHierarchy(AMRHierarchy):
     def _parse_hierarchy(self):
         f = self._handle # shortcut
 
-        # this relies on the first Group in the H5 file being
-        # 'Chombo_global'
-        levels = f.keys()[1:]
         grids = []
         self.dds_list = []
         i = 0
-        for lev in levels:
+        D = self.parameter_file.dimensionality
+        for lev_index, lev in enumerate(self._levels):
             level_number = int(re.match('level_(\d+)',lev).groups()[0])
-            boxes = f[lev]['boxes'].value
+            try:
+                boxes = f[lev]['boxes'].value
+            except KeyError:
+                boxes = f[lev]['particles:boxes'].value
             dx = f[lev].attrs['dx']
             self.dds_list.append(dx * np.ones(3))
+
+            if D == 1:
+                self.dds_list[lev_index][1] = 1.0
+                self.dds_list[lev_index][2] = 1.0
+
+            if D == 2:
+                self.dds_list[lev_index][2] = 1.0
+
             for level_id, box in enumerate(boxes):
-                si = np.array([box['lo_%s' % ax] for ax in 'ijk'])
-                ei = np.array([box['hi_%s' % ax] for ax in 'ijk'])
+                si = np.array([box['lo_%s' % ax] for ax in 'ijk'[:D]])
+                ei = np.array([box['hi_%s' % ax] for ax in 'ijk'[:D]])
+                
+                if D == 1:
+                    si = np.concatenate((si, [0.0, 0.0]))
+                    ei = np.concatenate((ei, [0.0, 0.0]))
+
+                if D == 2:
+                    si = np.concatenate((si, [0.0]))
+                    ei = np.concatenate((ei, [0.0]))
+
                 pg = self.grid(len(grids),self,level=level_number,
                                start = si, stop = ei)
                 grids.append(pg)
                 grids[-1]._level_id = level_id
-                self.grid_left_edge[i] = dx*si.astype(self.float_type)
-                self.grid_right_edge[i] = dx*(ei.astype(self.float_type)+1)
+                self.grid_left_edge[i] = self.dds_list[lev_index]*si.astype(self.float_type)
+                self.grid_right_edge[i] = self.dds_list[lev_index]*(ei.astype(self.float_type)+1)
                 self.grid_particle_count[i] = 0
                 self.grid_dimensions[i] = ei - si + 1
                 i += 1
         self.grids = np.empty(len(grids), dtype='object')
         for gi, g in enumerate(grids): self.grids[gi] = g
-#        self.grids = np.array(self.grids, dtype='object')
 
     def _populate_grid_objects(self):
         for g in self.grids:
@@ -200,15 +217,15 @@ class ChomboHierarchy(AMRHierarchy):
     def _setup_data_io(self):
         self.io = io_registry[self.data_style](self.parameter_file)
 
-class ChomboStaticOutput(StaticOutput):
-    _hierarchy_class = ChomboHierarchy
-    _fieldinfo_fallback = ChomboFieldInfo
-    _fieldinfo_known = KnownChomboFields
+class CharmStaticOutput(StaticOutput):
+    _hierarchy_class = CharmHierarchy
+    _fieldinfo_fallback = CharmFieldInfo
+    _fieldinfo_known = KnownCharmFields
 
-    def __init__(self, filename, data_style='chombo_hdf5',
+    def __init__(self, filename, data_style='charm_hdf5',
                  storage_filename = None, ini_filename = None):
         self._handle = h5py.File(filename,'r')
-        self.current_time = self._handle.attrs['time']
+        self.current_time = self._handle['level_0'].attrs['time']
         self.ini_filename = ini_filename
         self.fullplotdir = os.path.abspath(filename)
         StaticOutput.__init__(self,filename,data_style)
@@ -216,7 +233,7 @@ class ChomboStaticOutput(StaticOutput):
         self.cosmological_simulation = False
 
         # These are parameters that I very much wish to get rid of.
-        self.parameters["HydroMethod"] = 'chombo' # always PPM DE
+        self.parameters["HydroMethod"] = 'charm' # always PPM DE
         self.parameters["DualEnergyFormalism"] = 0 
         self.parameters["EOSType"] = -1 # default
 
@@ -239,7 +256,7 @@ class ChomboStaticOutput(StaticOutput):
         seconds = 1 #self["Time"]
         for unit in sec_conversion.keys():
             self.time_units[unit] = seconds / sec_conversion[unit]
-        for key in yt2chomboFieldsDict:
+        for key in yt2charmFieldsDict:
             self.conversion_factors[key] = 1.0
 
     def _setup_nounits_units(self):
@@ -258,74 +275,59 @@ class ChomboStaticOutput(StaticOutput):
         return f
 
     def _parse_parameter_file(self):
-        """
-        Check to see whether an 'orion2.ini' file
-        exists in the plot file directory. If one does, attempt to parse it.
-        Otherwise grab the dimensions from the hdf5 file.
-        """
         
-        if os.path.isfile('orion2.ini'): self._parse_inputs_file('orion2.ini')
         self.unique_identifier = \
                                int(os.stat(self.parameter_filename)[ST_CTIME])
+        self.dimensionality = self._handle['Chombo_global/'].attrs['SpaceDim']
         self.domain_left_edge = self.__calc_left_edge()
         self.domain_right_edge = self.__calc_right_edge()
         self.domain_dimensions = self.__calc_domain_dimensions()
-        self.dimensionality = 3
-        self.refine_by = self._handle['/level_0'].attrs['ref_ratio']
-        self.periodicity = (True, True, True)
 
-    def _parse_inputs_file(self, ini_filename):
-        self.fullplotdir = os.path.abspath(self.parameter_filename)
-        self.ini_filename = self._localize( \
-            self.ini_filename, ini_filename)
-        self.unique_identifier = \
-                               int(os.stat(self.parameter_filename)[ST_CTIME])
-        lines = open(self.ini_filename).readlines()
-        # read the file line by line, storing important parameters
-        for lineI, line in enumerate(lines):
-            try:
-                param, sep, vals = map(rstrip,line.partition(' '))
-            except ValueError:
-                mylog.error("ValueError: '%s'", line)
-            if chombo2enzoDict.has_key(param):
-                paramName = chombo2enzoDict[param]
-                t = map(parameterDict[paramName], vals.split())
-                if len(t) == 1:
-                    self.parameters[paramName] = t[0]
-                else:
-                    if paramName == "RefineBy":
-                        self.parameters[paramName] = t[0]
-                    else:
-                        self.parameters[paramName] = t
+        if self.dimensionality == 1:
+            self._fieldinfo_fallback = Charm1DFieldInfo
+            self.domain_left_edge = np.concatenate((self.domain_left_edge, [0.0, 0.0]))
+            self.domain_right_edge = np.concatenate((self.domain_right_edge, [1.0, 1.0]))
+            self.domain_dimensions = np.concatenate((self.domain_dimensions, [1, 1]))
+
+        if self.dimensionality == 2:
+            self._fieldinfo_fallback = Charm2DFieldInfo
+            self.domain_left_edge = np.concatenate((self.domain_left_edge, [0.0]))
+            self.domain_right_edge = np.concatenate((self.domain_right_edge, [1.0]))
+            self.domain_dimensions = np.concatenate((self.domain_dimensions, [1]))
+        
+        self.refine_by = self._handle['/level_0'].attrs['ref_ratio']
+        self.periodicity = (True,) * self.dimensionality
 
     def __calc_left_edge(self):
         fileh = self._handle
         dx0 = fileh['/level_0'].attrs['dx']
-        LE = dx0*((np.array(list(fileh['/level_0'].attrs['prob_domain'])))[0:3])
+        D = self.dimensionality
+        LE = dx0*((np.array(list(fileh['/level_0'].attrs['prob_domain'])))[0:D])
         return LE
 
     def __calc_right_edge(self):
         fileh = self._handle
         dx0 = fileh['/level_0'].attrs['dx']
-        RE = dx0*((np.array(list(fileh['/level_0'].attrs['prob_domain'])))[3:] + 1)
+        D = self.dimensionality
+        RE = dx0*((np.array(list(fileh['/level_0'].attrs['prob_domain'])))[D:] + 1)
         return RE
 
     def __calc_domain_dimensions(self):
         fileh = self._handle
-        L_index = ((np.array(list(fileh['/level_0'].attrs['prob_domain'])))[0:3])
-        R_index = ((np.array(list(fileh['/level_0'].attrs['prob_domain'])))[3:] + 1)
+        D = self.dimensionality
+        L_index = ((np.array(list(fileh['/level_0'].attrs['prob_domain'])))[0:D])
+        R_index = ((np.array(list(fileh['/level_0'].attrs['prob_domain'])))[D:] + 1)
         return R_index - L_index
 
     @classmethod
     def _is_valid(self, *args, **kwargs):
-        if not os.path.isfile('pluto.ini'):
-            try:
-                fileh = h5py.File(args[0],'r')
-                valid = "Chombo_global" in fileh["/"] and "Charm_global" not in fileh["/"]
-                fileh.close()
-                return valid
-            except:
-                pass
+        try:
+            fileh = h5py.File(args[0],'r')
+            valid = "Charm_global" in fileh["/"]
+            fileh.close()
+            return valid
+        except:
+            pass
         return False
 
     @parallel_root_only
