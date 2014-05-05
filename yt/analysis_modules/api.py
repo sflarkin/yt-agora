@@ -63,14 +63,7 @@ from .halo_profiler.api import \
     HaloProfiler, \
     FakeProfile
 
-from .index_subset.api import \
-    ConstructedRootGrid, \
-    AMRExtractedGridProxy, \
-    ExtractedHierarchy, \
-    ExtractedParameterFile
-
 from .level_sets.api import \
-    coalesce_join_tree, \
     identify_contours, \
     Clump, \
     find_clumps, \
@@ -121,3 +114,6 @@ from .photon_simulator.api import \
      TableAbsorbModel, \
      PhotonModel, \
      ThermalPhotonModel
+
+from .ppv_cube.api import \
+    PPVCube

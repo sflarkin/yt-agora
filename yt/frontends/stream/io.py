@@ -52,13 +52,7 @@ class IOHandlerStream(BaseIOHandler):
             raise NotImplementedError
         rv = {}
         for field in fields:
-            ftype, fname = field
-            try:
-                field_units = self.field_units[fname]
-            except KeyError:
-                field_units = self.field_units[field]
-            rv[field] = self.pf.arr(np.empty(size, dtype="float64"),
-                                    field_units)
+            rv[field] = self.pf.arr(np.empty(size, dtype="float64"))
         ng = sum(len(c.objs) for c in chunks)
         mylog.debug("Reading %s cells of %s fields in %s blocks",
                     size, [f2 for f1, f2 in fields], ng)
@@ -91,7 +85,7 @@ class IOHandlerStream(BaseIOHandler):
                 for ptype, field_list in sorted(ptf.items()):
                     x, y, z  = (gf[ptype, "particle_position_%s" % ax]
                                 for ax in 'xyz')
-                    mask = selector.select_points(x, y, z)
+                    mask = selector.select_points(x, y, z, 0.0)
                     if mask is None: continue
                     for field in field_list:
                         data = np.asarray(gf[ptype, field])
@@ -133,7 +127,7 @@ class StreamParticleIOHandler(BaseIOHandler):
             for ptype, field_list in sorted(ptf.items()):
                 x, y, z = (f[ptype, "particle_position_%s" % ax]
                            for ax in 'xyz')
-                mask = selector.select_points(x, y, z)
+                mask = selector.select_points(x, y, z, 0.0)
                 if mask is None: continue
                 for field in field_list:
                     data = f[ptype, field][mask]

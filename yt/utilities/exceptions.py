@@ -157,7 +157,7 @@ class YTUnitNotRecognized(YTException):
     def __str__(self):
         return "This parameter file doesn't recognize %s" % self.unit
 
-class YTUnitOperationError(YTException):
+class YTUnitOperationError(YTException, ValueError):
     def __init__(self, operation, unit1, unit2=None):
         self.operation = operation
         self.unit1 = unit1
@@ -267,8 +267,8 @@ class YTTooManyVertices(YTException):
         return s
 
 class YTInvalidWidthError(YTException):
-    def __init__(self, error):
-        self.error = error
+    def __init__(self, width):
+        self.error = "width (%s) is invalid" % str(width)
 
     def __str__(self):
         return str(self.error)
@@ -351,6 +351,10 @@ class YTRockstarMultiMassNotSupported(YTException):
 
 class YTEmptyProfileData(Exception):
     pass
+
+class YTTooParallel(YTException):
+    def __str__(self):
+        return "You've used too many processors for this dataset."
 
 class YTDuplicateFieldInProfile(Exception):
     def __init__(self, field, new_spec, old_spec):

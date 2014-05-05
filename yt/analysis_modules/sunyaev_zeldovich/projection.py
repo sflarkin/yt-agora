@@ -19,11 +19,8 @@ Chluba, Switzer, Nagai, Nelson, MNRAS, 2012, arXiv:1211.3206
 #-----------------------------------------------------------------------------
 
 from yt.utilities.physical_constants import sigma_thompson, clight, hcgs, kboltz, mh, Tcmb
-from yt.utilities.fits_image import FITSImageBuffer
-from yt.fields.local_fields import add_field, derived_field
-from yt.data_objects.image_array import ImageArray
+from yt.units.yt_array import YTQuantity
 from yt.funcs import fix_axis, mylog, iterable, get_pbar
-from yt.utilities.definitions import inv_axis_names
 from yt.visualization.volume_rendering.camera import off_axis_projection
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
      communication_system, parallel_root_only
@@ -39,26 +36,35 @@ except ImportError:
     pass
 
 vlist = "xyz"
+def setup_sunyaev_zeldovich_fields(registry, ftype = "gas", slice_info = None):
+    def _t_squared(field, data):
+        return data["gas","density"]*data["gas","kT"]*data["gas","kT"]
+    registry.add_field(("gas", "t_squared"),
+                       function = _t_squared,
+                       units="g*keV**2/cm**3")
+    def _beta_perp_squared(field, data):
+        return data["gas","density"]*data["gas","velocity_magnitude"]**2/clight/clight - data["gas","beta_par_squared"]
+    registry.add_field(("gas","beta_perp_squared"), 
+                       function = _beta_perp_squared,
+                       units="g/cm**3")
 
-@derived_field(name=("gas","t_squared"), units="g*keV**2/cm**3")
-def _t_squared(field, data):
-    return data["gas","density"]*data["gas","kT"]*data["gas","kT"]
+    def _beta_par_squared(field, data):
+        return data["gas","beta_par"]**2/data["gas","density"]
+    registry.add_field(("gas","beta_par_squared"),
+                       function = _beta_par_squared,
+                       units="g/cm**3")
 
-@derived_field(name=("gas","beta_perp_squared"), units="g/cm**3")
-def _beta_perp_squared(field, data):
-    return data["gas","density"]*data["gas","velocity_magnitude"]**2/clight/clight - data["gas","beta_par_squared"]
+    def _t_beta_par(field, data):
+        return data["gas","kT"]*data["gas","beta_par"]
+    registry.add_field(("gas","t_beta_par"),
+                       function = _t_beta_par,
+                       units="keV*g/cm**3")
 
-@derived_field(name=("gas","beta_par_squared"), units="g/cm**3")
-def _beta_par_squared(field, data):
-    return data["gas","beta_par"]**2/data["gas","density"]
-
-@derived_field(name=("gas","t_beta_par"), units="keV*g/cm**3")
-def _t_beta_par(field, data):
-    return data["gas","kT"]*data["gas","beta_par"]
-
-@derived_field(name=("gas","t_sz"), units="keV*g/cm**3")
-def _t_sz(field, data):
-    return data["gas","density"]*data["gas","kT"]
+    def _t_sz(field, data):
+        return data["gas","density"]*data["gas","kT"]
+    registry.add_field(("gas","t_sz"),
+                       function = _t_sz,
+                       units="keV*g/cm**3")
 
 def generate_beta_par(L):
     def _beta_par(field, data):
@@ -90,6 +96,7 @@ class SZProjection(object):
     def __init__(self, pf, freqs, mue=1.143, high_order=False):
 
         self.pf = pf
+        pf.field_info.load_plugin(setup_sunyaev_zeldovich_fields)
         self.num_freqs = len(freqs)
         self.high_order = high_order
         self.freqs = pf.arr(freqs, "GHz")
@@ -125,7 +132,7 @@ class SZProjection(object):
         --------
         >>> szprj.on_axis("y", center="max", width=(1.0, "Mpc"), source=my_sphere)
         """
-        axis = fix_axis(axis)
+        axis = fix_axis(axis, self.pf)
 
         if center == "c":
             ctr = self.pf.domain_center
@@ -138,8 +145,8 @@ class SZProjection(object):
         L[axis] = 1.0
 
         beta_par = generate_beta_par(L)
-        self.pf.field_info.add_field(name=("gas","beta_par"), function=beta_par, units="g/cm**3")
-        proj = self.pf.proj("density", axis, center=ctr, data_source=source)
+        self.pf.field_info.add_field(("gas","beta_par"), function=beta_par, units="g/cm**3")
+        proj = self.pf.h.proj("density", axis, center=ctr, data_source=source)
         frb = proj.to_frb(width, nx)
         dens = frb["density"]
         Te = frb["t_sz"]/dens
@@ -164,6 +171,8 @@ class SZProjection(object):
                                 np.array(omega1), np.array(sigma1),
                                 np.array(kappa1), np.array(bperp2))
 
+        self.pf.field_info.pop(("gas","beta_par"))
+
     def off_axis(self, L, center="c", width=(1, "unitary"), nx=800, source=None):
         r""" Make an off-axis projection of the SZ signal.
 
@@ -187,7 +196,9 @@ class SZProjection(object):
         >>> szprj.off_axis(L, center="c", width=(2.0, "Mpc"))
         """
         if iterable(width):
-            w = width[0]/self.pf.units[width[1]]
+            w = self.pf.quan(width[0], width[1]).in_units("code_length").value
+        elif isinstance(width, YTQuantity):
+            w = width.in_units("code_length").value
         else:
             w = width
         if center == "c":
@@ -202,7 +213,7 @@ class SZProjection(object):
             raise NotImplementedError
 
         beta_par = generate_beta_par(L)
-        self.pf.field_info.add_field(name=("gas","beta_par"), function=beta_par, units="g/cm**3")
+        self.pf.field_info.add_field(("gas","beta_par"), function=beta_par, units="g/cm**3")
 
         dens    = off_axis_projection(self.pf, ctr, L, w, nx, "density")
         Te      = off_axis_projection(self.pf, ctr, L, w, nx, "t_sz")/dens
@@ -229,6 +240,8 @@ class SZProjection(object):
         self._compute_intensity(np.array(tau), np.array(Te), np.array(bpar),
                                 np.array(omega1), np.array(sigma1),
                                 np.array(kappa1), np.array(bperp2))
+
+        self.pf.field_info.pop(("gas","beta_par"))
 
     def _compute_intensity(self, tau, Te, bpar, omega1, sigma1, kappa1, bperp2):
 
@@ -308,7 +321,9 @@ class SZProjection(object):
             center = sky_center
             units = "deg"
             deltas *= sky_scale
-            
+            deltas[0] *= -1.
+
+        from yt.utilities.fits_image import FITSImageBuffer
         fib = FITSImageBuffer(self.data, fields=self.data.keys(),
                               center=center, units=units,
                               scale=deltas)

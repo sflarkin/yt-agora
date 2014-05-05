@@ -1,5 +1,5 @@
 """
-These are common particle deposition fields.
+These are common particle fields.
 
 
 
@@ -39,7 +39,10 @@ from yt.utilities.math_utils import \
     get_cyl_z, get_sph_r, \
     get_sph_theta, get_sph_phi, \
     periodic_dist, euclidean_dist
-     
+
+from .vector_operations import \
+     create_magnitude_field
+    
 def _field_concat(fname):
     def _AllFields(field, data):
         v = []
@@ -77,12 +80,12 @@ def particle_deposition_functions(ptype, coord_name, mass_name, registry):
     registry.add_field(("deposit", "%s_count" % ptype),
              function = particle_count,
              validators = [ValidateSpatial()],
-             display_name = "\\mathrm{%s Count}" % ptype,
-             projection_conversion = '1')
+             display_name = "\\mathrm{%s Count}" % ptype)
 
     def particle_mass(field, data):
         pos = data[ptype, coord_name]
-        d = data.deposit(pos, [data[ptype, mass_name]], method = "sum")
+        pmass = data[ptype, mass_name].in_units(field.units)
+        d = data.deposit(pos, [pmass], method = "sum")
         return data.apply_units(d, field.units)
 
     registry.add_field(("deposit", "%s_mass" % ptype),
@@ -130,12 +133,6 @@ def particle_deposition_functions(ptype, coord_name, mass_name, registry):
                        function = particle_ones,
                        particle_type = True,
                        units = "")
-
-    registry.alias((ptype, "ParticleMass"), (ptype, mass_name),
-                    units = "g")
-
-    registry.alias((ptype, "ParticleMassMsun"), (ptype, mass_name),
-                    units = "Msun")
 
     def particle_mesh_ids(field, data):
         pos = data[ptype, coord_name]
@@ -210,7 +207,7 @@ def standard_particle_fields(registry, ptype,
                      + (data[ptype, svel % 'y'] - bulk_velocity[1])**2
                      + (data[ptype, svel % 'z'] - bulk_velocity[2])**2 )
     
-        registry.add_field((ptype, "particle_velocity_magnitude"),
+    registry.add_field((ptype, "particle_velocity_magnitude"),
                   function=_particle_velocity_magnitude,
                   particle_type=True,
                   take_log=False,
@@ -293,6 +290,9 @@ def standard_particle_fields(registry, ptype,
               units="cm**2/s",
               validators=[ValidateParameter("center")])
 
+    create_magnitude_field(registry, "particle_specific_angular_momentum",
+                           "cm**2/s", ftype=ptype, particle_type=True)
+    
     def _particle_angular_momentum(field, data):
         return data[ptype, "particle_mass"] \
              * data[ptype, "particle_specific_angular_momentum"]
@@ -321,6 +321,9 @@ def standard_particle_fields(registry, ptype,
              units="g*cm**2/s", particle_type=True,
              validators=[ValidateParameter('center')])
 
+    create_magnitude_field(registry, "particle_angular_momentum",
+                           "g*cm**2/s", ftype=ptype, particle_type=True)
+    
     from .field_functions import \
         get_radius
 

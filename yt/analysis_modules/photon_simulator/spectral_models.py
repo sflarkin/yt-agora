@@ -16,14 +16,21 @@ import os
 from yt.funcs import *
 from yt import units
 import h5py
+
 try:
-    import astropy.io.fits as pyfits
+    import xspec
+except ImportError:
+    pass
+
+try:
     import xspec
     from scipy.integrate import cumtrapz
     from scipy import stats        
 except ImportError:
     pass
-    
+from yt.frontends.fits.data_structures import ap
+pyfits = ap.pyfits
+
 from yt.utilities.physical_constants import hcgs, clight, erg_per_keV, amu_cgs
 
 hc = (hcgs*clight).in_units("keV*angstrom")

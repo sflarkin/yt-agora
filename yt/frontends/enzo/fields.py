@@ -21,6 +21,7 @@ from yt.fields.field_info_container import \
 from yt.units.yt_array import \
     YTArray
 from yt.fields.species_fields import \
+    add_nuclei_density_fields, \
     add_species_field_by_density
 from yt.utilities.physical_constants import \
     mh, me, mp, \
@@ -30,22 +31,6 @@ b_units = "code_magnetic"
 ra_units = "code_length / code_time**2"
 rho_units = "code_mass / code_length**3"
 vel_units = "code_velocity"
-
-known_species_masses = dict(
-  (sp, mh * v) for sp, v in [
-                ("HI", 1.0),
-                ("HII", 1.0),
-                ("De", 1.0),
-                ("HeI", 4.0),
-                ("HeII", 4.0),
-                ("HeIII", 4.0),
-                ("H2I", 2.0),
-                ("H2II", 2.0),
-                ("HM", 1.0),
-                ("DI", 2.0),
-                ("DII", 2.0),
-                ("HDI", 3.0),
-    ])
 
 known_species_names = {
     'HI'      : 'H',
@@ -58,8 +43,8 @@ known_species_names = {
     'HM'      : 'H_m1',
     'DI'      : 'D',
     'DII'     : 'D_p1',
-    'HD'      : 'HD',
-    'Electron': 'De'
+    'HDI'     : 'HD',
+    'Electron': 'El'
 }
 
 class EnzoFieldInfo(FieldInfoContainer):
@@ -135,9 +120,10 @@ class EnzoFieldInfo(FieldInfoContainer):
                            take_log=True,
                            units="code_mass/code_length**3")
         yt_name = known_species_names[species]
-        self.alias(("gas", "%s_density" % yt_name),
-                   ("enzo", "%s_Density" % species))
-        add_species_field_by_density(self, "gas", yt_name)
+        # don't alias electron density since mass is wrong
+        if species != "Electron":
+            self.alias(("gas", "%s_density" % yt_name),
+                       ("enzo", "%s_Density" % species))
 
     def setup_species_fields(self):
         species_names = [fn.rsplit("_Density")[0] for ft, fn in 
@@ -146,12 +132,13 @@ class EnzoFieldInfo(FieldInfoContainer):
                          if sp in known_species_names]
         def _electron_density(field, data):
             return data["Electron_Density"] * (me/mp)
-        self.add_field(("gas", "De_density"),
+        self.add_field(("gas", "El_density"),
                        function = _electron_density,
                        units = "g/cm**3")
         for sp in species_names:
             self.add_species_field(sp)
-
+            self.species_names.append(known_species_names[sp])
+        add_nuclei_density_fields(self, "gas")
 
     def setup_fluid_fields(self):
         # Now we conditionally load a few other things.

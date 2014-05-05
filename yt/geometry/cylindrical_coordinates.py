@@ -18,8 +18,11 @@ import numpy as np
 from yt.units.yt_array import YTArray
 from .coordinate_handler import \
     CoordinateHandler, \
-    _unknown_coord
-
+    _unknown_coord, \
+    _get_coord_fields
+import yt.visualization._MPL as _MPL
+from yt.utilities.lib.misc_utilities import \
+    pixelize_cylinder
 #
 # Cylindrical fields
 #
@@ -36,54 +39,29 @@ class CylindricalCoordinateHandler(CoordinateHandler):
         registry.add_field(("index", "dy"), function=_unknown_coord)
         registry.add_field(("index", "x"), function=_unknown_coord)
         registry.add_field(("index", "y"), function=_unknown_coord)
+        f1, f2 = _get_coord_fields(0)
+        registry.add_field(("index", "dr"), function = f1,
+                           display_field = False,
+                           units = "code_length")
+        registry.add_field(("index", "r"), function = f2,
+                           display_field = False,
+                           units = "code_length")
 
-        def _dr(field, data):
-            return np.ones(data.ActiveDimensions, dtype='float64') * data.dds[0]
-        registry.add_field(("index", "dr"),
-                 function=_dr,
-                 display_field=False,
-                 validators=[ValidateSpatial(0)])
+        f1, f2 = _get_coord_fields(1)
+        registry.add_field(("index", "dz"), function = f1,
+                           display_field = False,
+                           units = "code_length")
+        registry.add_field(("index", "z"), function = f2,
+                           display_field = False,
+                           units = "code_length")
 
-        def _dz(field, data):
-            return np.ones(data.ActiveDimensions, dtype='float64') * data.dds[1]
-        registry.add_field(("index", "dz"),
-                 function=_dz,
-                 display_field=False,
-                 validators=[ValidateSpatial(0)])
-
-        def _dtheta(field, data):
-            return np.ones(data.ActiveDimensions, dtype='float64') * data.dds[2]
-        registry.add_field(("index", "dtheta"),
-                 function=_dtheta,
-                 display_field=False,
-                 validators=[ValidateSpatial(0)])
-
-        def _coordR(field, data):
-            dim = data.ActiveDimensions[0]
-            return (np.ones(data.ActiveDimensions, dtype='float64')
-                           * np.arange(data.ActiveDimensions[0])[:,None,None]
-                    +0.5) * data["index", "dr"] + data.LeftEdge[0]
-        registry.add_field(("index", "r"),
-                 function=_coordR, display_field=False,
-                 validators=[ValidateSpatial(0)])
-
-        def _coordZ(field, data):
-            dim = data.ActiveDimensions[1]
-            return (np.ones(data.ActiveDimensions, dtype='float64')
-                           * np.arange(data.ActiveDimensions[1])[None,:,None]
-                    +0.5) * data["index", "dz"] + data.LeftEdge[1]
-        registry.add_field(("index", "z"),
-                 function=_coordZ, display_field=False,
-                 validators=[ValidateSpatial(0)])
-
-        def _coordTheta(field, data):
-            dim = data.ActiveDimensions[2]
-            return (np.ones(data.ActiveDimensions, dtype='float64')
-                           * np.arange(data.ActiveDimensions[2])[None,None,:]
-                    +0.5) * data["index", "dtheta"] + data.LeftEdge[2]
-        registry.add_field(("index", "theta"),
-                 function=_coordTheta, display_field=False,
-                 validators=[ValidateSpatial(0)])
+        f1, f2 = _get_coord_fields(2, "")
+        registry.add_field(("index", "dtheta"), function = f1,
+                           display_field = False,
+                           units = "")
+        registry.add_field(("index", "theta"), function = f2,
+                           display_field = False,
+                           units = "")
 
         def _CylindricalVolume(field, data):
             return data["index", "dtheta"] \
@@ -91,14 +69,16 @@ class CylindricalCoordinateHandler(CoordinateHandler):
                  * data["index", "dr"] \
                  * data["index", "dz"]
         registry.add_field(("index", "cell_volume"),
-                 function=_CylindricalVolume)
+                 function=_CylindricalVolume,
+                 units = "code_length**3")
 
 
-    def pixelize(self, dimension, data_source, field, bounds, size, antialias = True):
+    def pixelize(self, dimension, data_source, field, bounds, size,
+                 antialias = True, periodic = True):
         ax_name = self.axis_name[dimension]
         if ax_name in ('r', 'theta'):
             return self._ortho_pixelize(data_source, field, bounds, size,
-                                        antialias)
+                                        antialias, dimension, periodic)
         elif ax_name == "z":
             return self._cyl_pixelize(data_source, field, bounds, size,
                                         antialias)
@@ -106,20 +86,26 @@ class CylindricalCoordinateHandler(CoordinateHandler):
             # Pixelizing along a cylindrical surface is a bit tricky
             raise NotImplementedError
 
-    def _ortho_pixelize(self, data_source, field, bounds, size, antialias):
+    def _ortho_pixelize(self, data_source, field, bounds, size, antialias,
+                        dim, periodic):
+        period = self.period[:2].copy() # dummy here
+        period[0] = self.period[self.x_axis[dim]]
+        period[1] = self.period[self.y_axis[dim]]
+        if hasattr(period, 'in_units'):
+            period = period.in_units("code_length").d
         buff = _MPL.Pixelize(data_source['px'], data_source['py'],
                              data_source['pdx'], data_source['pdy'],
                              data_source[field], size[0], size[1],
                              bounds, int(antialias),
-                             True, self.period).transpose()
+                             period, int(periodic)).transpose()
         return buff
 
     def _cyl_pixelize(self, data_source, field, bounds, size, antialias):
         buff = pixelize_cylinder(data_source['r'],
-                                 data_source['dr']/2.0,
+                                 data_source['dr'],
                                  data_source['theta'],
-                                 data_source['dtheta']/2.0,
-                                 size[0], data_source[field], bounds[0])
+                                 data_source['dtheta']/2.0, # half-widths
+                                 size, data_source[field], bounds)
         return buff
 
     axis_name = { 0  : 'r',  1  : 'z',  2  : 'theta',

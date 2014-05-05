@@ -7,18 +7,16 @@ import types
 from functools import wraps
 from matplotlib.font_manager import FontProperties
 
+from ._mpl_imports import FigureCanvasAgg
 from .tick_locators import LogLocator, LinearLocator
 from .color_maps import yt_colormaps, is_colormap
 from .plot_modifications import \
     callback_registry
-from .plot_window import \
-    CallbackWrapper
 from .base_plot_types import CallbackWrapper
 
 from yt.funcs import \
     defaultdict, get_image_suffix, \
-    get_ipython_api_version, ensure_list
-from yt.utilities.definitions import axis_names
+    get_ipython_api_version
 from yt.utilities.exceptions import \
     YTNotInsideNotebook
 from ._mpl_imports import FigureCanvasAgg
@@ -95,6 +93,10 @@ class PlotDictionary(dict):
         item = self.data_source._determine_fields(item)[0]
         return dict.__getitem__(self, item)
 
+    def __contains__(self, item):
+        item = self.data_source._determine_fields(item)[0]
+        return dict.__contains__(self, item)
+
     def __init__(self, data_source, *args):
         self.data_source = data_source
         return dict.__init__(self, args)
@@ -109,7 +111,7 @@ class ImagePlotContainer(object):
 
     def __init__(self, data_source, figure_size, fontsize):
         self.data_source = data_source
-        self.figure_size = figure_size
+        self.figure_size = float(figure_size)
         self.plots = PlotDictionary(data_source)
         self._callbacks = []
         self._field_transform = {}
@@ -248,11 +250,16 @@ class ImagePlotContainer(object):
         # Left blank to be overriden in subclasses
         pass
 
-    def _switch_pf(self, new_pf):
+    def _switch_pf(self, new_pf, data_source=None):
         ds = self.data_source
         name = ds._type_name
         kwargs = dict((n, getattr(ds, n)) for n in ds._con_args)
-        new_ds = getattr(new_pf.h, name)(**kwargs)
+        if data_source is not None:
+            if name != "proj":
+                raise RuntimeError("The data_source keyword argument "
+                                   "is only defined for projections.")
+            kwargs['data_source'] = data_source
+        new_ds = getattr(new_pf, name)(**kwargs)
         self.pf = new_pf
         self.data_source = new_ds
         self._data_valid = self._plot_valid = False
@@ -263,15 +270,15 @@ class ImagePlotContainer(object):
         return self.plots[item]
 
     def run_callbacks(self, f):
-        keys = self._frb.keys()
+        keys = self.frb.keys()
         for name, (args, kwargs) in self._callbacks:
-            cbw = CallbackWrapper(self, self.plots[f], self._frb, f)
+            cbw = CallbackWrapper(self, self.plots[f], self.frb, f)
             CallbackMaker = callback_registry[name]
             callback = CallbackMaker(*args[1:], **kwargs)
             callback(cbw)
-        for key in self._frb.keys():
+        for key in self.frb.keys():
             if key not in keys:
-                del self._frb[key]
+                del self.frb[key]
 
     @invalidate_plot
     @invalidate_figure
@@ -321,9 +328,27 @@ class ImagePlotContainer(object):
             font_dict = {}
         if 'color' in font_dict:
             self._font_color = font_dict.pop('color')
+        # Set default values if the user does not explicitly set them.
+        # this prevents reverting to the matplotlib defaults.
+        font_dict.setdefault('family', 'stixgeneral')
+        font_dict.setdefault('size', 18)
         self._font_properties = \
             FontProperties(**font_dict)
         return self
+
+    def set_font_size(self, size):
+        """Set the size of the font used in the plot
+
+        This sets the font size by calling the set_font function.  See set_font
+        for more font customization options.
+
+        Parameters
+        ----------
+        size : float
+        The absolute size of the font in points (1 pt = 1/72 inch).
+
+        """
+        return self.set_font({'size': size})
 
     @invalidate_plot
     def set_cmap(self, field, cmap):
@@ -367,7 +392,7 @@ class ImagePlotContainer(object):
             The size of the figure on the longest axis (in units of inches),
             including the margins but not the colorbar.
         """
-        self.figure_size = size
+        self.figure_size = float(size)
         return self
 
     def save(self, name=None, mpl_kwargs=None):
@@ -398,7 +423,8 @@ class ImagePlotContainer(object):
             for k, v in self.plots.iteritems():
                 names.append(v.save(name, mpl_kwargs))
             return names
-        axis = axis_names[self.data_source.axis]
+        axis = self.pf.coordinates.axis_name.get(
+            self.data_source.axis, '')
         weight = None
         type = self._plot_type
         if type in ['Projection', 'OffAxisProjection']:
