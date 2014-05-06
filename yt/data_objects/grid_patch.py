@@ -13,20 +13,17 @@ Python-based grid handler, not to be confused with the SWIG-handler
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
-import exceptions
 import pdb
 import weakref
 import itertools
 import numpy as np
 
 from yt.funcs import *
-from yt.utilities.definitions import x_dict, y_dict
 
 from yt.data_objects.data_containers import \
     YTFieldData, \
     YTDataContainer, \
     YTSelectionContainer
-from yt.utilities.definitions import x_dict, y_dict
 from yt.fields.field_exceptions import \
     NeedsGridType, \
     NeedsOriginalGrid, \
