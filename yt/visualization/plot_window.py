@@ -41,6 +41,8 @@ from yt.funcs import \
     mylog, iterable, ensure_list, \
     fix_axis, assert_valid_width_tuple
 from yt.units.unit_object import Unit
+from yt.units.unit_registry import \
+     UnitParseError
 from yt.utilities.png_writer import \
     write_png_to_string
 from yt.utilities.definitions import \
@@ -50,7 +52,8 @@ from yt.utilities.math_utils import \
 from yt.utilities.exceptions import \
     YTUnitNotRecognized, \
     YTInvalidWidthError, \
-    YTCannotParseUnitDisplayName
+    YTCannotParseUnitDisplayName, \
+    YTUnitConversionError
 
 from yt.data_objects.time_series import \
     DatasetSeries
@@ -144,7 +147,7 @@ def get_sanitized_width(axis, width, depth, pf):
 def get_sanitized_center(center, pf):
     if isinstance(center, basestring):
         if center.lower() == "m" or center.lower() == "max":
-            v, center = pf.h.find_max("density")
+            v, center = pf.h.find_max(("gas", "density"))
             center = pf.arr(center, 'code_length')
         elif center.lower() == "c" or center.lower() == "center":
             center = (pf.domain_left_edge + pf.domain_right_edge) / 2
@@ -217,6 +220,8 @@ def get_axes_unit(width, pf):
     r"""
     Infers the axes unit names from the input width specification
     """
+    if pf.no_cgs_equiv_length:
+        return ("code_length",)*2
     if iterable(width):
         if isinstance(width[1], basestring):
             axes_unit = (width[1], width[1])
