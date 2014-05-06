@@ -18,6 +18,7 @@ import string, re, gc, time, os, os.path, weakref
 import functools
 
 from yt.funcs import *
+from yt.extern.six import add_metaclass
 
 from yt.config import ytcfg
 from yt.utilities.cosmology import \
@@ -67,6 +68,12 @@ def _unsupported_object(pf, obj_name):
         raise YTObjectNotImplemented(pf, obj_name)
     return _raise_unsupp
 
+class RegisteredDataset(type):
+    def __init__(cls, name, b, d):
+        type.__init__(cls, name, b, d)
+        output_type_registry[name] = cls
+        mylog.debug("Registering: %s as %s", name, cls)
+
 class IndexProxy(object):
     # This is a simple proxy for Index objects.  It enables backwards
     # compatibility so that operations like .h.sphere, .h.print_stats and
@@ -99,6 +106,7 @@ def requires_index(attr_name):
 
     return ireq
 
+@add_metaclass(RegisteredDataset)
 class Dataset(object):
 
     default_fluid_type = "gas"
@@ -115,12 +123,6 @@ class Dataset(object):
     field_units = None
     derived_field_list = requires_index("derived_field_list")
     _instantiated = False
-
-    class __metaclass__(type):
-        def __init__(cls, name, b, d):
-            type.__init__(cls, name, b, d)
-            output_type_registry[name] = cls
-            mylog.debug("Registering: %s as %s", name, cls)
 
     def __new__(cls, filename=None, *args, **kwargs):
         from yt.frontends.stream.data_structures import StreamHandler
@@ -175,6 +177,7 @@ class Dataset(object):
         self._instantiated = time.time()
 
         self.min_level = 0
+        self.no_cgs_equiv_length = False
 
         self._create_unit_registry()
         self._parse_parameter_file()
@@ -220,7 +223,7 @@ class Dataset(object):
             self.current_time, self.unique_identifier)
         try:
             import hashlib
-            return hashlib.md5(s).hexdigest()
+            return hashlib.md5(s.encode('utf-8')).hexdigest()
         except ImportError:
             return s.replace(";", "*")
 
@@ -243,26 +246,13 @@ class Dataset(object):
         """ Returns units, parameters, or conversion_factors in that order. """
         return self.parameters[key]
 
-    def keys(self):
-        """
-        Returns a list of possible keys, from units, parameters and
-        conversion_factors.
-
-        """
-        return self.units.keys() \
-             + self.time_units.keys() \
-             + self.parameters.keys() \
-             + self.conversion_factors.keys()
-
     def __iter__(self):
-        for ll in [self.units, self.time_units,
-                   self.parameters, self.conversion_factors]:
-            for i in ll.keys(): yield i
+      for i in self.parameters: yield i
 
     def get_smallest_appropriate_unit(self, v):
         max_nu = 1e30
         good_u = None
-        for unit in ['mpc', 'kpc', 'pc', 'au', 'rsun', 'km', 'cm']:
+        for unit in ['Mpc', 'kpc', 'pc', 'au', 'rsun', 'km', 'cm']:
             vv = v * self.length_unit.in_units(unit)
             if vv < max_nu and vv > 1.0:
                 good_u = unit
@@ -574,6 +564,8 @@ class Dataset(object):
         self.unit_registry.add("code_magnetic", 1.0, dimensions.magnetic_field)
         self.unit_registry.add("code_temperature", 1.0, dimensions.temperature)
         self.unit_registry.add("code_velocity", 1.0, dimensions.velocity)
+        self.unit_registry.add("code_metallicity", 1.0,
+                               dimensions.dimensionless)
 
     def set_units(self):
         """
@@ -628,12 +620,10 @@ class Dataset(object):
                     self.length_unit / self.time_unit)
         self.unit_registry.modify("code_velocity", vel_unit)
         # domain_width does not yet exist
-        if self.domain_left_edge is None or self.domain_right_edge is None:
-            DW = np.zeros(3)
-        else:
+        if None not in (self.domain_left_edge, self.domain_right_edge):
             DW = self.arr(self.domain_right_edge - self.domain_left_edge, "code_length")
-        self.unit_registry.add("unitary", float(DW.max() * DW.units.cgs_value),
-                               DW.units.dimensions)
+            self.unit_registry.add("unitary", float(DW.max() * DW.units.cgs_value),
+                                   DW.units.dimensions)
 
     _arr = None
     @property
@@ -651,6 +641,15 @@ class Dataset(object):
         self._quan = functools.partial(YTQuantity,
                 registry = self.unit_registry)
         return self._quan
+
+    def add_field(self, name, function=None, **kwargs):
+        """
+        Dataset-specific call to add_field
+        """
+        self.index
+        self.field_info.add_field(name, function=function, **kwargs)
+        deps, _ = self.field_info.check_derived_fields([name])
+        self.field_dependencies.update(deps)
 
 def _reconstruct_pf(*args, **kwargs):
     pfs = ParameterFileStore()
