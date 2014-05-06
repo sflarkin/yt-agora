@@ -15,7 +15,6 @@ This is a library of yt-defined exceptions
 
 
 # We don't need to import 'exceptions'
-#import exceptions
 import os.path
 
 class YTException(Exception):
@@ -267,8 +266,8 @@ class YTTooManyVertices(YTException):
         return s
 
 class YTInvalidWidthError(YTException):
-    def __init__(self, error):
-        self.error = error
+    def __init__(self, width):
+        self.error = "width (%s) is invalid" % str(width)
 
     def __str__(self):
         return str(self.error)

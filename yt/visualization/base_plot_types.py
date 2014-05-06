@@ -13,11 +13,11 @@ This is a place for base classes of the various plot types.
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 import matplotlib
-import cStringIO
+from yt.extern.six.moves import StringIO
 from ._mpl_imports import \
     FigureCanvasAgg, FigureCanvasPdf, FigureCanvasPS
 from yt.funcs import \
-    get_image_suffix, mylog, x_dict, y_dict
+    get_image_suffix, mylog
 import numpy as np
 
 class CallbackWrapper(object):
@@ -30,8 +30,8 @@ class CallbackWrapper(object):
             self.image = self._axes.images[0]
         if frb.axis < 3:
             DD = frb.pf.domain_width
-            xax = x_dict[frb.axis]
-            yax = y_dict[frb.axis]
+            xax = frb.pf.coordinates.x_axis[frb.axis]
+            yax = frb.pf.coordinates.y_axis[frb.axis]
             self._period = (DD[xax], DD[yax])
         self.pf = frb.pf
         self.xlim = viewer.xlim
@@ -114,7 +114,7 @@ class ImagePlotMPL(PlotMPL):
 
     def _repr_png_(self):
         canvas = FigureCanvasAgg(self.figure)
-        f = cStringIO.StringIO()
+        f = StringIO()
         canvas.print_figure(f)
         f.seek(0)
         return f.read()
