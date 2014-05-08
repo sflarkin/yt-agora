@@ -16,7 +16,6 @@ Data containers based on geometric selection
 
 import types
 import numpy as np
-from exceptions import ValueError, SyntaxError
 
 from yt.funcs import *
 from yt.utilities.lib.alt_ray_tracers import cylindrical_ray_trace
@@ -675,8 +674,9 @@ class YTCutRegionBase(YTSelectionContainer3D):
                                            chunking_style,
                                            **kwargs):
             with self.base_object._chunked_read(chunk):
-                self.get_data(fields)
-                yield self
+                with self._chunked_read(chunk):
+                    self.get_data(fields)
+                    yield self
 
     def get_data(self, fields = None):
         fields = ensure_list(fields)
