@@ -471,31 +471,31 @@ class SDFIndex(object):
                            ileft[0]:iright[0]+1]
 
         mask = slice(0, -1, None)
-        X = X[mask, mask, mask].astype('int64').ravel()
-        Y = Y[mask, mask, mask].astype('int64').ravel()
-        Z = Z[mask, mask, mask].astype('int64').ravel()
+        X = X[mask, mask, mask].astype('int32').ravel()
+        Y = Y[mask, mask, mask].astype('int32').ravel()
+        Z = Z[mask, mask, mask].astype('int32').ravel()
 
         if wandering_particles:
             # Need to get padded bbox around the border to catch
             # wandering particles.
-            dmask = X == self.domain_buffer-1
-            dmask += Y == self.domain_buffer-1
-            dmask += Z == self.domain_buffer-1
-            dmask += X == self.domain_dims
-            dmask += Y == self.domain_dims
-            dmask += Z == self.domain_dims
+            dmask = X < self.domain_buffer
+            dmask += Y < self.domain_buffer
+            dmask += Z < self.domain_buffer
+            dmask += X >= self.domain_dims
+            dmask += Y >= self.domain_dims
+            dmask += Z >= self.domain_dims
             dinds = self.get_keyv([X[dmask], Y[dmask], Z[dmask]])
             dinds = dinds[dinds < self.indexdata['index'][-1]]
             dinds = dinds[self.indexdata['len'][dinds] > 0]
-            print 'Getting boundary layers for wanderers, cells: %i' % dinds.size
+            #print 'Getting boundary layers for wanderers, cells: %i' % dinds.size
 
         # Correct For periodicity
         X[X < self.domain_buffer] += self.domain_active_dims
-        X[X >= self.domain_dims -  self.domain_buffer] -= self.domain_active_dims
         Y[Y < self.domain_buffer] += self.domain_active_dims
-        Y[Y >= self.domain_dims -  self.domain_buffer] -= self.domain_active_dims
         Z[Z < self.domain_buffer] += self.domain_active_dims
-        Z[Z >= self.domain_dims -  self.domain_buffer] -= self.domain_active_dims
+        X[X >= self.domain_buffer + self.domain_active_dims] -= self.domain_active_dims
+        Y[Y >= self.domain_buffer + self.domain_active_dims] -= self.domain_active_dims
+        Z[Z >= self.domain_buffer + self.domain_active_dims] -= self.domain_active_dims
 
         #print 'periodic:',  X.min(), X.max(), Y.min(), Y.max(), Z.min(), Z.max()
 
@@ -600,23 +600,24 @@ class SDFIndex(object):
             i += 1
         mylog.debug('Read %i chunks, batched into %i reads' % (num_inds, num_reads))
 
-    def filter_bbox(self, left, right, iter):
+    def filter_bbox(self, left, right, myiter):
         """
         Filter data by masking out data outside of a bbox defined
         by left/right. Account for periodicity of data, allowing left/right
         to be outside of the domain.
         """
-        for data in iter:
+        for data in myiter:
             mask = np.zeros_like(data, dtype='bool')
-            pos = np.array([data['x'], data['y'], data['z']]).T
-            # Now make pos periodic
-            for i in range(3):
-                pos[i][pos[i] < left[i]] += self.true_domain_width[i]
-                pos[i][pos[i] >= right[i]] -= self.true_domain_width[i]
+            pos = np.array([data['x'].copy(), data['y'].copy(), data['z'].copy()]).T
 
-            # First mask out the particles outside the bbox
-            mask = np.all(pos >= left, axis=1) * \
-                np.all(pos < right, axis=1)
+
+            # This hurts, but is useful for periodicity. Probably should check first
+            # if it is even needed for a given left/right
+            for i in range(3):
+                pos[:,i] = np.mod(pos[:,i] - left[i], self.true_domain_width[i]) + left[i]
+
+            # Now get all particles that are within the bbox
+            mask = np.all(pos >= left, axis=1) * np.all(pos < right, axis=1)
 
             mylog.debug("Filtering particles, returning %i out of %i" % (mask.sum(), mask.shape[0]))
 
@@ -628,10 +629,10 @@ class SDFIndex(object):
                 if f in 'xyz': continue
                 filtered[f] = data[f][mask]
 
-            for i, ax in enumerate('xyz'):
-                print left, right
-                assert np.all(filtered[ax] >= left[i])
-                assert np.all(filtered[ax] < right[i])
+            #for i, ax in enumerate('xyz'):
+            #    print left, right
+            #    assert np.all(filtered[ax] >= left[i])
+            #    assert np.all(filtered[ax] < right[i])
 
             yield filtered
 
@@ -787,7 +788,7 @@ class SDFIndex(object):
             self.iter_bbox_data(pbox[:,0], pbox[:,1], fields)):
             data.append(dd)
 
-        # Front & Back 
+        # Front & Back
         pbox = bbox.copy()
         pbox[0, 0] -= pad[0]
         pbox[0, 1] += pad[0]
@@ -804,7 +805,7 @@ class SDFIndex(object):
             self.iter_bbox_data(pbox[:,0], pbox[:,1], fields)):
             data.append(dd)
 
-        # Left & Right 
+        # Left & Right
         pbox = bbox.copy()
         pbox[0, 0] -= pad[0]
         pbox[0, 1] = bbox[0, 0]
