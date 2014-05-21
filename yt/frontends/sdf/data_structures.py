@@ -29,17 +29,22 @@ from yt.geometry.particle_geometry_handler import \
     ParticleIndex
 from yt.data_objects.static_output import \
     Dataset, ParticleFile
-from yt.utilities.physical_constants import \
-    G, \
+from yt.utilities.physical_ratios import \
     cm_per_kpc, \
-    mass_sun_cgs
-from yt.utilities.cosmology import Cosmology
+    mass_sun_grams, \
+    sec_per_Gyr
 from .fields import \
     SDFFieldInfo
 from .io import \
     IOHandlerSDF, \
     SDFRead,\
     SDFIndex
+
+# currently specified by units_2HOT == 2 in header
+# in future will read directly from file
+units_2HOT_v2_length = 3.08567802e21
+units_2HOT_v2_mass = 1.98892e43
+units_2HOT_v2_time = 3.1558149984e16
 
 class SDFFile(ParticleFile):
     pass
@@ -74,6 +79,8 @@ class SDFDataset(Dataset):
         self.idx_filename = idx_filename
         self.idx_header = idx_header
         self.idx_level = idx_level
+        if self.idx_filename is not None:
+            dataset_type = 'sindex_sdf_particles'
         super(SDFDataset, self).__init__(filename, dataset_type)
 
     def _parse_parameter_file(self):
@@ -97,18 +104,23 @@ class SDFDataset(Dataset):
 
         nz = 1 << self.over_refine_factor
         self.domain_dimensions = np.ones(3, "int32") * nz
-        self.periodicity = (True, True, True)
+        if "do_periodic" in self.parameters and self.parameters["do_periodic"]:
+            self.periodicity = (True, True, True)
+        else:
+            self.periodicity = (False, False, False)
 
         self.cosmological_simulation = 1
 
         self.current_redshift = self.parameters.get("redshift", 0.0)
         self.omega_lambda = self.parameters["Omega0_lambda"]
         self.omega_matter = self.parameters["Omega0_m"]
+        if "Omega0_fld" in self.parameters:
+            self.omega_lambda += self.parameters["Omega0_fld"]
+        if "Omega0_r" in self.parameters:
+            # not correct, but most codes can't handle Omega0_r
+            self.omega_matter += self.parameters["Omega0_r"]
         self.hubble_constant = self.parameters["h_100"]
-        # Now we calculate our time based on the cosmology.
-        cosmo = Cosmology(self.hubble_constant,
-                          self.omega_matter, self.omega_lambda)
-        self.current_time = cosmo.hubble_time(self.current_redshift)
+        self.current_time = units_2HOT_v2_time * self.parameters["tpos"]
         mylog.info("Calculating time to be %0.3e seconds", self.current_time)
         self.filename_template = self.parameter_filename
         self.file_count = 1
@@ -135,4 +147,4 @@ class SDFDataset(Dataset):
         if not os.path.isfile(args[0]): return False
         with open(args[0], "r") as f:
             line = f.readline().strip()
-            return line == "# SDF 1.0"
+            return line[:5] == "# SDF"
