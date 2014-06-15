@@ -14,15 +14,11 @@ Fixed resolution buffer support, along with a primitive image analysis tool.
 #-----------------------------------------------------------------------------
 
 from yt.funcs import *
-from yt.utilities.definitions import \
-    x_dict, \
-    y_dict, \
-    axis_names
 from .volume_rendering.api import off_axis_projection
 from yt.data_objects.image_array import ImageArray
 from yt.utilities.lib.misc_utilities import \
     pixelize_cylinder
-import _MPL
+from . import _MPL
 import numpy as np
 import weakref
 import re
@@ -94,9 +90,9 @@ class FixedResolutionBuffer(object):
         self.axis = data_source.axis
         self.periodic = periodic
 
-        #h = getattr(data_source, "index", None)
-        #if h is not None:
-        #    h.plots.append(weakref.proxy(self))
+        ds = getattr(data_source, "pf", None)
+        if ds is not None:
+            ds.plots.append(weakref.proxy(self))
 
         # Handle periodicity, just in case
         if self.data_source.axis < 3:
@@ -104,8 +100,8 @@ class FixedResolutionBuffer(object):
             DRE = self.pf.domain_right_edge
             DD = float(self.periodic)*(DRE - DLE)
             axis = self.data_source.axis
-            xax = x_dict[axis]
-            yax = y_dict[axis]
+            xax = self.pf.coordinates.x_axis[axis]
+            yax = self.pf.coordinates.y_axis[axis]
             self._period = (DD[xax], DD[yax])
             self._edges = ( (DLE[xax], DRE[xax]), (DLE[yax], DRE[yax]) )
         
@@ -334,10 +330,10 @@ class FixedResolutionBuffer(object):
     @property
     def limits(self):
         rv = dict(x = None, y = None, z = None)
-        xax = x_dict[self.axis]
-        yax = y_dict[self.axis]
-        xn = axis_names[xax]
-        yn = axis_names[yax]
+        xax = self.pf.coordinates.x_axis[self.axis]
+        yax = self.pf.coordinates.y_axis[self.axis]
+        xn = self.pf.coordinates.axis_name[xax]
+        yn = self.pf.coordinates.axis_name[yax]
         rv[xn] = (self.bounds[0], self.bounds[1])
         rv[yn] = (self.bounds[2], self.bounds[3])
         return rv
@@ -353,9 +349,9 @@ class CylindricalFixedResolutionBuffer(FixedResolutionBuffer):
         self.antialias = antialias
         self.data = {}
         
-        h = getattr(data_source, "index", None)
-        if h is not None:
-            h.plots.append(weakref.proxy(self))
+        ds = getattr(data_source, "pf", None)
+        if ds is not None:
+            ds.plots.append(weakref.proxy(self))
 
     def __getitem__(self, item) :
         if item in self.data: return self.data[item]

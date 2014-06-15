@@ -28,7 +28,6 @@ from yt.funcs import *
 from yt.data_objects.particle_io import particle_handler_registry
 from yt.utilities.lib.marching_cubes import \
     march_cubes_grid, march_cubes_grid_flux
-from yt.utilities.definitions import  x_dict, y_dict
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelAnalysisInterface
 from yt.utilities.parameter_file_storage import \
@@ -41,6 +40,7 @@ from yt.fields.field_exceptions import \
 from yt.fields.derived_field import \
     ValidateSpatial
 import yt.geometry.selection_routines
+from yt.extern.six import add_metaclass
 
 def force_array(item, shape):
     try:
@@ -72,7 +72,13 @@ class YTFieldData(dict):
     """
     pass
 
+class RegisteredDataContainer(type):
+    def __init__(cls, name, b, d):
+        type.__init__(cls, name, b, d)
+        if hasattr(cls, "_type_name") and not cls._skip_add:
+            data_object_registry[cls._type_name] = cls
 
+@add_metaclass(RegisteredDataContainer)
 class YTDataContainer(object):
     """
     Generic YTDataContainer container.  By itself, will attempt to
@@ -86,12 +92,6 @@ class YTDataContainer(object):
     _container_fields = ()
     _field_cache = None
     _index = None
-
-    class __metaclass__(type):
-        def __init__(cls, name, b, d):
-            type.__init__(cls, name, b, d)
-            if hasattr(cls, "_type_name") and not cls._skip_add:
-                data_object_registry[cls._type_name] = cls
 
     def __init__(self, pf, field_parameters):
         """
@@ -137,17 +137,25 @@ class YTDataContainer(object):
             self.center = None
             self.set_field_parameter('center', self.center)
             return
+        elif isinstance(center, YTArray):
+            self.center = self.pf.arr(center.in_cgs())
+            self.center.convert_to_units('code_length')
         elif isinstance(center, (types.ListType, types.TupleType, np.ndarray)):
-            center = self.pf.arr(center, 'code_length')
-        elif center in ("c", "center"):
-            center = self.pf.domain_center
-        elif center == ("max"): # is this dangerous for race conditions?
-            center = self.pf.h.find_max("density")[1]
-        elif center.startswith("max_"):
-            center = self.pf.h.find_max(center[4:])[1]
+            if isinstance(center[0], YTQuantity):
+                self.center = self.pf.arr([c.in_cgs() for c in center])
+                self.center.convert_to_units('code_length')
+            else:
+                self.center = self.pf.arr(center, 'code_length')
+        elif isinstance(center, basestring):
+            if center.lower() in ("c", "center"):
+                self.center = self.pf.domain_center
+             # is this dangerous for race conditions?
+            elif center.lower() in ("max", "m"):
+                self.center = self.pf.h.find_max(("gas", "density"))[1]
+            elif center.startswith("max_"):
+                self.center = self.pf.h.find_max(center[4:])[1]
         else:
-            center = np.array(center, dtype='float64')
-        self.center = self.pf.arr(center, 'code_length')
+            self.center = self.pf.arr(center, 'code_length', dtype='float64')
         self.set_field_parameter('center', self.center)
 
     def get_field_parameter(self, name, default=None):
@@ -591,6 +599,10 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
             return
         elif self._locked == True:
             raise GenerationInProgress(fields)
+        # Track which ones we want in the end
+        ofields = set(self.field_data.keys()
+                    + fields_to_get
+                    + fields_to_generate)
         # At this point, we want to figure out *all* our dependencies.
         fields_to_get = self._identify_dependencies(fields_to_get,
             self._spatial)
@@ -619,6 +631,9 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
 
         fields_to_generate += gen_fluids + gen_particles
         self._generate_fields(fields_to_generate)
+        for field in self.field_data.keys():
+            if field not in ofields:
+                self.field_data.pop(field)
 
     def _generate_fields(self, fields_to_generate):
         index = 0
@@ -726,9 +741,10 @@ class YTSelectionContainer2D(YTSelectionContainer):
     _spatial = False
     def __init__(self, axis, pf, field_parameters):
         ParallelAnalysisInterface.__init__(self)
-        self.axis = fix_axis(axis)
         super(YTSelectionContainer2D, self).__init__(
             pf, field_parameters)
+        # We need the pf, which will exist by now, for fix_axis.
+        self.axis = fix_axis(axis, self.pf)
         self.set_field_parameter("axis", axis)
 
     def _convert_field_name(self, field):
@@ -736,7 +752,7 @@ class YTSelectionContainer2D(YTSelectionContainer):
 
     def _get_pw(self, fields, center, width, origin, plot_type):
         axis = self.axis
-        self.fields = [k for k in self.field_data.keys()
+        self.fields = [k for k in self.field_data
                        if k not in self._key_fields]
         from yt.visualization.plot_window import \
             get_window_parameters, PWViewerMPL
@@ -798,7 +814,10 @@ class YTSelectionContainer2D(YTSelectionContainer):
                     "Currently we only support images centered at R=0. " +
                     "We plan to generalize this in the near future")
             from yt.visualization.fixed_resolution import CylindricalFixedResolutionBuffer
-            if iterable(width): radius = max(width)
+            if iterable(width):
+                radius = max(width)
+            else:
+                radius = width
             if iterable(resolution): resolution = max(resolution)
             frb = CylindricalFixedResolutionBuffer(self, radius, resolution)
             return frb
@@ -812,17 +831,17 @@ class YTSelectionContainer2D(YTSelectionContainer):
             center = self.pf.arr(center, 'code_length')
         if iterable(width):
             w, u = width
-            width = self.pf.arr(w, input_units = u)
+            width = self.pf.quan(w, input_units = u)
         if height is None:
             height = width
         elif iterable(height):
             h, u = height
-            height = self.pf.arr(w, input_units = u)
+            height = self.pf.quan(w, input_units = u)
         if not iterable(resolution):
             resolution = (resolution, resolution)
         from yt.visualization.fixed_resolution import FixedResolutionBuffer
-        xax = x_dict[self.axis]
-        yax = y_dict[self.axis]
+        xax = self.pf.coordinates.x_axis[self.axis]
+        yax = self.pf.coordinates.y_axis[self.axis]
         bounds = (center[xax] - width*0.5, center[xax] + width*0.5,
                   center[yax] - height*0.5, center[yax] + height*0.5)
         frb = FixedResolutionBuffer(self, bounds, resolution,

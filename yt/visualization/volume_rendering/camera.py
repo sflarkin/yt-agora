@@ -13,7 +13,7 @@ Import the components of the volume rendering extension
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
-import __builtin__
+from yt.extern.six.moves import builtins
 import numpy as np
 
 from yt.funcs import *
@@ -620,13 +620,13 @@ class Camera(ParallelAnalysisInterface):
             label = '$\\rm{log}\\/ $' + label
         self.transfer_function.vert_cbar(ax=cb.ax, label=label)
 
-    def show_mpl(self, im, enhance=True):
+    def show_mpl(self, im, enhance=True, clear_fig=True):
         if self._pylab is None:
             import pylab
             self._pylab = pylab
         if self._render_figure is None:
             self._render_figure = self._pylab.figure(1)
-        self._render_figure.clf()
+        if clear_fig: self._render_figure.clf()
 
         if enhance:
             nz = im[im > 0.0]
@@ -642,9 +642,9 @@ class Camera(ParallelAnalysisInterface):
     def draw(self):
         self._pylab.draw()
     
-    def save_annotated(self, fn, image, enhance=True, dpi=100):
+    def save_annotated(self, fn, image, enhance=True, dpi=100, clear_fig=True):
         image = image.swapaxes(0,1) 
-        ax = self.show_mpl(image, enhance=enhance)
+        ax = self.show_mpl(image, enhance=enhance, clear_fig=clear_fig)
         self.annotate(ax.axes, enhance)
         self._pylab.savefig(fn, bbox_inches='tight', facecolor='black', dpi=dpi)
         
@@ -738,7 +738,7 @@ class Camera(ParallelAnalysisInterface):
         >>> cam.show()
 
         """
-        if "__IPYTHON__" in dir(__builtin__):
+        if "__IPYTHON__" in dir(builtins):
             from IPython.core.displaypub import publish_display_data
             image = self.snapshot()[:,:,:3]
             if clip_ratio is not None: clip_ratio *= image.std()

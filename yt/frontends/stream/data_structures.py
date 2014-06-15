@@ -614,10 +614,11 @@ Parameters
         new_data = {}
         for key in data.keys():
             psize = get_psize(np.array(data[key].shape), nprocs)
-            grid_left_edges, grid_right_edges, temp[key] = \
-                             decompose_array(data[key], psize, bbox)
-            grid_dimensions = np.array([grid.shape for grid in temp[key]],
+            grid_left_edges, grid_right_edges, shapes, slices = \
+                             decompose_array(data[key].shape, psize, bbox)
+            grid_dimensions = np.array([shape for shape in shapes],
                                        dtype="int32")
+            temp[key] = [data[key][slice] for slice in slices]
         for gid in range(nprocs):
             new_data[gid] = {}
             for key in temp.keys():
@@ -984,8 +985,12 @@ def load_particles(data, length_unit = None, bbox=None,
         This is a dict of numpy arrays, where the keys are the field names.
         Particles positions must be named "particle_position_x",
         "particle_position_y", "particle_position_z".
-    sim_unit_to_cm : float
-        Conversion factor from simulation units to centimeters
+    length_unit : float
+        Conversion factor from simulation length units to centimeters
+    mass_unit : float
+        Conversion factor from simulation mass units to grams
+    time_unit : float
+        Conversion factor from simulation time units to seconds
     bbox : array_like (xdim:zdim, LE:RE), optional
         Size of computational domain in units sim_unit_to_cm
     sim_time : float, optional

@@ -33,8 +33,10 @@ from yt.units.unit_registry import UnitRegistry
 from yt.units.dimensions import dimensionless
 from yt.utilities.exceptions import \
     YTUnitOperationError, YTUnitConversionError, \
-    YTUfuncUnitError
+    YTUfuncUnitError, YTIterableUnitCoercionError
 from numbers import Number as numeric_type
+from yt.utilities.on_demand_imports import _astropy
+from sympy import Rational
 
 # redefine this here to avoid a circular import from yt.funcs
 def iterable(obj):
@@ -72,7 +74,8 @@ def return_arr(func):
         if ret.shape == ():
             return YTQuantity(ret, units)
         else:
-            return YTArray(ret, units)
+            # This could be a subclass, so don't call YTArray directly.
+            return type(args[0])(ret, units)
     return wrapped
 
 def sqrt_unit(unit):
@@ -115,31 +118,47 @@ def arctan2_unit(unit1, unit2):
 def comparison_unit(unit1, unit2):
     return None
 
+NULL_UNIT = Unit()
+
+def coerce_iterable_units(input_object):
+    if isinstance(input_object, np.ndarray):
+        return input_object
+    if iterable(input_object):
+        if any([isinstance(o, YTArray) for o in input_object]):
+            ff = getattr(input_object[0], 'units', NULL_UNIT, )
+            if any([ff != getattr(_, 'units', NULL_UNIT) for _ in input_object]):
+                raise YTIterableUnitCoercionError(input_object)
+            # This will create a copy of the data in the iterable.
+            return YTArray(input_object)
+        return input_object
+    else:
+        return input_object
+
 def sanitize_units_mul(this_object, other_object):
-    ret = other_object
+    inp = coerce_iterable_units(this_object)
+    ret = coerce_iterable_units(other_object)
     # If the other object is a YTArray and has the same dimensions as the object
     # under consideration, convert so we don't mix units with the same
     # dimensions.
-    if isinstance(other_object, YTArray):
-        if this_object.units.same_dimensions_as(other_object.units):
-            ret = other_object.in_units(this_object.units)
+    if isinstance(ret, YTArray):
+        if inp.units.same_dimensions_as(ret.units):
+            ret.in_units(inp.units)
     return ret
 
 def sanitize_units_add(this_object, other_object, op_string):
+    inp = coerce_iterable_units(this_object)
+    ret = coerce_iterable_units(other_object)
     # Make sure the other object is a YTArray before we use the `units`
     # attribute.
-    if isinstance(other_object, YTArray):
-        if not this_object.units.same_dimensions_as(other_object.units):
-            raise YTUnitOperationError(op_string, this_object.units,
-                                       other_object.units)
-        ret = other_object.in_units(this_object.units)
+    if isinstance(ret, YTArray):
+        if not inp.units.same_dimensions_as(ret.units):
+            raise YTUnitOperationError(op_string, inp.units, ret.units)
+        ret = ret.in_units(inp.units)
     # If the other object is not a YTArray, the only valid case is adding
     # dimensionless things.
     else:
-        if not this_object.units.is_dimensionless:
-            raise YTUnitOperationError(op_string, this_object.units,
-                                       dimensionless)
-        ret = other_object
+        if not inp.units.is_dimensionless:
+            raise YTUnitOperationError(op_string, inp.units, dimensionless)
     return ret
 
 unary_operators = (
@@ -237,7 +256,9 @@ class YTArray(np.ndarray):
 
     __array_priority__ = 2.0
 
-    def __new__(cls, input_array, input_units=None, registry=None, dtype=np.float64):
+    def __new__(cls, input_array, input_units=None, registry=None, dtype=None):
+        if dtype is None:
+            dtype = getattr(input_array, 'dtype', np.float64)
         if input_array is NotImplemented:
             return input_array
         if registry is None and isinstance(input_units, basestring):
@@ -247,6 +268,9 @@ class YTArray(np.ndarray):
                     "Perhaps you meant to do something like this instead: \n"
                     "ds.arr(%s, \"%s\")" % (input_array, input_units)
                     )
+        if _astropy._units is not None:
+            if isinstance(input_array, _astropy.units.quantity.Quantity):
+                return cls.from_astropy(input_array)
         if isinstance(input_array, YTArray):
             if input_units is None:
                 if registry is None:
@@ -260,8 +284,8 @@ class YTArray(np.ndarray):
             return input_array
         elif isinstance(input_array, np.ndarray):
             pass
-        elif iterable(input_array):
-            if isinstance(input_array[0], YTQuantity):
+        elif iterable(input_array) and input_array:
+            if isinstance(input_array[0], YTArray):
                 return YTArray(np.array(input_array, dtype=dtype),
                                input_array[0].units)
 
@@ -421,9 +445,127 @@ class YTArray(np.ndarray):
 
         """
         return np.array(self)
+
+    @classmethod
+    def from_astropy(cls, arr):
+        """
+        Creates a new YTArray with the same unit information from an
+        AstroPy quantity *arr*.
+        """
+        # Converting from AstroPy Quantity
+        u = arr.unit
+        ap_units = []
+        for base, power in zip(u.bases, u.powers):
+            unit_str = base.to_string()
+            # we have to do this because AstroPy is silly and defines
+            # hour as "h"
+            if unit_str == "h": unit_str = "hr"
+            ap_units.append("%s**(%s)" % (unit_str, Rational(power)))
+        ap_units = "*".join(ap_units)
+        if isinstance(arr.value, np.ndarray):
+            return YTArray(arr.value, ap_units)
+        else:
+            return YTQuantity(arr.value, ap_units)
+
+
+    def to_astropy(self, **kwargs):
+        """
+        Creates a new AstroPy quantity with the same unit information.
+        """
+        if _astropy.units is None:
+            raise ImportError("You don't have AstroPy installed, so you can't convert to " +
+                              "an AstroPy quantity.")
+        return self.value*_astropy.units.Unit(str(self.units), **kwargs)
+
     #
     # End unit conversion methods
     #
+
+    def write_hdf5(self, filename, dataset_name=None, info=None):
+        r"""Writes ImageArray to hdf5 file.
+
+        Parameters
+        ----------
+        filename: string
+            The filename to create and write a dataset to
+
+        dataset_name: string
+            The name of the dataset to create in the file.
+
+        info: dictionary
+            A dictionary of supplementary info to write to append as attributes
+            to the dataset.
+
+        Examples
+        --------
+        >>> a = YTArray([1,2,3], 'cm')
+
+        >>> myinfo = {'field':'dinosaurs', 'type':'field_data'}
+
+        >>> a.write_hdf5('test_array_data.h5', dataset_name='dinosaurs',
+        ...              info=myinfo)
+
+        """
+        import h5py
+        from yt.extern.six.moves import cPickle as pickle
+        if info is None:
+            info = {}
+
+        info['units'] = str(self.units)
+        info['unit_registry'] = pickle.dumps(self.units.registry.lut)
+
+        if dataset_name is None:
+            dataset_name = 'array_data'
+
+        f = h5py.File(filename)
+        if dataset_name in f.keys():
+            d = f[dataset_name]
+            # Overwrite without deleting if we can get away with it.
+            if d.shape == self.shape and d.dtype == self.dtype:
+                d[:] = self
+                for k in d.attrs.keys():
+                    del d.attrs[k]
+            else:
+                del f[dataset_name]
+                d = f.create_dataset(dataset_name, data=self)
+        else:
+            d = f.create_dataset(dataset_name, data=self)
+
+        for k, v in info.iteritems():
+            d.attrs.create(k, v)
+        f.close()
+
+    @classmethod
+    def from_hdf5(cls, filename, dataset_name=None):
+        r"""Attempts read in and convert a dataset in an hdf5 file into a YTArray.
+
+        Parameters
+        ----------
+        filename: string
+        The filename to of the hdf5 file.
+
+        dataset_name: string
+            The name of the dataset to read from.  If the dataset has a units
+            attribute, attempt to infer units as well.
+
+        """
+        import h5py
+        from yt.extern.six.moves import cPickle as pickle
+
+        if dataset_name is None:
+            dataset_name = 'array_data'
+
+        f = h5py.File(filename)
+        dataset = f[dataset_name]
+        data = dataset[:]
+        units = dataset.attrs.get('units', '')
+        if 'unit_registry' in dataset.attrs.keys():
+            unit_lut = pickle.loads(dataset.attrs['unit_registry'])
+        else:
+            unit_lut = None
+
+        registry = UnitRegistry(lut=unit_lut, add_default_symbols=False)
+        return cls(data, units, registry=registry)
 
     #
     # Start convenience methods
@@ -727,7 +869,7 @@ class YTArray(np.ndarray):
 
     @return_arr
     def prod(self, axis=None, dtype=None, out=None):
-        if axis:
+        if axis is not None:
             units = self.units**self.shape[axis]
         else:
             units = self.units**self.size
@@ -775,15 +917,21 @@ class YTArray(np.ndarray):
             # Raise YTUnitOperationError up here since we know the context now
             except RuntimeError:
                 raise YTUnitOperationError(context[0], u)
+            ret_class = type(self)
         elif context[0] in binary_operators:
-            unit1 = getattr(context[1][0], 'units', None)
-            unit2 = getattr(context[1][1], 'units', None)
+            oper1 = coerce_iterable_units(context[1][0])
+            oper2 = coerce_iterable_units(context[1][1])
+            cls1 = type(oper1)
+            cls2 = type(oper2)
+            unit1 = getattr(oper1, 'units', None)
+            unit2 = getattr(oper2, 'units', None)
+            ret_class = get_binary_op_return_class(cls1, cls2)
             if unit1 is None:
                 unit1 = Unit(registry=getattr(unit2, 'registry', None))
             if unit2 is None and context[0] is not power:
                 unit2 = Unit(registry=getattr(unit1, 'registry', None))
             elif context[0] is power:
-                unit2 = context[1][1]
+                unit2 = oper2
                 if isinstance(unit2, np.ndarray):
                     if isinstance(unit2, YTArray):
                         if unit2.units.is_dimensionless:
@@ -807,13 +955,18 @@ class YTArray(np.ndarray):
         else:
             raise RuntimeError("Operation is not defined.")
         if unit is None:
-            out_arr = np.array(out_arr)
+            out_arr = np.array(out_arr, copy=False)
             return out_arr
         out_arr.units = unit
-        if out_arr.size > 1:
-            return YTArray(np.array(out_arr), unit)
-        else:
+        if out_arr.size == 1:
             return YTQuantity(np.array(out_arr), unit)
+        else:
+            if ret_class is YTQuantity:
+                # This happens if you do ndarray * YTQuantity. Explicitly
+                # casting to YTArray avoids creating a YTQuantity with size > 1
+                return YTArray(np.array(out_arr, unit))
+            return ret_class(np.array(out_arr, copy=False), unit)
+
 
     def __reduce__(self):
         """Pickle reduction method
@@ -882,7 +1035,30 @@ def array_like_field(data, x, field):
         units = data.pf._get_field_info(field[0],field[1]).units
     else:
         units = data.pf._get_field_info(field).units
+    if isinstance(x, YTArray):
+        arr = copy.deepcopy(x)
+        arr.convert_to_units(units)
+        return arr
     if isinstance(x, np.ndarray):
         return data.pf.arr(x, units)
     else:
         return data.pf.quan(x, units)
+
+def get_binary_op_return_class(cls1, cls2):
+    if cls1 is cls2:
+        return cls1
+    if cls1 is np.ndarray or issubclass(cls1, (numeric_type, np.number, list, tuple)):
+        return cls2
+    if cls2 is np.ndarray or issubclass(cls2, (numeric_type, np.number, list, tuple)):
+        return cls1
+    if issubclass(cls1, YTQuantity):
+        return cls2
+    if issubclass(cls2, YTQuantity):
+        return cls1
+    if issubclass(cls1, cls2):
+        return cls1
+    if issubclass(cls2, cls1):
+        return cls2
+    else:
+        raise RuntimeError("Undefined operation for a YTArray subclass. "
+                           "Received operand types (%s) and (%s)" % (cls1, cls2))

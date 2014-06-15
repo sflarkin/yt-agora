@@ -261,6 +261,8 @@ class Unit(Expr):
                     dimensions=(self.dimensions / u.dimensions),
                     registry=self.registry)
 
+    __truediv__ = __div__
+
     def __pow__(self, p):
         """ Take Unit to power p (float). """
         try:
@@ -358,7 +360,8 @@ class Unit(Expr):
         for ex in self.expr.free_symbols:
             symbol_table[ex] = latex_symbol_lut[str(ex)]
         return latex(self.expr, symbol_names=symbol_table,
-                     fold_frac_powers=True, fold_short_frac=True)
+                     mul_symbol="dot", fold_frac_powers=True,
+                     fold_short_frac=True)
 #
 # Unit manipulation functions
 #
@@ -497,7 +500,7 @@ def _lookup_unit_symbol(symbol_str, unit_symbol_lut):
 
             if symbol_str not in latex_symbol_lut:
                 latex_symbol_lut[symbol_str] = \
-                    string.replace(latex_symbol_lut[symbol_wo_prefix],
+                    latex_symbol_lut[symbol_wo_prefix].replace(
                                    '{'+symbol_wo_prefix+'}', '{'+symbol_str+'}')
 
             # don't forget to account for the prefix value!
