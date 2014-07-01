@@ -31,7 +31,7 @@ from nose.plugins import Plugin
 from yt.testing import *
 from yt.convenience import load, simulation
 from yt.config import ytcfg
-from yt.data_objects.static_output import StaticOutput
+from yt.data_objects.static_output import Dataset
 from yt.utilities.logger import disable_stream_logging
 from yt.utilities.command_line import get_yt_version
 
@@ -45,7 +45,7 @@ run_big_data = False
 # Set the latest gold and local standard filenames
 _latest = ytcfg.get("yt", "gold_standard_filename")
 _latest_local = ytcfg.get("yt", "local_standard_filename")
-_url_path = "http://yt-answer-tests.s3-website-us-east-1.amazonaws.com/%s_%s"
+_url_path = ytcfg.get("yt", "answer_tests_url")
 
 class AnswerTesting(Plugin):
     name = "answer-testing"
@@ -197,30 +197,20 @@ class AnswerTestCloudStorage(AnswerTestStorage):
         if self.answer_name is None: return
         # This is where we dump our result storage up to Amazon, if we are able
         # to.
-        import boto
-        from boto.s3.key import Key
-        c = boto.connect_s3()
-        bucket = c.get_bucket("yt-answer-tests")
-        for pf_name in result_storage:
+        import pyrax
+        pyrax.set_credential_file(os.path.expanduser("~/.yt/rackspace"))
+        cf = pyrax.cloudfiles
+        c = cf.get_container("yt-answer-tests")
+        pb = get_pbar("Storing results ", len(result_storage))
+        for i, pf_name in enumerate(result_storage):
+            pb.update(i)
             rs = cPickle.dumps(result_storage[pf_name])
-            tk = bucket.get_key("%s_%s" % (self.answer_name, pf_name))
-            if tk is not None: tk.delete()
-            k = Key(bucket)
-            k.key = "%s_%s" % (self.answer_name, pf_name)
-
-            pb_widgets = [
-                unicode(k.key, errors='ignore').encode('utf-8'), ' ',
-                progressbar.FileTransferSpeed(),' <<<', progressbar.Bar(),
-                '>>> ', progressbar.Percentage(), ' ', progressbar.ETA()
-                ]
-            self.pbar = progressbar.ProgressBar(widgets=pb_widgets,
-                                                maxval=sys.getsizeof(rs))
-
-            self.pbar.start()
-            k.set_contents_from_string(rs, cb=self.progress_callback,
-                                       num_cb=100000)
-            k.set_acl("public-read")
-            self.pbar.finish()
+            object_name = "%s_%s" % (self.answer_name, pf_name)
+            if object_name in c.get_object_names():
+                obj = c.get_object(object_name)
+                c.delete_object(obj)
+            c.store_object(object_name, rs)
+        pb.finish()
 
 class AnswerTestLocalStorage(AnswerTestStorage):
     def dump(self, result_storage):
@@ -254,7 +244,7 @@ def temp_cwd(cwd):
     os.chdir(oldcwd)
 
 def can_run_pf(pf_fn, file_check = False):
-    if isinstance(pf_fn, StaticOutput):
+    if isinstance(pf_fn, Dataset):
         return AnswerTestingTest.result_storage is not None
     path = ytcfg.get("yt", "test_data_dir")
     if not os.path.isdir(path):
@@ -271,7 +261,7 @@ def can_run_pf(pf_fn, file_check = False):
 
 def data_dir_load(pf_fn, cls = None, args = None, kwargs = None):
     path = ytcfg.get("yt", "test_data_dir")
-    if isinstance(pf_fn, StaticOutput): return pf_fn
+    if isinstance(pf_fn, Dataset): return pf_fn
     if not os.path.isdir(path):
         return False
     with temp_cwd(path):
@@ -345,7 +335,7 @@ class AnswerTestingTest(object):
         This is a helper function to return the location of the most dense
         point.
         """
-        return self.pf.h.find_max("Density")[1]
+        return self.pf.h.find_max("density")[1]
 
     @property
     def entire_simulation(self):
@@ -378,9 +368,9 @@ class FieldValuesTest(AnswerTestingTest):
 
     def run(self):
         obj = create_obj(self.pf, self.obj_type)
-        avg = obj.quantities["WeightedAverageQuantity"](self.field,
-                             weight="Ones")
-        (mi, ma), = obj.quantities["Extrema"](self.field)
+        avg = obj.quantities.weighted_average_quantity(
+            self.field, weight="ones")
+        mi, ma = obj.quantities.extrema(self.field)
         return np.array([avg, mi, ma])
 
     def compare(self, new_result, old_result):
@@ -435,7 +425,7 @@ class ProjectionValuesTest(AnswerTestingTest):
         else:
             obj = None
         if self.pf.domain_dimensions[self.axis] == 1: return None
-        proj = self.pf.h.proj(self.field, self.axis,
+        proj = self.pf.proj(self.field, self.axis,
                               weight_field=self.weight_field,
                               data_source = obj)
         return proj.field_data
@@ -484,7 +474,7 @@ class PixelizedProjectionValuesTest(AnswerTestingTest):
             obj = create_obj(self.pf, self.obj_type)
         else:
             obj = None
-        proj = self.pf.h.proj(self.field, self.axis, 
+        proj = self.pf.proj(self.field, self.axis,
                               weight_field=self.weight_field,
                               data_source = obj)
         frb = proj.to_frb((1.0, 'unitary'), 256)
@@ -513,7 +503,7 @@ class GridValuesTest(AnswerTestingTest):
 
     def run(self):
         hashes = {}
-        for g in self.pf.h.grids:
+        for g in self.pf.index.grids:
             hashes[g.id] = hashlib.md5(g[self.field].tostring()).hexdigest()
             g.clear_data()
         return hashes
@@ -551,11 +541,11 @@ class GridHierarchyTest(AnswerTestingTest):
 
     def run(self):
         result = {}
-        result["grid_dimensions"] = self.pf.h.grid_dimensions
-        result["grid_left_edges"] = self.pf.h.grid_left_edge
-        result["grid_right_edges"] = self.pf.h.grid_right_edge
-        result["grid_levels"] = self.pf.h.grid_levels
-        result["grid_particle_count"] = self.pf.h.grid_particle_count
+        result["grid_dimensions"] = self.pf.index.grid_dimensions
+        result["grid_left_edges"] = self.pf.index.grid_left_edge
+        result["grid_right_edges"] = self.pf.index.grid_right_edge
+        result["grid_levels"] = self.pf.index.grid_levels
+        result["grid_particle_count"] = self.pf.index.grid_particle_count
         return result
 
     def compare(self, new_result, old_result):
@@ -569,7 +559,7 @@ class ParentageRelationshipsTest(AnswerTestingTest):
         result = {}
         result["parents"] = []
         result["children"] = []
-        for g in self.pf.h.grids:
+        for g in self.pf.index.grids:
             p = g.Parent
             if p is None:
                 result["parents"].append(None)
@@ -701,32 +691,32 @@ def requires_pf(pf_fn, big_data = False, file_check = False):
     else:
         return ftrue
 
-def small_patch_amr(pf_fn, fields):
+def small_patch_amr(pf_fn, fields, input_center="max", input_weight="density"):
     if not can_run_pf(pf_fn): return
-    dso = [ None, ("sphere", ("max", (0.1, 'unitary')))]
+    dso = [ None, ("sphere", (input_center, (0.1, 'unitary')))]
     yield GridHierarchyTest(pf_fn)
     yield ParentageRelationshipsTest(pf_fn)
     for field in fields:
         yield GridValuesTest(pf_fn, field)
         for axis in [0, 1, 2]:
             for ds in dso:
-                for weight_field in [None, "Density"]:
+                for weight_field in [None, input_weight]:
                     yield ProjectionValuesTest(
                         pf_fn, axis, field, weight_field,
                         ds)
                 yield FieldValuesTest(
                         pf_fn, field, ds)
 
-def big_patch_amr(pf_fn, fields):
+def big_patch_amr(pf_fn, fields, input_center="max", input_weight="density"):
     if not can_run_pf(pf_fn): return
-    dso = [ None, ("sphere", ("max", (0.1, 'unitary')))]
+    dso = [ None, ("sphere", (input_center, (0.1, 'unitary')))]
     yield GridHierarchyTest(pf_fn)
     yield ParentageRelationshipsTest(pf_fn)
     for field in fields:
         yield GridValuesTest(pf_fn, field)
         for axis in [0, 1, 2]:
             for ds in dso:
-                for weight_field in [None, "Density"]:
+                for weight_field in [None, input_weight]:
                     yield PixelizedProjectionValuesTest(
                         pf_fn, axis, field, weight_field,
                         ds)

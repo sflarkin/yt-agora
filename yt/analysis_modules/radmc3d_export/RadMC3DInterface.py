@@ -69,7 +69,7 @@ class RadMC3DWriter:
     Parameters
     ----------
 
-    pf : `StaticOutput`
+    pf : `Dataset`
         This is the parameter file object corresponding to the
         simulation output to be written out.
 
@@ -124,7 +124,7 @@ class RadMC3DWriter:
     
     >>> writer.write_amr_grid()
     >>> writer.write_line_file("NumberDensityCO", "numberdens_co.inp")
-    >>> velocity_fields = ["x-velocity", "y-velocity", "z-velocity"]
+    >>> velocity_fields = ["velocity_x", "velocity_y", "velocity_z"]
     >>> writer.write_line_file(velocity_fields, "gas_velocity.inp") 
 
     '''
@@ -147,7 +147,7 @@ class RadMC3DWriter:
         self.layers.append(base_layer)
         self.cell_count += np.product(pf.domain_dimensions)
 
-        sorted_grids = sorted(pf.h.grids, key=lambda x: x.Level)
+        sorted_grids = sorted(pf.index.grids, key=lambda x: x.Level)
         for grid in sorted_grids:
             if grid.Level <= self.max_level:
                 self._add_grid_to_layers(grid)
@@ -182,10 +182,14 @@ class RadMC3DWriter:
         LE   = self.domain_left_edge
         RE   = self.domain_right_edge
 
+        # Radmc3D wants the cell wall positions in cgs. Convert here:
+        LE_cgs = LE * self.pf.units['cm']
+        RE_cgs = RE * self.pf.units['cm']
+
         # calculate cell wall positions
-        xs = [str(x) for x in np.linspace(LE[0], RE[0], dims[0]+1)]
-        ys = [str(y) for y in np.linspace(LE[1], RE[1], dims[1]+1)]
-        zs = [str(z) for z in np.linspace(LE[2], RE[2], dims[2]+1)]
+        xs = [str(x) for x in np.linspace(LE_cgs[0], RE_cgs[0], dims[0]+1)]
+        ys = [str(y) for y in np.linspace(LE_cgs[1], RE_cgs[1], dims[1]+1)]
+        zs = [str(z) for z in np.linspace(LE_cgs[2], RE_cgs[2], dims[2]+1)]
 
         # writer file header
         grid_file = open(self.grid_filename, 'w')
@@ -238,7 +242,7 @@ class RadMC3DWriter:
         grid_file.close()
 
     def _write_layer_data_to_file(self, fhandle, field, level, LE, dim):
-        cg = self.pf.h.covering_grid(level, LE, dim, num_ghost_zones=1)
+        cg = self.pf.covering_grid(level, LE, dim, num_ghost_zones=1)
         if isinstance(field, list):
             data_x = cg[field[0]]
             data_y = cg[field[1]]

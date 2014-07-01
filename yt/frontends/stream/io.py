@@ -15,22 +15,23 @@ Enzo-specific IO functions
 
 from collections import defaultdict
 
-import exceptions
 import os
 import numpy as np
 
 from yt.utilities.io_handler import \
     BaseIOHandler, _axis_ids
 from yt.utilities.logger import ytLogger as mylog
+from yt.units.yt_array import YTArray
 from yt.utilities.lib.geometry_utils import compute_morton
 from yt.utilities.exceptions import *
 
 class IOHandlerStream(BaseIOHandler):
 
-    _data_style = "stream"
+    _dataset_type = "stream"
 
     def __init__(self, pf):
         self.fields = pf.stream_handler.fields
+        self.field_units = pf.stream_handler.field_units
         super(IOHandlerStream, self).__init__(pf)
 
     def _read_data_set(self, grid, field):
@@ -50,8 +51,7 @@ class IOHandlerStream(BaseIOHandler):
             raise NotImplementedError
         rv = {}
         for field in fields:
-            ftype, fname = field
-            rv[field] = np.empty(size, dtype="float64")
+            rv[field] = self.pf.arr(np.empty(size, dtype="float64"))
         ng = sum(len(c.objs) for c in chunks)
         mylog.debug("Reading %s cells of %s fields in %s blocks",
                     size, [f2 for f1, f2 in fields], ng)
@@ -60,7 +60,7 @@ class IOHandlerStream(BaseIOHandler):
             ind = 0
             for chunk in chunks:
                 for g in chunk.objs:
-                    ds = self.fields[g.id][field]
+                    ds = self.fields[g.id][ftype, fname]
                     ind += g.select(selector, ds, rv[field], ind) # caches
         return rv
 
@@ -84,7 +84,7 @@ class IOHandlerStream(BaseIOHandler):
                 for ptype, field_list in sorted(ptf.items()):
                     x, y, z  = (gf[ptype, "particle_position_%s" % ax]
                                 for ax in 'xyz')
-                    mask = selector.select_points(x, y, z)
+                    mask = selector.select_points(x, y, z, 0.0)
                     if mask is None: continue
                     for field in field_list:
                         data = np.asarray(gf[ptype, field])
@@ -96,7 +96,7 @@ class IOHandlerStream(BaseIOHandler):
 
 class StreamParticleIOHandler(BaseIOHandler):
 
-    _data_style = "stream_particles"
+    _dataset_type = "stream_particles"
 
     def __init__(self, pf):
         self.fields = pf.stream_handler.fields
@@ -108,7 +108,7 @@ class StreamParticleIOHandler(BaseIOHandler):
         for chunk in chunks:
             for obj in chunk.objs:
                 data_files.update(obj.data_files)
-        for data_file in data_files:
+        for data_file in sorted(data_files):
             f = self.fields[data_file.filename]
             # This double-reads
             for ptype, field_list in sorted(ptf.items()):
@@ -121,44 +121,48 @@ class StreamParticleIOHandler(BaseIOHandler):
         for chunk in chunks:
             for obj in chunk.objs:
                 data_files.update(obj.data_files)
-        for data_file in data_files:
+        for data_file in sorted(data_files):
             f = self.fields[data_file.filename]
             for ptype, field_list in sorted(ptf.items()):
                 x, y, z = (f[ptype, "particle_position_%s" % ax]
                            for ax in 'xyz')
-                mask = selector.select_points(x, y, z)
+                mask = selector.select_points(x, y, z, 0.0)
                 if mask is None: continue
                 for field in field_list:
                     data = f[ptype, field][mask]
                     yield (ptype, field), data
 
-
     def _initialize_index(self, data_file, regions):
         # self.fields[g.id][fname] is the pattern here
-        pos = np.column_stack(self.fields[data_file.filename][
-                              ("io", "particle_position_%s" % ax)]
-                              for ax in 'xyz')
-        if np.any(pos.min(axis=0) < data_file.pf.domain_left_edge) or \
-           np.any(pos.max(axis=0) > data_file.pf.domain_right_edge):
-            raise YTDomainOverflow(pos.min(axis=0), pos.max(axis=0),
-                                   data_file.pf.domain_left_edge,
-                                   data_file.pf.domain_right_edge)
-        regions.add_data_file(pos, data_file.file_id)
-        morton = compute_morton(
-                pos[:,0], pos[:,1], pos[:,2],
-                data_file.pf.domain_left_edge,
-                data_file.pf.domain_right_edge)
-        return morton
+        morton = []
+        for ptype in self.pf.particle_types_raw:
+            pos = np.column_stack(self.fields[data_file.filename][
+                                  (ptype, "particle_position_%s" % ax)]
+                                  for ax in 'xyz')
+            if np.any(pos.min(axis=0) < data_file.pf.domain_left_edge) or \
+               np.any(pos.max(axis=0) > data_file.pf.domain_right_edge):
+                raise YTDomainOverflow(pos.min(axis=0), pos.max(axis=0),
+                                       data_file.pf.domain_left_edge,
+                                       data_file.pf.domain_right_edge)
+            regions.add_data_file(pos, data_file.file_id)
+            morton.append(compute_morton(
+                    pos[:,0], pos[:,1], pos[:,2],
+                    data_file.pf.domain_left_edge,
+                    data_file.pf.domain_right_edge))
+        return np.concatenate(morton)
 
     def _count_particles(self, data_file):
-        npart = self.fields[data_file.filename]["io", "particle_position_x"].size
-        return {'io': npart}
+        pcount = {}
+        for ptype in self.pf.particle_types_raw:
+            d = self.fields[data_file.filename]
+            pcount[ptype] = d[ptype, "particle_position_x"].size
+        return pcount
 
     def _identify_fields(self, data_file):
-        return self.fields[data_file.filename].keys()
+        return self.fields[data_file.filename].keys(), {}
 
 class IOHandlerStreamHexahedral(BaseIOHandler):
-    _data_style = "stream_hexahedral"
+    _dataset_type = "stream_hexahedral"
 
     def __init__(self, pf):
         self.fields = pf.stream_handler.fields
@@ -187,7 +191,7 @@ class IOHandlerStreamHexahedral(BaseIOHandler):
         return rv
 
 class IOHandlerStreamOctree(BaseIOHandler):
-    _data_style = "stream_octree"
+    _dataset_type = "stream_octree"
 
     def __init__(self, pf):
         self.fields = pf.stream_handler.fields

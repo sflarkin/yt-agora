@@ -16,11 +16,18 @@ API for yt.frontends.chombo
 from .data_structures import \
       ChomboGrid, \
       ChomboHierarchy, \
-      ChomboStaticOutput
+      ChomboDataset, \
+      Orion2Hierarchy, \
+      Orion2Dataset, \
+      ChomboPICHierarchy, \
+      ChomboPICDataset
 
 from .fields import \
       ChomboFieldInfo, \
-      add_chombo_field
+      Orion2FieldInfo, \
+      ChomboPICFieldInfo1D, \
+      ChomboPICFieldInfo2D, \
+      ChomboPICFieldInfo3D
 
 from .io import \
       IOHandlerChomboHDF5

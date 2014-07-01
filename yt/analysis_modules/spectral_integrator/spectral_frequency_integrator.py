@@ -14,7 +14,6 @@ bins.  Currently only supports Cloudy-style data.
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
-from exceptions import IOError
 import h5py
 import numpy as np
 import os
@@ -24,13 +23,14 @@ from yt.funcs import \
      mylog, \
      only_on_root
 
-from yt.data_objects.field_info_container import add_field
+from yt.fields.local_fields import add_field
 from yt.utilities.exceptions import YTException
 from yt.utilities.linear_interpolators import \
     BilinearFieldInterpolator
 from yt.utilities.physical_constants import \
-    erg_per_eV, \
-    keV_per_Hz
+    erg_per_eV, hcgs
+from yt.units import keV, Hz
+keV_per_Hz = keV/Hz/hcgs
 
 xray_data_version = 1
 
@@ -214,8 +214,7 @@ def add_xray_emissivity_field(e_min, e_max, filename=None,
     add_field(field_name, function=_emissivity_field,
               projection_conversion="cm",
               display_name=r"\epsilon_{X}\/(%s-%s\/keV)" % (e_min, e_max),
-              units=r"\rm{erg}\/\rm{cm}^{-3}\/\rm{s}^{-1}",
-              projected_units=r"\rm{erg}\/\rm{cm}^{-2}\/\rm{s}^{-1}")
+              units=r"\rm{erg}\/\rm{cm}^{-3}\/\rm{s}^{-1}")
     return field_name
 
 def add_xray_luminosity_field(e_min, e_max, filename=None,
@@ -258,7 +257,7 @@ def add_xray_luminosity_field(e_min, e_max, filename=None,
     >>> from yt.analysis_modules.spectral_integrator.api import *
     >>> add_xray_luminosity_field(0.5, 2)
     >>> pf = load(dataset)
-    >>> sp = pf.h.sphere('max', (2., 'mpc'))
+    >>> sp = pf.sphere('max', (2., 'mpc'))
     >>> print sp.quantities['TotalQuantity']('Xray_Luminosity_0.5_2keV')
     
     """
@@ -348,6 +347,5 @@ def add_xray_photon_emissivity_field(e_min, e_max, filename=None,
     add_field(field_name, function=_emissivity_field,
               projection_conversion="cm",
               display_name=r"\epsilon_{X}\/(%s-%s\/keV)" % (e_min, e_max),
-              units=r"\rm{photons}\/\rm{cm}^{-3}\/\rm{s}^{-1}",
-              projected_units=r"\rm{photons}\/\rm{cm}^{-2}\/\rm{s}^{-1}")
+              units=r"\rm{photons}\/\rm{cm}^{-3}\/\rm{s}^{-1}")
     return field_name

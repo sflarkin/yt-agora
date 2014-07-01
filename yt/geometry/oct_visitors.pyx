@@ -176,10 +176,12 @@ cdef void count_by_domain(Oct *o, OctVisitorData *data, np.uint8_t selected):
     arr[o.domain - 1] += 1
 
 cdef void store_octree(Oct *o, OctVisitorData *data, np.uint8_t selected):
-    cdef np.uint8_t *arr, res, ii
+    cdef np.uint8_t *arr, res, ii, *always_descend
     ii = cind(data.ind[0], data.ind[1], data.ind[2])
-    arr = <np.uint8_t *> data.array
-    if o.children == NULL or o.children[ii] == NULL:
+    cdef void **p = <void **> data.array
+    arr = <np.uint8_t *> p[0]
+    if o.children == NULL:
+        # Not refined.
         res = 0
     else:
         res = 1
@@ -210,7 +212,7 @@ cdef void load_octree(Oct *o, OctVisitorData *data, np.uint8_t selected):
             o.children = <Oct **> malloc(sizeof(Oct *) * 8)
             for i in range(8):
                 o.children[i] = NULL
-        for i in range(arr[data.index]):
+        for i in range(8):
             o.children[ii + i] = &octs[nocts[0]]
             o.children[ii + i].domain_ind = nocts[0]
             o.children[ii + i].file_ind = -1

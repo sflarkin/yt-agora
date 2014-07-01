@@ -1,5 +1,5 @@
 """
-AMR hierarchy container class
+AMR index container class
 
 
 
@@ -24,21 +24,25 @@ from yt.funcs import *
 from yt.utilities.logger import ytLogger as mylog
 from yt.arraytypes import blankRecordArray
 from yt.config import ytcfg
-from yt.data_objects.field_info_container import NullFunc
+from yt.fields.field_info_container import NullFunc
 from yt.geometry.geometry_handler import \
-    GeometryHandler, YTDataChunk, ChunkDataCache
+    Index, YTDataChunk, ChunkDataCache
 from yt.utilities.definitions import MAXLEVEL
 from yt.utilities.physical_constants import sec_per_year
 from yt.utilities.io_handler import io_registry
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
-    ParallelAnalysisInterface, parallel_splitter
-from yt.utilities.lib import GridTree, MatchPointsToGrids
+    ParallelAnalysisInterface
+from yt.utilities.lib.GridTree import GridTree, MatchPointsToGrids
 
 from yt.data_objects.data_containers import data_object_registry
 
-class GridGeometryHandler(GeometryHandler):
+class GridIndex(Index):
+    """The index class for patch and block AMR datasets. """
     float_type = 'float64'
     _preload_implemented = False
+    _index_properties = ("grid_left_edge", "grid_right_edge",
+                         "grid_levels", "grid_particle_count",
+                         "grid_dimensions")
 
     def _setup_geometry(self):
         mylog.debug("Counting grids.")
@@ -47,13 +51,13 @@ class GridGeometryHandler(GeometryHandler):
         mylog.debug("Initializing grid arrays.")
         self._initialize_grid_arrays()
 
-        mylog.debug("Parsing hierarchy.")
-        self._parse_hierarchy()
+        mylog.debug("Parsing index.")
+        self._parse_index()
 
         mylog.debug("Constructing grid objects.")
         self._populate_grid_objects()
 
-        mylog.debug("Re-examining hierarchy")
+        mylog.debug("Re-examining index")
         self._initialize_level_stats()
 
     def __del__(self):
@@ -68,6 +72,23 @@ class GridGeometryHandler(GeometryHandler):
     def parameters(self):
         return self.parameter_file.parameters
 
+    def _detect_output_fields_backup(self):
+        # grab fields from backup file as well, if present
+        return
+        try:
+            backup_filename = self.parameter_file.backup_filename
+            f = h5py.File(backup_filename, 'r')
+            g = f["data"]
+            grid = self.grids[0] # simply check one of the grids
+            grid_group = g["grid_%010i" % (grid.id - grid._id_offset)]
+            for field_name in grid_group:
+                if field_name != 'particles':
+                    self.field_list.append(field_name)
+        except KeyError:
+            return
+        except IOError:
+            return
+
     def select_grids(self, level):
         """
         Returns an array of grids at *level*.
@@ -81,8 +102,10 @@ class GridGeometryHandler(GeometryHandler):
     def _initialize_grid_arrays(self):
         mylog.debug("Allocating arrays for %s grids", self.num_grids)
         self.grid_dimensions = np.ones((self.num_grids,3), 'int32')
-        self.grid_left_edge = np.zeros((self.num_grids,3), self.float_type)
-        self.grid_right_edge = np.ones((self.num_grids,3), self.float_type)
+        self.grid_left_edge = self.pf.arr(np.zeros((self.num_grids,3),
+                                    self.float_type), 'code_length')
+        self.grid_right_edge = self.pf.arr(np.ones((self.num_grids,3),
+                                    self.float_type), 'code_length')
         self.grid_levels = np.zeros((self.num_grids,1), 'int32')
         self.grid_particle_count = np.zeros((self.num_grids,1), 'int32')
 
@@ -160,7 +183,7 @@ class GridGeometryHandler(GeometryHandler):
             print "% 3i\t% 6i\t% 14i\t% 14i" % \
                   (level, self.level_stats['numgrids'][level],
                    self.level_stats['numcells'][level],
-                   self.level_stats['numcells'][level]**(1./3))
+                   np.ceil(self.level_stats['numcells'][level]**(1./3)))
             dx = self.select_grids(level)[0].dds[0]
         print "-" * 46
         print "   \t% 6i\t% 14i" % (self.level_stats['numgrids'].sum(), self.level_stats['numcells'].sum())
@@ -169,17 +192,14 @@ class GridGeometryHandler(GeometryHandler):
             print "z = %0.8f" % (self["CosmologyCurrentRedshift"])
         except:
             pass
-        t_s = self.pf.current_time * self.pf["Time"]
         print "t = %0.8e = %0.8e s = %0.8e years" % \
-            (self.pf.current_time, \
-             t_s, t_s / sec_per_year )
+            (self.pf.current_time.in_units("code_time"),
+             self.pf.current_time.in_units("s"),
+             self.pf.current_time.in_units("yr"))
         print "\nSmallest Cell:"
         u=[]
-        for item in self.parameter_file.units.items():
-            u.append((item[1],item[0]))
-        u.sort()
-        for unit in u:
-            print "\tWidth: %0.3e %s" % (dx*unit[0], unit[1])
+        for item in ("Mpc", "pc", "AU", "cm"):
+            print "\tWidth: %0.3e %s" % (dx.in_units(item), item)
 
     def find_max(self, field, finest_levels = 3):
         """
@@ -221,10 +241,46 @@ class GridGeometryHandler(GeometryHandler):
         ind = pts.find_points_in_tree()
         return self.grids[ind], ind
 
+    def find_field_value_at_point(self, fields, coord):
+        r"""Find the value of fields at a coordinate.
+
+        Returns the values [field1, field2,...] of the fields at the given
+        (x, y, z) points. Returns a list of field values in the same order as
+        the input *fields*.
+
+        Parameters
+        ----------
+        fields : string or list of strings
+            The field(s) that will be returned.
+
+        coord : list or array of coordinates
+            The location for which field values will be returned.
+
+        Examples
+        --------
+        >>> pf.h.find_field_value_at_point(['Density', 'Temperature'],
+            [0.4, 0.3, 0.8])
+        [2.1489e-24, 1.23843e4]
+        """
+        this = self.find_points(*coord)[0][-1]
+        cellwidth = (this.RightEdge - this.LeftEdge) / this.ActiveDimensions
+        mark = np.zeros(3).astype('int')
+        # Find the index for the cell containing this point.
+        for dim in xrange(len(coord)):
+            mark[dim] = int((coord[dim] - this.LeftEdge[dim]) / cellwidth[dim])
+        out = []
+        fields = ensure_list(fields)
+        # Pull out the values and add it to the out list.
+        for field in fields:
+            out.append(this[field][mark[0], mark[1], mark[2]])
+        return out
+
     def get_grid_tree(self) :
 
-        left_edge = np.zeros((self.num_grids, 3))
-        right_edge = np.zeros((self.num_grids, 3))
+        left_edge = self.pf.arr(np.zeros((self.num_grids, 3)),
+                               'code_length')
+        right_edge = self.pf.arr(np.zeros((self.num_grids, 3)),
+                                'code_length')
         level = np.zeros((self.num_grids), dtype='int64')
         parent_ind = np.zeros((self.num_grids), dtype='int64')
         num_children = np.zeros((self.num_grids), dtype='int64')
@@ -296,13 +352,23 @@ class GridGeometryHandler(GeometryHandler):
             # individual grids.
             yield YTDataChunk(dobj, "spatial", [g], size, cache = False)
 
-    def _chunk_io(self, dobj, cache = True):
+    _grid_chunksize = 1000
+    def _chunk_io(self, dobj, cache = True, local_only = False):
+        # local_only is only useful for inline datasets and requires
+        # implementation by subclasses.
         gfiles = defaultdict(list)
         gobjs = getattr(dobj._current_chunk, "objs", dobj._chunk_info)
         for g in gobjs:
             gfiles[g.filename].append(g)
         for fn in sorted(gfiles):
+            # We can apply a heuristic here to make sure we aren't loading too
+            # many grids all at once.
             gs = gfiles[fn]
-            yield YTDataChunk(dobj, "io", gs, self._count_selection(dobj, gs),
-                              cache = cache)
+            size = self._grid_chunksize
+            
+            for grids in (gs[pos:pos + size] for pos
+                          in xrange(0, len(gs), size)):
+                yield YTDataChunk(dobj, "io", grids,
+                        self._count_selection(dobj, grids),
+                        cache = cache)
 

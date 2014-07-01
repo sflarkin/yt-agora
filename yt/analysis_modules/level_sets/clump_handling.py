@@ -117,7 +117,7 @@ class Clump(object):
                 unique_contours.update(np.unique(ff))
         for cid in sorted(unique_contours):
             new_clump = self.data.cut_region(
-                    ["obj['Contours'] == %s" % cid],
+                    ["obj['contours'] == %s" % (cid + 1)],
                     {'contour_slices': cids})
             if new_clump["Ones"].size == 0:
                 # This is to skip possibly duplicate clumps.  Using "Ones" here
@@ -206,7 +206,7 @@ def find_clumps(clump, min_val, max_val, d_clump):
             clump.children = []
 
 def get_lowest_clumps(clump, clump_list=None):
-    "Return a list of all clumps at the bottom of the hierarchy."
+    "Return a list of all clumps at the bottom of the index."
 
     if clump_list is None: clump_list = []
     if clump.children is None or len(clump.children) == 0:
@@ -217,7 +217,7 @@ def get_lowest_clumps(clump, clump_list=None):
 
     return clump_list
 
-def write_clump_hierarchy(clump,level,f_ptr):
+def write_clump_index(clump,level,f_ptr):
     for q in range(level):
         f_ptr.write("\t")
     f_ptr.write("Clump at level %d:\n" % level)
@@ -226,7 +226,7 @@ def write_clump_hierarchy(clump,level,f_ptr):
     f_ptr.flush()
     if ((clump.children is not None) and (len(clump.children) > 0)):
         for child in clump.children:
-            write_clump_hierarchy(child,(level+1),f_ptr)
+            write_clump_index(child,(level+1),f_ptr)
 
 def write_clumps(clump,level,f_ptr):
     if ((clump.children is None) or (len(clump.children) == 0)):
@@ -239,7 +239,7 @@ def write_clumps(clump,level,f_ptr):
             write_clumps(child,0,f_ptr)
 
 # Old clump info writing routines.
-def write_old_clump_hierarchy(clump,level,f_ptr):
+def write_old_clump_index(clump,level,f_ptr):
     for q in range(level):
         f_ptr.write("\t")
     f_ptr.write("Clump at level %d:\n" % level)
@@ -249,7 +249,7 @@ def write_old_clump_hierarchy(clump,level,f_ptr):
     f_ptr.flush()
     if ((clump.children is not None) and (len(clump.children) > 0)):
         for child in clump.children:
-            write_clump_hierarchy(child,(level+1),f_ptr)
+            write_clump_index(child,(level+1),f_ptr)
 
 def write_old_clumps(clump,level,f_ptr):
     if ((clump.children is None) or (len(clump.children) == 0)):
