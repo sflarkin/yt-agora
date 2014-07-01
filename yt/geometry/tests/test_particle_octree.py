@@ -9,6 +9,8 @@ from yt.geometry.oct_container import _ORDER_MAX
 from yt.utilities.lib.geometry_utils import get_morton_indices
 from yt.frontends.stream.api import load_particles
 from yt.geometry.selection_routines import RegionSelector, AlwaysSelector
+from yt.units.unit_registry import UnitRegistry
+import yt.units.dimensions as dimensions
 import yt.data_objects.api
 import time, os
 
@@ -111,7 +113,7 @@ def test_particle_overrefine():
         pf1 = load_particles(data, 1.0, bbox = bbox, n_ref = n_ref)
         dd1 = pf1.h.all_data()
         v1 = dict((a, getattr(dd1, a)) for a in _attrs)
-        cv1 = dd1["CellVolumeCode"].sum(dtype="float64")
+        cv1 = dd1["cell_volume"].sum(dtype="float64")
         for over_refine in [1, 2, 3]:
             f = 1 << (3*(over_refine-1))
             pf2 = load_particles(data, 1.0, bbox = bbox, n_ref = n_ref,
@@ -120,24 +122,33 @@ def test_particle_overrefine():
             v2 = dict((a, getattr(dd2, a)) for a in _attrs)
             for a in sorted(v1):
                 yield assert_equal, v1[a].size * f, v2[a].size
-            cv2 = dd2["CellVolumeCode"].sum(dtype="float64")
+            cv2 = dd2["cell_volume"].sum(dtype="float64")
             yield assert_equal, cv1, cv2
 
 class FakePF:
     domain_left_edge = None
     domain_right_edge = None
+    domain_width = None
+    unit_registry = UnitRegistry()
+    unit_registry.add('code_length', 1.0, dimensions.length)
     periodicity = (False, False, False)
 
 class FakeRegion:
     def __init__(self, nfiles):
         self.pf = FakePF()
-        self.pf.domain_left_edge = [0.0, 0.0, 0.0]
-        self.pf.domain_right_edge = [nfiles, nfiles, nfiles]
+        self.pf.domain_left_edge = YTArray([0.0, 0.0, 0.0], "code_length",
+                                           registry=self.pf.unit_registry)
+        self.pf.domain_right_edge = YTArray([nfiles, nfiles, nfiles], "code_length",
+                                            registry=self.pf.unit_registry)
+        self.pf.domain_width = self.pf.domain_right_edge - \
+                               self.pf.domain_left_edge
         self.nfiles = nfiles
 
     def set_edges(self, file_id):
-        self.left_edge = [file_id + 0.1, 0.0, 0.0]
-        self.right_edge = [file_id+1 - 0.1, self.nfiles, self.nfiles]
+        self.left_edge = YTArray([file_id + 0.1, 0.0, 0.0],
+                                 'code_length', registry=self.pf.unit_registry)
+        self.right_edge = YTArray([file_id+1 - 0.1, self.nfiles, self.nfiles],
+                                  'code_length', registry=self.pf.unit_registry)
 
 def test_particle_regions():
     np.random.seed(int(0x4d3d3d3))

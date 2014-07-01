@@ -3,7 +3,7 @@ from yt.testing import *
 def _get_dobjs(c):
     dobjs = [("sphere", ("center", (1.0, "unitary"))),
              ("sphere", ("center", (0.1, "unitary"))),
-             ("ortho_ray", (0, (c[x_dict[0]], c[y_dict[0]]))),
+             ("ortho_ray", (0, (c[1], c[2]))),
              ("slice", (0, c[0])),
              #("disk", ("center", [0.1, 0.3, 0.6],
              #           (0.2, 'unitary'), (0.1, 'unitary'))),
@@ -16,7 +16,7 @@ def test_chunking():
     for nprocs in [1, 2, 4, 8]:
         pf = fake_random_pf(64, nprocs = nprocs)
         c = (pf.domain_right_edge + pf.domain_left_edge)/2.0 
-        c += 0.5/pf.domain_dimensions
+        c += pf.arr(0.5/pf.domain_dimensions, "code_length")
         for dobj in _get_dobjs(c):
             obj = getattr(pf.h, dobj[0])(*dobj[1])
             coords = {'f':{}, 'i':{}}
@@ -26,8 +26,8 @@ def test_chunking():
                 for chunk in obj.chunks(None, t):
                     coords['f'][t].append(chunk.fcoords[:,:])
                     coords['i'][t].append(chunk.icoords[:,:])
-                coords['f'][t] = np.concatenate(coords['f'][t])
-                coords['i'][t] = np.concatenate(coords['i'][t])
+                coords['f'][t] = uconcatenate(coords['f'][t])
+                coords['i'][t] = uconcatenate(coords['i'][t])
                 coords['f'][t].sort()
                 coords['i'][t].sort()
             yield assert_equal, coords['f']['io'], coords['f']['all']

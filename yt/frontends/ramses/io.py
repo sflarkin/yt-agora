@@ -23,7 +23,7 @@ import yt.utilities.fortran_utils as fpu
 import cStringIO
 
 class IOHandlerRAMSES(BaseIOHandler):
-    _data_style = "ramses"
+    _dataset_type = "ramses"
 
     def _read_fluid_selection(self, chunks, selector, fields, size):
         # Chunks in this case will have affiliated domain subset objects
@@ -77,7 +77,7 @@ class IOHandlerRAMSES(BaseIOHandler):
                 for ptype, field_list in sorted(ptf.items()):
                     x, y, z = (np.asarray(rv[ptype, pn % ax], "=f8")
                                for ax in 'xyz')
-                    mask = selector.select_points(x, y, z)
+                    mask = selector.select_points(x, y, z, 0.0)
                     for field in field_list:
                         data = np.asarray(rv.pop((ptype, field))[mask], "=f8")
                         yield (ptype, field), data
