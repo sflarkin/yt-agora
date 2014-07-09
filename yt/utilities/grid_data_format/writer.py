@@ -18,11 +18,11 @@ import h5py
 import numpy as np
 
 from yt import __version__ as yt_version
-
+from yt.utilities.exceptions import YTGDFAlreadyExists
 
 def write_to_gdf(pf, gdf_path, data_author=None, data_comment=None,
-                 particle_type_name="dark_matter"):
-    """
+                 particle_type_name="dark_matter", clobber=False):
+    r"""
     Write a parameter file to the given path in the Grid Data Format.
 
     Parameters
@@ -31,11 +31,24 @@ def write_to_gdf(pf, gdf_path, data_author=None, data_comment=None,
         The yt data to write out.
     gdf_path : string
         The path of the file to output.
+    data_author : string, optional
+        The name of the author who wrote the data. Default: None.
+    data_comment : string, optional
+        A descriptive comment. Default: None.
+    particle_type_name : string, optional
+        The particle type of the particles in the dataset. Default: "dark_matter"
+    clobber : boolean, optional
+        Whether or not to clobber an already existing file. If False, attempting
+        to overwrite an existing file will result in an exception.
 
+    Examples
+    --------
+    >>> write_to_gdf(ds, "clumps.h5", data_author="Your Mom",
+    ...              data_comment="All Your Base Are Belong To Us", clobber=True)
     """
 
     f = _create_new_gdf(pf, gdf_path, data_author, data_comment,
-                        particle_type_name)
+                        particle_type_name, clobber=clobber)
 
     # now add the fields one-by-one
     for field_name in pf.field_list:
@@ -140,15 +153,14 @@ def _write_field_to_gdf(pf, fhandle, field_name, particle_type_name,
 
 
 def _create_new_gdf(pf, gdf_path, data_author=None, data_comment=None,
-                    particle_type_name="dark_matter"):
+                    particle_type_name="dark_matter", clobber=False):
     # Make sure we have the absolute path to the file first
     gdf_path = os.path.abspath(gdf_path)
 
-    # Stupid check -- is the file already there?
-    # @todo: make this a specific exception/error.
-    if os.path.exists(gdf_path):
-        raise IOError("A file already exists in the location: %s. Please \
-                      provide a new one or remove that file." % gdf_path)
+    # Is the file already there? If so, are we allowing
+    # clobbering?
+    if os.path.exists(gdf_path) and not clobber:
+        raise YTGDFAlreadyExists(gdf_path)
 
     ###
     # Create and open the file with h5py
@@ -212,7 +224,7 @@ def _create_new_gdf(pf, gdf_path, data_author=None, data_comment=None,
     f["grid_left_index"] = np.array(
         [grid.get_global_startindex() for grid in pf.index.grids]
     ).reshape(pf.index.grid_dimensions.shape[0], 3)
-    f["grid_level"] = pf.index.grid_levels
+    f["grid_level"] = pf.index.grid_levels.flat
     # @todo: Fill with proper values
     f["grid_parent_id"] = -np.ones(pf.index.grid_dimensions.shape[0])
     f["grid_particle_count"] = pf.index.grid_particle_count
