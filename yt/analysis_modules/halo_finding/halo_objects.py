@@ -24,6 +24,7 @@ import glob
 import os
 import os.path as path
 from collections import defaultdict
+from yt.extern.six import add_metaclass
 
 from yt.funcs import *
 
@@ -50,12 +51,13 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelAnalysisInterface, \
     parallel_blocking_call
 
+
+@add_metaclass(ParallelDummy)
 class Halo(object):
     """
     A data source that returns particle information about the members of a
     HOP-identified halo.
     """
-    __metaclass__ = ParallelDummy  # This will proxy up our methods
     _distributed = False
     _processing = False
     _owner = 0
@@ -318,8 +320,7 @@ class Halo(object):
             center = self.maximum_density_location()
         radius = self.maximum_radius()
         # A bit of a long-reach here...
-        sphere = self.data.index.sphere(
-                        center, radius=radius)
+        sphere = self.data.pf.sphere(center, radius=radius)
         return sphere
 
     def get_size(self):
@@ -491,39 +492,39 @@ class Halo(object):
         # all the parameters except for the center of mass.
         com = self.center_of_mass()
         position = [self["particle_position_x"],
-		    self["particle_position_y"],
-		    self["particle_position_z"]]
+                    self["particle_position_y"],
+                    self["particle_position_z"]]
         # Locate the furthest particle from com, its vector length and index
-	DW = np.array([self.gridsize[0],self.gridsize[1],self.gridsize[2]])
-	position = [position[0] - com[0],
-		    position[1] - com[1],
-		    position[2] - com[2]]
-	# different cases of particles being on other side of boundary
-	for axis in range(np.size(DW)):
-	    cases = np.array([position[axis],
-	  		      position[axis] + DW[axis],
-			      position[axis] - DW[axis]])        
+        DW = np.array([self.gridsize[0],self.gridsize[1],self.gridsize[2]])
+        position = [position[0] - com[0],
+                    position[1] - com[1],
+                    position[2] - com[2]]
+        # different cases of particles being on other side of boundary
+        for axis in range(np.size(DW)):
+            cases = np.array([position[axis],
+                                position[axis] + DW[axis],
+                              position[axis] - DW[axis]])        
             # pick out the smallest absolute distance from com
             position[axis] = np.choose(np.abs(cases).argmin(axis=0), cases)
-	# find the furthest particle's index
-	r = np.sqrt(position[0]**2 +
-		    position[1]**2 +
-		    position[2]**2)
+        # find the furthest particle's index
+        r = np.sqrt(position[0]**2 +
+                    position[1]**2 +
+                    position[2]**2)
         A_index = r.argmax()
         mag_A = r.max()
         # designate the A vector
-	A_vector = (position[0][A_index],
-		    position[1][A_index],
-		    position[2][A_index])
+        A_vector = (position[0][A_index],
+                    position[1][A_index],
+                    position[2][A_index])
         # designate the e0 unit vector
         e0_vector = A_vector / mag_A
         # locate the tB particle position by finding the max B
-	e0_vector_copy = np.empty((np.size(position[0]), 3), dtype='float64')
+        e0_vector_copy = np.empty((np.size(position[0]), 3), dtype='float64')
         for i in range(3):
             e0_vector_copy[:, i] = e0_vector[i]
         rr = np.array([position[0],
-		       position[1],
-		       position[2]]).T # Similar to tB_vector in old code.
+                       position[1],
+                       position[2]]).T # Similar to tB_vector in old code.
         tC_vector = np.cross(e0_vector_copy, rr)
         te2 = tC_vector.copy()
         for dim in range(3):
@@ -683,7 +684,7 @@ class RockstarHalo(Halo):
         >>> ell = halos[0].get_ellipsoid()
         """
         ep = self.get_ellipsoid_parameters()
-        ell = self.data.index.ellipsoid(ep[0], ep[1], ep[2], ep[3],
+        ell = self.data.pf.ellipsoid(ep[0], ep[1], ep[2], ep[3],
             ep[4], ep[5])
         return ell
     
@@ -954,7 +955,7 @@ class LoadedHalo(Halo):
         Examples
         --------
         >>> params = halos[0].get_ellipsoid_parameters()
-	"""
+        """
 
         basic_parameters = self._get_ellipsoid_parameters_basic_loadedhalo()
         toreturn = [self.center_of_mass()]
@@ -983,7 +984,7 @@ class LoadedHalo(Halo):
         >>> ell = halos[0].get_ellipsoid()
         """
         ep = self.get_ellipsoid_parameters()
-        ell = self.pf.index.ellipsoid(ep[0], ep[1], ep[2], ep[3],
+        ell = self.pf.ellipsoid(ep[0], ep[1], ep[2], ep[3],
             ep[4], ep[5])
         return ell
 
@@ -1816,7 +1817,7 @@ class GenericHaloFinder(HaloList, ParallelAnalysisInterface):
     def __init__(self, pf, ds, dm_only=True, padding=0.0):
         ParallelAnalysisInterface.__init__(self)
         self.pf = pf
-        self.index = pf.h
+        self.index = pf.index
         self.center = (np.array(ds.right_edge) + np.array(ds.left_edge)) / 2.0
 
     def _parse_halolist(self, threshold_adjustment):
@@ -2126,11 +2127,11 @@ class parallelHF(GenericHaloFinder, parallelHOPHaloList):
                 self.comm.mpi_bcast(self.bucket_bounds)
             my_bounds = self.bucket_bounds[self.comm.rank]
             LE, RE = my_bounds[0], my_bounds[1]
-            self._data_source = self.index.region([0.] * 3, LE, RE)
+            self._data_source = self.pf.region([0.] * 3, LE, RE)
         # If this isn't parallel, define the region as an AMRRegionStrict so
         # particle IO works.
         if self.comm.size == 1:
-            self._data_source = self.index.region([0.5] * 3,
+            self._data_source = self.pf.region([0.5] * 3,
                 LE, RE)
         # get the average spacing between particles for this region
         # The except is for the serial case where the full box is what we want.
@@ -2485,7 +2486,7 @@ class FOFHaloFinder(GenericHaloFinder, FOFHaloList):
             ds_RE = np.array(subvolume.right_edge)
         self.period = pf.domain_right_edge - pf.domain_left_edge
         self.pf = pf
-        self.index = pf.h
+        self.index = pf.index
         self.redshift = pf.current_redshift
         self._data_source = pf.h.all_data()
         GenericHaloFinder.__init__(self, pf, self._data_source, dm_only,

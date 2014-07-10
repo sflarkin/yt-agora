@@ -40,6 +40,7 @@ from yt.fields.field_exceptions import \
 from yt.fields.derived_field import \
     ValidateSpatial
 import yt.geometry.selection_routines
+from yt.extern.six import add_metaclass
 
 def force_array(item, shape):
     try:
@@ -71,7 +72,13 @@ class YTFieldData(dict):
     """
     pass
 
+class RegisteredDataContainer(type):
+    def __init__(cls, name, b, d):
+        type.__init__(cls, name, b, d)
+        if hasattr(cls, "_type_name") and not cls._skip_add:
+            data_object_registry[cls._type_name] = cls
 
+@add_metaclass(RegisteredDataContainer)
 class YTDataContainer(object):
     """
     Generic YTDataContainer container.  By itself, will attempt to
@@ -85,12 +92,6 @@ class YTDataContainer(object):
     _container_fields = ()
     _field_cache = None
     _index = None
-
-    class __metaclass__(type):
-        def __init__(cls, name, b, d):
-            type.__init__(cls, name, b, d)
-            if hasattr(cls, "_type_name") and not cls._skip_add:
-                data_object_registry[cls._type_name] = cls
 
     def __init__(self, pf, field_parameters):
         """
@@ -136,17 +137,25 @@ class YTDataContainer(object):
             self.center = None
             self.set_field_parameter('center', self.center)
             return
+        elif isinstance(center, YTArray):
+            self.center = self.pf.arr(center.in_cgs())
+            self.center.convert_to_units('code_length')
         elif isinstance(center, (types.ListType, types.TupleType, np.ndarray)):
-            center = self.pf.arr(center, 'code_length')
-        elif center in ("c", "center"):
-            center = self.pf.domain_center
-        elif center == ("max"): # is this dangerous for race conditions?
-            center = self.pf.h.find_max("density")[1]
-        elif center.startswith("max_"):
-            center = self.pf.h.find_max(center[4:])[1]
+            if isinstance(center[0], YTQuantity):
+                self.center = self.pf.arr([c.in_cgs() for c in center])
+                self.center.convert_to_units('code_length')
+            else:
+                self.center = self.pf.arr(center, 'code_length')
+        elif isinstance(center, basestring):
+            if center.lower() in ("c", "center"):
+                self.center = self.pf.domain_center
+             # is this dangerous for race conditions?
+            elif center.lower() in ("max", "m"):
+                self.center = self.pf.h.find_max(("gas", "density"))[1]
+            elif center.startswith("max_"):
+                self.center = self.pf.h.find_max(center[4:])[1]
         else:
-            center = np.array(center, dtype='float64')
-        self.center = self.pf.arr(center, 'code_length')
+            self.center = self.pf.arr(center, 'code_length', dtype='float64')
         self.set_field_parameter('center', self.center)
 
     def get_field_parameter(self, name, default=None):
@@ -590,6 +599,10 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
             return
         elif self._locked == True:
             raise GenerationInProgress(fields)
+        # Track which ones we want in the end
+        ofields = set(self.field_data.keys()
+                    + fields_to_get
+                    + fields_to_generate)
         # At this point, we want to figure out *all* our dependencies.
         fields_to_get = self._identify_dependencies(fields_to_get,
             self._spatial)
@@ -610,14 +623,19 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
                                         fluids, self, self._current_chunk)
         for f, v in read_fluids.items():
             self.field_data[f] = self.pf.arr(v, input_units = finfos[f].units)
+            self.field_data[f].convert_to_units(finfos[f].output_units)
 
         read_particles, gen_particles = self.index._read_particle_fields(
                                         particles, self, self._current_chunk)
         for f, v in read_particles.items():
             self.field_data[f] = self.pf.arr(v, input_units = finfos[f].units)
+            self.field_data[f].convert_to_units(finfos[f].output_units)
 
         fields_to_generate += gen_fluids + gen_particles
         self._generate_fields(fields_to_generate)
+        for field in self.field_data.keys():
+            if field not in ofields:
+                self.field_data.pop(field)
 
     def _generate_fields(self, fields_to_generate):
         index = 0
@@ -735,16 +753,19 @@ class YTSelectionContainer2D(YTSelectionContainer):
         return field
 
     def _get_pw(self, fields, center, width, origin, plot_type):
-        axis = self.axis
-        self.fields = [k for k in self.field_data.keys()
-                       if k not in self._key_fields]
         from yt.visualization.plot_window import \
             get_window_parameters, PWViewerMPL
-        from yt.visualization.fixed_resolution import FixedResolutionBuffer
+        from yt.visualization.fixed_resolution import FixedResolutionBuffer as frb
+        axis = self.axis
+        skip = self._key_fields
+        skip += list(set(frb._exclude_fields).difference(set(self._key_fields)))
+        self.fields = ensure_list(fields) + \
+            [k for k in self.field_data if k not in skip]
         (bounds, center) = get_window_parameters(axis, center, width, self.pf)
-        pw = PWViewerMPL(self, bounds, fields=list(self.fields), origin=origin,
-                         frb_generator=FixedResolutionBuffer, 
+        pw = PWViewerMPL(self, bounds, fields=self.fields, origin=origin,
+                         frb_generator=frb,
                          plot_type=plot_type)
+        pw._setup_plots()
         return pw
 
 
@@ -798,7 +819,10 @@ class YTSelectionContainer2D(YTSelectionContainer):
                     "Currently we only support images centered at R=0. " +
                     "We plan to generalize this in the near future")
             from yt.visualization.fixed_resolution import CylindricalFixedResolutionBuffer
-            if iterable(width): radius = max(width)
+            if iterable(width):
+                radius = max(width)
+            else:
+                radius = width
             if iterable(resolution): resolution = max(resolution)
             frb = CylindricalFixedResolutionBuffer(self, radius, resolution)
             return frb
@@ -812,12 +836,12 @@ class YTSelectionContainer2D(YTSelectionContainer):
             center = self.pf.arr(center, 'code_length')
         if iterable(width):
             w, u = width
-            width = self.pf.arr(w, input_units = u)
+            width = self.pf.quan(w, input_units = u)
         if height is None:
             height = width
         elif iterable(height):
             h, u = height
-            height = self.pf.arr(w, input_units = u)
+            height = self.pf.quan(w, input_units = u)
         if not iterable(resolution):
             resolution = (resolution, resolution)
         from yt.visualization.fixed_resolution import FixedResolutionBuffer
@@ -1219,10 +1243,10 @@ class YTBooleanRegionBase(YTSelectionContainer3D):
         pbar = get_pbar("Building boolean", len(self._all_regions))
         for i, region in enumerate(self._all_regions):
             try:
-                region._get_list_of_grids()
+                region._get_list_of_grids() # This is no longer supported. 
                 alias = region
             except AttributeError:
-                alias = region.data
+                alias = region.data         # This is no longer supported.
             for grid in alias._grids:
                 if grid in self._some_overlap or grid in self._all_overlap:
                     continue

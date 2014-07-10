@@ -13,7 +13,6 @@ Enzo-specific IO functions
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
-import exceptions
 import os
 
 from yt.utilities.io_handler import \
@@ -53,7 +52,7 @@ class IOHandlerPackedHDF5(BaseIOHandler):
 
     @property
     def _read_exception(self):
-        return (exceptions.KeyError,)
+        return (KeyError,)
 
     def _read_particle_coords(self, chunks, ptf):
         chunks = list(chunks)
@@ -63,7 +62,7 @@ class IOHandlerPackedHDF5(BaseIOHandler):
                 if g.filename is None: continue
                 if f is None:
                     #print "Opening (count) %s" % g.filename
-                    f = h5py.File(g.filename, "r")
+                    f = h5py.File(g.filename.encode('ascii'), "r")
                 nap = sum(g.NumberOfActiveParticles.values())
                 if g.NumberOfParticles == 0 and nap == 0:
                     continue
@@ -89,7 +88,7 @@ class IOHandlerPackedHDF5(BaseIOHandler):
                 if g.filename is None: continue
                 if f is None:
                     #print "Opening (read) %s" % g.filename
-                    f = h5py.File(g.filename, "r")
+                    f = h5py.File(g.filename.encode('ascii'), "r")
                 nap = sum(g.NumberOfActiveParticles.values())
                 if g.NumberOfParticles == 0 and nap == 0:
                     continue
@@ -121,7 +120,7 @@ class IOHandlerPackedHDF5(BaseIOHandler):
             if not (len(chunks) == len(chunks[0].objs) == 1):
                 raise RuntimeError
             g = chunks[0].objs[0]
-            f = h5py.File(g.filename, 'r')
+            f = h5py.File(g.filename.encode('ascii'), 'r')
             gds = f.get("/Grid%08i" % g.id)
             for ftype, fname in fields:
                 if fname in gds:
@@ -146,14 +145,15 @@ class IOHandlerPackedHDF5(BaseIOHandler):
             for g in chunk.objs:
                 if g.filename is None: continue
                 if fid is None:
-                    fid = h5py.h5f.open(g.filename, h5py.h5f.ACC_RDONLY)
+                    fid = h5py.h5f.open(g.filename.encode('ascii'), h5py.h5f.ACC_RDONLY)
                 data = np.empty(g.ActiveDimensions[::-1], dtype="float64")
                 data_view = data.swapaxes(0,2)
                 nd = 0
                 for field in fields:
                     ftype, fname = field
                     try:
-                        dg = h5py.h5d.open(fid, "/Grid%08i/%s" % (g.id, fname))
+                        node = "/Grid%08i/%s" % (g.id, fname)
+                        dg = h5py.h5d.open(fid, node.encode('ascii'))
                     except KeyError:
                         if fname == "Dark_Matter_Density": continue
                         raise
@@ -186,14 +186,15 @@ class IOHandlerPackedHDF5(BaseIOHandler):
                 if fid is not None: fid.close()
                 fid = None
             if fid is None:
-                fid = h5py.h5f.open(g.filename, h5py.h5f.ACC_RDONLY)
+                fid = h5py.h5f.open(g.filename.encode('ascii'), h5py.h5f.ACC_RDONLY)
                 fn = g.filename
             data = np.empty(g.ActiveDimensions[::-1], dtype="float64")
             data_view = data.swapaxes(0,2)
             for field in fluid_fields:
                 ftype, fname = field
                 try:
-                    dg = h5py.h5d.open(fid, "/Grid%08i/%s" % (g.id, fname))
+                    node = "/Grid%08i/%s" % (g.id, fname)
+                    dg = h5py.h5d.open(fid, node.encode('ascii'))
                 except KeyError:
                     if fname == "Dark_Matter_Density": continue
                     raise
@@ -234,7 +235,18 @@ class IOHandlerInMemory(BaseIOHandler):
         BaseIOHandler.__init__(self, pf)
 
     def _read_field_names(self, grid):
-        return [("enzo", field) for field in self.grids_in_memory[grid.id].keys()]
+        fields = []
+        add_io = "io" in grid.pf.particle_types
+        for name, v in self.grids_in_memory[grid.id].items():
+
+            # NOTE: This won't work with 1D datasets or references.
+            if not hasattr(v, "shape") or v.dtype == "O":
+                continue
+            elif v.ndim == 1:
+                if add_io: fields.append( ("io", str(name)) )
+            else:
+                fields.append( ("enzo", str(name)) )
+        return fields
 
     def _read_fluid_selection(self, chunks, selector, fields, size):
         rv = {}
@@ -295,7 +307,7 @@ class IOHandlerInMemory(BaseIOHandler):
                     x, y, z = self.grids_in_memory[g.id]['particle_position_x'], \
                                         self.grids_in_memory[g.id]['particle_position_y'], \
                                         self.grids_in_memory[g.id]['particle_position_z']
-                    mask = selector.select_points(x, y, z)
+                    mask = selector.select_points(x, y, z, 0.0)
                     if mask is None: continue
                     for field in field_list:
                         data = self.grids_in_memory[g.id][field]

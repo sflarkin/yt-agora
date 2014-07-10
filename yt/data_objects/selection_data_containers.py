@@ -16,7 +16,6 @@ Data containers based on geometric selection
 
 import types
 import numpy as np
-from exceptions import ValueError, SyntaxError
 
 from yt.funcs import *
 from yt.utilities.lib.alt_ray_tracers import cylindrical_ray_trace
@@ -25,7 +24,10 @@ from .data_containers import \
     YTSelectionContainer1D, YTSelectionContainer2D, YTSelectionContainer3D
 from yt.data_objects.derived_quantities import \
     DerivedQuantityCollection
-from yt.utilities.exceptions import YTSphereTooSmall
+from yt.utilities.exceptions import \
+    YTSphereTooSmall, \
+    YTIllDefinedCutRegion, \
+    YTMixedCutRegion
 from yt.utilities.linear_interpolators import TrilinearFieldInterpolator
 from yt.utilities.minimal_representation import \
     MinimalSliceData
@@ -54,9 +56,6 @@ class YTOrthoRayBase(YTSelectionContainer1D):
     fields : list of strings, optional
         If you want the object to pre-retrieve a set of fields, supply them
         here.  This is not necessary.
-    kwargs : dict of items
-        Any additional values are passed as field parameters that can be
-        accessed by generated fields.
 
     Examples
     --------
@@ -106,9 +105,6 @@ class YTRayBase(YTSelectionContainer1D):
     fields : list of strings, optional
         If you want the object to pre-retrieve a set of fields, supply them
         here.  This is not necessary.
-    kwargs : dict of items
-        Any additional values are passed as field parameters that can be
-        accessed by generated fields.
 
     Examples
     --------
@@ -169,9 +165,6 @@ class YTSliceBase(YTSelectionContainer2D):
     field_parameters : dictionary
          A dictionary of field parameters than can be accessed by derived
          fields.
-    kwargs : dict of items
-        Any additional values are passed as field parameters that can be
-        accessed by generated fields.
 
     Examples
     --------
@@ -250,9 +243,6 @@ class YTCuttingPlaneBase(YTSelectionContainer2D):
     node_name: string, optional
         The node in the .yt file to find or store this slice at.  Should
         probably not be used.
-    kwargs : dict of items
-        Any additional values are passed as field parameters that can be
-        accessed by generated fields.
 
     Notes
     -----
@@ -407,8 +397,8 @@ class YTCuttingPlaneBase(YTSelectionContainer2D):
         """
         normal = self.normal
         center = self.center
-        self.fields = [k for k in self.field_data.keys()
-                       if k not in self._key_fields]
+        self.fields = ensure_list(fields) + [k for k in self.field_data.keys()
+                                             if k not in self._key_fields]
         from yt.visualization.plot_window import get_oblique_window_parameters, PWViewerMPL
         from yt.visualization.fixed_resolution import ObliqueFixedResolutionBuffer
         (bounds, center_rot) = get_oblique_window_parameters(normal, center, width, self.pf)
@@ -419,6 +409,7 @@ class YTCuttingPlaneBase(YTSelectionContainer2D):
             plot_type='OffAxisSlice')
         if axes_unit is not None:
             pw.set_axes_unit(axes_unit)
+        pw._setup_plots()
         return pw
 
     def to_frb(self, width, resolution, height=None):
@@ -460,12 +451,12 @@ class YTCuttingPlaneBase(YTSelectionContainer2D):
         >>> write_image(np.log10(frb["Density"]), 'density_1pc.png')
         """
         if iterable(width):
-            assert_valid_width_tuple(width)
+            validate_width_tuple(width)
             width = self.pf.quan(width[0], width[1])
         if height is None:
             height = width
         elif iterable(height):
-            assert_valid_width_tuple(height)
+            validate_width_tuple(height)
             height = self.pf.quan(height[0], height[1])
         if not iterable(resolution):
             resolution = (resolution, resolution)
@@ -696,6 +687,9 @@ class YTCutRegionBase(YTSelectionContainer3D):
         self.base_object.get_data(fields)
         ind = self._cond_ind
         for field in fields:
+            f = self.base_object[field]
+            if f.shape != ind.shape:
+                raise YTMixedCutRegion(self.conditionals, field)
             self.field_data[field] = self.base_object[field][ind]
 
     @property
@@ -706,6 +700,8 @@ class YTCutRegionBase(YTSelectionContainer3D):
             for cond in self.conditionals:
                 res = eval(cond)
                 if ind is None: ind = res
+                if ind.shape != res.shape:
+                    raise YTIllDefinedCutRegion(self.conditionals)
                 np.logical_and(res, ind, ind)
         return ind
 

@@ -18,18 +18,16 @@ import numpy as np
 from .cartesian_coordinates import \
     CartesianCoordinateHandler
 
-class PPVCoordinateHandler(CartesianCoordinateHandler):
+class SpectralCubeCoordinateHandler(CartesianCoordinateHandler):
 
     def __init__(self, pf):
-        super(PPVCoordinateHandler, self).__init__(pf)
+        super(SpectralCubeCoordinateHandler, self).__init__(pf)
 
         self.axis_name = {}
         self.axis_id = {}
-        self.x_axis = {}
-        self.y_axis = {}
 
-        for axis, axis_name in zip([pf.lon_axis, pf.lat_axis, pf.vel_axis],
-                                   ["Image\ x", "Image\ y", pf.vel_name]):
+        for axis, axis_name in zip([pf.lon_axis, pf.lat_axis, pf.spec_axis],
+                                   ["Image\ x", "Image\ y", pf.spec_name]):
             lower_ax = "xyz"[axis]
             upper_ax = lower_ax.upper()
 
@@ -42,31 +40,26 @@ class PPVCoordinateHandler(CartesianCoordinateHandler):
             self.axis_id[axis] = axis
             self.axis_id[axis_name] = axis
 
-            if axis == 0:
-                self.x_axis[axis] = 1
-                self.x_axis[lower_ax] = 1
-                self.x_axis[axis_name] = 1
-            else:
-                self.x_axis[axis] = 0
-                self.x_axis[lower_ax] = 0
-                self.x_axis[axis_name] = 0
-
-            if axis == 2:
-                self.y_axis[axis] = 1
-                self.y_axis[lower_ax] = 1
-                self.y_axis[axis_name] = 1
-            else:
-                self.y_axis[axis] = 2
-                self.y_axis[lower_ax] = 2
-                self.y_axis[axis_name] = 2
-
         self.default_unit_label = {}
         self.default_unit_label[pf.lon_axis] = "pixel"
         self.default_unit_label[pf.lat_axis] = "pixel"
-        self.default_unit_label[pf.vel_axis] = pf.vel_unit
+        self.default_unit_label[pf.spec_axis] = pf.spec_unit
+
+        def _spec_axis(ax, x, y):
+            p = (x,y)[ax]
+            return [self.pf.pixel2spec(pp).v for pp in p]
+
+        self.axis_field = {}
+        self.axis_field[self.pf.spec_axis] = _spec_axis
 
     def convert_to_cylindrical(self, coord):
         raise NotImplementedError
 
     def convert_from_cylindrical(self, coord):
         raise NotImplementedError
+
+    x_axis = { 'x' : 1, 'y' : 0, 'z' : 0,
+                0  : 1,  1  : 0,  2  : 0}
+
+    y_axis = { 'x' : 2, 'y' : 2, 'z' : 1,
+                0  : 2,  1  : 2,  2  : 1}

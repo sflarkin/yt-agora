@@ -18,8 +18,6 @@ import os
 import cPickle
 import weakref
 import h5py
-from exceptions import IOError, TypeError
-from types import ClassType
 import numpy as np
 import abc
 import copy
@@ -40,6 +38,7 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
 from yt.utilities.exceptions import YTFieldNotFound
 
 class Index(ParallelAnalysisInterface):
+    """The base index class"""
     _global_mesh = True
     _unsupported_objects = ()
     _index_properties = ()

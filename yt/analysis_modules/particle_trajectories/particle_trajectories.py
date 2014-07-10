@@ -32,9 +32,9 @@ class ParticleTrajectories(object):
     
     Parameters
     ----------
-    filenames : list of strings
-        A time-sorted list of filenames to construct the DatasetSeries
-        object.
+    outputs : `yt.data_objects.time_series.DatasetSeries` or list of strings
+        DatasetSeries object, or a time-sorted list of filenames to
+        construct a new DatasetSeries object.
     indices : array_like
         An integer array of particle indices whose trajectories we
         want to track. If they are not sorted they will be sorted.
@@ -43,6 +43,10 @@ class ParticleTrajectories(object):
         collection is instantiated.
         Default : None (will default to the fields 'particle_position_x',
         'particle_position_y', 'particle_position_z')
+    suppress_logging : boolean
+        Suppress yt's logging when iterating over the simulation time
+        series.
+        Default : False
 
     Examples
     ________
@@ -59,18 +63,22 @@ class ParticleTrajectories(object):
     >>> for t in trajs :
     >>>     print t["particle_velocity_x"].max(), t["particle_velocity_x"].min()
     """
-    def __init__(self, filenames, indices, fields=None) :
+    def __init__(self, outputs, indices, fields=None, suppress_logging=False):
 
         indices.sort() # Just in case the caller wasn't careful
         self.field_data = YTFieldData()
-        self.data_series = DatasetSeries.from_filenames(filenames)
+        if isinstance(outputs, DatasetSeries):
+            self.data_series = outputs
+        else:
+            self.data_series = DatasetSeries(outputs)
         self.masks = []
         self.sorts = []
         self.array_indices = []
         self.indices = indices
         self.num_indices = len(indices)
-        self.num_steps = len(filenames)
+        self.num_steps = len(outputs)
         self.times = []
+        self.suppress_logging = suppress_logging
 
         # Default fields 
         
@@ -80,8 +88,9 @@ class ParticleTrajectories(object):
         fields.append("particle_position_z")
         fields = list(OrderedDict.fromkeys(fields))
 
-        old_level = int(ytcfg.get("yt","loglevel"))
-        mylog.setLevel(40)
+        if self.suppress_logging:
+            old_level = int(ytcfg.get("yt","loglevel"))
+            mylog.setLevel(40)
         my_storage = {}
         pbar = get_pbar("Constructing trajectory information", len(self.data_series))
         for i, (sto, ds) in enumerate(self.data_series.piter(storage=my_storage)):
@@ -98,7 +107,8 @@ class ParticleTrajectories(object):
             pbar.update(i)
         pbar.finish()
 
-        mylog.setLevel(old_level)
+        if self.suppress_logging:
+            mylog.setLevel(old_level)
 
         times = []
         for fn, time in sorted(my_storage.items()):
@@ -188,14 +198,17 @@ class ParticleTrajectories(object):
         with shape (num_indices, num_steps)
         """
         if not self.field_data.has_key(field):
-            old_level = int(ytcfg.get("yt","loglevel"))
-            mylog.setLevel(40)
-            dd_first = self.data_series[0].all_data()
+            if self.suppress_logging:
+                old_level = int(ytcfg.get("yt","loglevel"))
+                mylog.setLevel(40)
+            ds_first = self.data_series[0]
+            dd_first = ds_first.all_data()
             fd = dd_first._determine_fields(field)[0]
             if field not in self.particle_fields:
                 if self.data_series[0].field_info[fd].particle_type:
                     self.particle_fields.append(field)
-            particles = np.empty((self.num_indices,self.num_steps)) * np.nan
+            particles = np.empty((self.num_indices,self.num_steps))
+            particles[:] = np.nan
             step = int(0)
             pbar = get_pbar("Generating field %s in trajectories." % (field), self.num_steps)
             my_storage={}
@@ -229,7 +242,8 @@ class ParticleTrajectories(object):
             for i, (fn, (indices, pfield)) in enumerate(sorted(my_storage.items())):
                 particles[indices,i] = pfield
             self.field_data[field] = array_like_field(dd_first, particles, fd)
-            mylog.setLevel(old_level)
+            if self.suppress_logging:
+                mylog.setLevel(old_level)
         return self.field_data[field]
 
     def trajectory_from_index(self, index):

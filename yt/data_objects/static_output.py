@@ -18,6 +18,7 @@ import string, re, gc, time, os, os.path, weakref
 import functools
 
 from yt.funcs import *
+from yt.extern.six import add_metaclass
 
 from yt.config import ytcfg
 from yt.utilities.cosmology import \
@@ -54,8 +55,8 @@ from yt.geometry.spherical_coordinates import \
     SphericalCoordinateHandler
 from yt.geometry.geographic_coordinates import \
     GeographicCoordinateHandler
-from yt.geometry.ppv_coordinates import \
-    PPVCoordinateHandler
+from yt.geometry.spec_cube_coordinates import \
+    SpectralCubeCoordinateHandler
 
 # We want to support the movie format in the future.
 # When such a thing comes to pass, I'll move all the stuff that is contant up
@@ -68,6 +69,12 @@ def _unsupported_object(pf, obj_name):
     def _raise_unsupp(*args, **kwargs):
         raise YTObjectNotImplemented(pf, obj_name)
     return _raise_unsupp
+
+class RegisteredDataset(type):
+    def __init__(cls, name, b, d):
+        type.__init__(cls, name, b, d)
+        output_type_registry[name] = cls
+        mylog.debug("Registering: %s as %s", name, cls)
 
 class IndexProxy(object):
     # This is a simple proxy for Index objects.  It enables backwards
@@ -101,6 +108,7 @@ def requires_index(attr_name):
 
     return ireq
 
+@add_metaclass(RegisteredDataset)
 class Dataset(object):
 
     default_fluid_type = "gas"
@@ -117,12 +125,6 @@ class Dataset(object):
     field_units = None
     derived_field_list = requires_index("derived_field_list")
     _instantiated = False
-
-    class __metaclass__(type):
-        def __init__(cls, name, b, d):
-            type.__init__(cls, name, b, d)
-            output_type_registry[name] = cls
-            mylog.debug("Registering: %s as %s", name, cls)
 
     def __new__(cls, filename=None, *args, **kwargs):
         from yt.frontends.stream.data_structures import StreamHandler
@@ -223,7 +225,7 @@ class Dataset(object):
             self.current_time, self.unique_identifier)
         try:
             import hashlib
-            return hashlib.md5(s).hexdigest()
+            return hashlib.md5(s.encode('utf-8')).hexdigest()
         except ImportError:
             return s.replace(";", "*")
 
@@ -246,21 +248,8 @@ class Dataset(object):
         """ Returns units, parameters, or conversion_factors in that order. """
         return self.parameters[key]
 
-    def keys(self):
-        """
-        Returns a list of possible keys, from units, parameters and
-        conversion_factors.
-
-        """
-        return self.units.keys() \
-             + self.time_units.keys() \
-             + self.parameters.keys() \
-             + self.conversion_factors.keys()
-
     def __iter__(self):
-        for ll in [self.units, self.time_units,
-                   self.parameters, self.conversion_factors]:
-            for i in ll.keys(): yield i
+      for i in self.parameters: yield i
 
     def get_smallest_appropriate_unit(self, v):
         max_nu = 1e30
@@ -372,8 +361,8 @@ class Dataset(object):
             self.coordinates = SphericalCoordinateHandler(self)
         elif self.geometry == "geographic":
             self.coordinates = GeographicCoordinateHandler(self)
-        elif self.geometry == "ppv":
-            self.coordinates = PPVCoordinateHandler(self)
+        elif self.geometry == "spectral_cube":
+            self.coordinates = SpectralCubeCoordinateHandler(self)
         else:
             raise YTGeometryNotSupported(self.geometry)
 
@@ -509,7 +498,7 @@ class Dataset(object):
                 continue
             cname = cls.__name__
             if cname.endswith("Base"): cname = cname[:-4]
-            self._add_object_class(name, cname, cls, {'pf':self})
+            self._add_object_class(name, cname, cls, {'pf':weakref.proxy(self)})
         if self.refine_by != 2 and hasattr(self, 'proj') and \
             hasattr(self, 'overlap_proj'):
             mylog.warning("Refine by something other than two: reverting to"
@@ -530,15 +519,27 @@ class Dataset(object):
 
     def find_max(self, field):
         """
-        Returns (value, center) of location of maximum for a given field.
+        Returns (value, location) of the maximum of a given field.
         """
         mylog.debug("Searching for maximum value of %s", field)
         source = self.all_data()
         max_val, maxi, mx, my, mz = \
-            source.quantities["MaxLocation"](field)
+            source.quantities.max_location(field)
         mylog.info("Max Value is %0.5e at %0.16f %0.16f %0.16f",
               max_val, mx, my, mz)
-        return max_val, np.array([mx, my, mz], dtype="float64")
+        return max_val, self.arr([mx, my, mz], 'code_length', dtype="float64")
+
+    def find_min(self, field):
+        """
+        Returns (value, location) for the minimum of a given field.
+        """
+        mylog.debug("Searching for minimum value of %s", field)
+        source = self.all_data()
+        min_val, maxi, mx, my, mz = \
+            source.quantities.min_location(field)
+        mylog.info("Min Value is %0.5e at %0.16f %0.16f %0.16f",
+              min_val, mx, my, mz)
+        return min_val, self.arr([mx, my, mz], 'code_length', dtype="float64")
 
     # Now all the object related stuff
     def all_data(self, find_max=False):
@@ -660,9 +661,38 @@ class Dataset(object):
     def add_field(self, name, function=None, **kwargs):
         """
         Dataset-specific call to add_field
+
+        Add a new field, along with supplemental metadata, to the list of
+        available fields.  This respects a number of arguments, all of which
+        are passed on to the constructor for
+        :class:`~yt.data_objects.api.DerivedField`.
+
+        Parameters
+        ----------
+
+        name : str
+           is the name of the field.
+        function : callable
+           A function handle that defines the field.  Should accept
+           arguments (field, data)
+        units : str
+           A plain text string encoding the unit.  Powers must be in
+           python syntax (** instead of ^).
+        take_log : bool
+           Describes whether the field should be logged
+        validators : list
+           A list of :class:`FieldValidator` objects
+        particle_type : bool
+           Is this a particle (1D) field?
+        vector_field : bool
+           Describes the dimensionality of the field.  Currently unused.
+        display_name : str
+           A name used in the plots
+
         """
         self.index
         self.field_info.add_field(name, function=function, **kwargs)
+        self.field_info._show_field_errors.append(name)
         deps, _ = self.field_info.check_derived_fields([name])
         self.field_dependencies.update(deps)
 
@@ -687,3 +717,6 @@ class ParticleFile(object):
 
     def _calculate_offsets(self, fields):
         pass
+
+    def __cmp__(self, other):
+        return cmp(self.filename, other.filename)
