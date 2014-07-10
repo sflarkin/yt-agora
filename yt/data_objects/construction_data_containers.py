@@ -17,10 +17,8 @@ Data containers that require processing before they can be utilized.
 import numpy as np
 import math
 import weakref
-import exceptions
 import itertools
 import shelve
-from exceptions import ValueError, KeyError
 from functools import wraps
 import fileinput
 from re import finditer
@@ -129,7 +127,6 @@ class YTStreamlineBase(YTSelectionContainer1D):
         
 
     def _get_cut_mask(self, grid):
-        #pdb.set_trace()
         points_in_grid = np.all(self.positions > grid.LeftEdge, axis=1) & \
                          np.all(self.positions <= grid.RightEdge, axis=1) 
         pids = np.where(points_in_grid)[0]
@@ -181,8 +178,6 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         weight value before being integrated, and at the conclusion of the
         projection the resultant values will be divided by the projected
         `weight_field`.
-    max_level : int
-        If supplied, only cells at or below this level will be projected.
     center : array_like, optional
         The 'center' supplied to fields that use it.  Note that this does
         not have to have `coord` as one value.  Strictly optional.
@@ -210,15 +205,15 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
     _con_args = ('axis', 'field', 'weight_field')
     _container_fields = ('px', 'py', 'pdx', 'pdy', 'weight_field')
     def __init__(self, field, axis, weight_field = None,
-                 center = None, pf = None, data_source=None, 
+                 center = None, pf = None, data_source = None,
                  style = "integrate", field_parameters = None):
         YTSelectionContainer2D.__init__(self, axis, pf, field_parameters)
         if style == "sum":
             self.proj_style = "integrate"
-            self.sum_only = True
+            self._sum_only = True
         else:
             self.proj_style = style
-            self.sum_only = False
+            self._sum_only = False
         if style == "mip":
             self.func = np.max
         elif style == "integrate" or style == "sum":
@@ -321,7 +316,7 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
             finfo = self.pf._get_field_info(*field)
             mylog.debug("Setting field %s", field)
             units = finfo.units
-            if self.weight_field is None:
+            if self.weight_field is None and not self._sum_only:
                 # See _handle_chunk where we mandate cm
                 if units == '':
                     input_units = "cm"
@@ -333,7 +328,7 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
             self[field] = YTArray(field_data[fi].ravel(),
                                   input_units=input_units,
                                   registry=self.pf.unit_registry)
-            if self.weight_field is None:
+            if self.weight_field is None and not self._sum_only:
                 u_obj = Unit(units, registry=self.pf.unit_registry)
                 if u_obj.is_code_unit and input_units != units \
                     or self.pf.no_cgs_equiv_length:
@@ -355,7 +350,7 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         tree.initialize_chunk(i1, i2, ilevel)
 
     def _handle_chunk(self, chunk, fields, tree):
-        if self.proj_style == "mip" or self.sum_only:
+        if self.proj_style == "mip" or self._sum_only:
             dl = 1.0
         else:
             # This gets explicitly converted to cm
@@ -600,7 +595,7 @@ class YTArbitraryGridBase(YTCoveringGridBase):
     ----------
     left_edge : array_like
         The left edge of the region to be extracted
-    rigth_edge : array_like
+    right_edge : array_like
         The left edge of the region to be extracted
     dims : array_like
         Number of cells along each axis of resulting grid.
@@ -631,7 +626,7 @@ class YTArbitraryGridBase(YTCoveringGridBase):
         self.ActiveDimensions = np.array(dims, dtype='int32')
         if self.ActiveDimensions.size == 1:
             self.ActiveDimensions = np.array([dims, dims, dims], dtype="int32")
-        self.dds = (self.right_edge - self.left_edge)/self.ActiveDimensions
+        self.dds = self.base_dds = (self.right_edge - self.left_edge)/self.ActiveDimensions
         self.level = 99
         self._setup_data_source()
 

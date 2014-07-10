@@ -76,6 +76,7 @@ class GadgetBinaryFile(ParticleFile):
 class ParticleDataset(Dataset):
     _unit_base = None
     over_refine_factor = 1
+    filter_bbox = False
 
 
 class GadgetDataset(ParticleDataset):
@@ -312,8 +313,9 @@ class OWLSDataset(GadgetHDF5Dataset):
 
         # Set standard values
         self.current_time = hvals["Time_GYR"] * sec_conversion["Gyr"]
-        self.domain_left_edge = np.zeros(3, "float64")
-        self.domain_right_edge = np.ones(3, "float64") * hvals["BoxSize"]
+        if self.domain_left_edge is None:
+            self.domain_left_edge = np.zeros(3, "float64")
+            self.domain_right_edge = np.ones(3, "float64") * hvals["BoxSize"]
         nz = 1 << self.over_refine_factor
         self.domain_dimensions = np.ones(3, "int32") * nz
         self.cosmological_simulation = 1
@@ -343,7 +345,8 @@ class OWLSDataset(GadgetHDF5Dataset):
         try:
             fileh = h5py.File(args[0], mode='r')
             if "Constants" in fileh["/"].keys() and \
-               "Header" in fileh["/"].keys():
+               "Header" in fileh["/"].keys() and \
+               "SUBFIND" not in fileh["/"].keys():
                 fileh.close()
                 return True
             fileh.close()

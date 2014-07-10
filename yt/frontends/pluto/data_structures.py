@@ -13,7 +13,6 @@ Data structures for Pluto.
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
-import h5py
 import re
 import os
 import weakref
@@ -21,9 +20,6 @@ import numpy as np
 
 from collections import \
      defaultdict
-from string import \
-     strip, \
-     rstrip
 from stat import \
      ST_CTIME
 
@@ -41,6 +37,8 @@ from yt.data_objects.static_output import \
      Dataset
 from yt.utilities.definitions import \
      mpc_conversion, sec_conversion
+from yt.utilities.file_handler import \
+    HDF5FileHandler
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
      parallel_root_only
 from yt.utilities.io_handler import \
@@ -170,7 +168,7 @@ class PlutoDataset(Dataset):
 
     def __init__(self, filename, dataset_type='pluto_hdf5',
                  storage_filename = None, ini_filename = None):
-        self._handle = h5py.File(filename,'r')
+        self._handle = HDF5FileHandler(filename)
         self.current_time = self._handle.attrs['time']
         self.ini_filename = ini_filename
         self.fullplotdir = os.path.abspath(filename)
@@ -182,9 +180,6 @@ class PlutoDataset(Dataset):
         self.parameters["HydroMethod"] = 'chombo' # always PPM DE
         self.parameters["DualEnergyFormalism"] = 0 
         self.parameters["EOSType"] = -1 # default
-
-    def __del__(self):
-        self._handle.close()
 
     def _set_units(self):
         """
@@ -236,7 +231,8 @@ class PlutoDataset(Dataset):
         # read the file line by line, storing important parameters
         for lineI, line in enumerate(lines):
             try:
-                param, sep, vals = map(rstrip,line.partition(' '))
+                param, sep, vals = [v.rstrip() for v in line.partition(' ')]
+                #param, sep, vals = map(rstrip,line.partition(' '))
             except ValueError:
                 mylog.error("ValueError: '%s'", line)
             if pluto2enzoDict.has_key(param):
