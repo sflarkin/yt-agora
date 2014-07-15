@@ -19,9 +19,8 @@ import types
 import sys
 import warnings
 
-from matplotlib.delaunay.triangulate import Triangulation as triang
+from distutils.version import LooseVersion
 from matplotlib.mathtext import MathTextParser
-from distutils import version
 from numbers import Number
 
 from ._mpl_imports import FigureCanvasAgg
@@ -66,8 +65,7 @@ from yt.utilities.exceptions import \
 # included in matplotlib (not in gentoo, yes in everything else)
 # Also accounting for the fact that in 1.2.0, pyparsing got renamed.
 try:
-    if version.LooseVersion(matplotlib.__version__) < \
-        version.LooseVersion("1.2.0"):
+    if LooseVersion(matplotlib.__version__) < LooseVersion("1.2.0"):
         from matplotlib.pyparsing import ParseFatalException
     else:
         if sys.version_info[0] == 3:
@@ -1529,7 +1527,13 @@ class PWViewerExtJS(PlotWindow):
         y = raw_data['py']
         z = raw_data[field]
         if logit: z = np.log10(z)
-        fvals = triang(x,y).nn_interpolator(z)(xi,yi).transpose()[::-1,:]
+        if LooseVersion(matplotlib.__version__) < LooseVersion("1.4.0"):
+            from matplotlib.delaunay.triangulate import Triangulation as triang
+            fvals = triang(x,y).nn_interpolator(z)(xi,yi).transpose()[::-1,:]
+        else:
+            from matplotlib.tri import Triangulation, LinearTriInterpolator
+            t = Triangulation(x, y)
+            fvals = LinearTriInterpolator(t, z)(xi, yi).transpose()[::-1,:]
 
         ax.contour(fvals, number, colors='w')
 
@@ -1680,6 +1684,7 @@ class PWViewerExtJS(PlotWindow):
 
 
 class WindowPlotMPL(ImagePlotMPL):
+    """A container for a single PlotWindow matplotlib figure and axes"""
     def __init__(self, data, cbname, cmap, extent, zlim, figure_size, fontsize,
                  unit_aspect, figure, axes, cax):
         self._draw_colorbar = True
@@ -1855,7 +1860,7 @@ def SlicePlot(pf, normal=None, fields=None, axis=None, *args, **kwargs):
         if np.count_nonzero(normal) == 1:
             normal = ("x","y","z")[np.nonzero(normal)[0][0]]
         else:
-            normal = np.array(normal)
+            normal = np.array(normal, dtype='float64')
             np.divide(normal, np.dot(normal,normal), normal)
 
     # by now the normal should be properly set to get either a On/Off Axis plot
