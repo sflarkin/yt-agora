@@ -224,6 +224,7 @@ def setup_package():
         zip_safe=False,
         data_files=REASON_FILES,
         cmdclass={'build_py': my_build_py, 'build_src': my_build_src},
+        install_requires=["thingking"],
     )
     return
 
