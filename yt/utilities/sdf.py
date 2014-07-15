@@ -21,7 +21,8 @@ _types = {
     'char': 'B',
 }
 
-def get_type(vtype, tlen=None):
+
+def _get_type(vtype, tlen=None):
     try:
         t = _types[vtype]
         if tlen is not None:
@@ -32,13 +33,15 @@ def get_type(vtype, tlen=None):
         t = eval("np."+vtype)
     return t
 
-def lstrip(text_list):
+
+def _lstrip(text_list):
     return [t.strip() for t in text_list]
 
-def get_struct_vars(line):
-    spl = lstrip(line.split(";"))
-    multiv = lstrip(spl[0].split(","))
-    ret = lstrip(multiv[0].split())
+
+def _get_struct_vars(line):
+    spl = _lstrip(line.split(";"))
+    multiv = _lstrip(spl[0].split(","))
+    ret = _lstrip(multiv[0].split())
     ctype = ret[0]
     vnames = [ret[-1]] + multiv[1:]
     vnames = [v.strip() for v in vnames]
@@ -49,22 +52,23 @@ def get_struct_vars(line):
         if '[' in vnames[0]:
             num = int(vnames[0].split('[')[-1].strip(']'))
             #num = int(re.sub("\D", "", vnames[0]))
-    ctype = get_type(ctype, tlen=num)
+    ctype = _get_type(ctype, tlen=num)
     return ctype, vnames
+
 
 def bbox_filter(left, right, domain_width):
 
     def myfilter(chunk, mask=None):
         pos = np.array([chunk['x'], chunk['y'], chunk['z']]).T
 
-        # This hurts, but is useful for periodicity. Probably should check first
-        # if it is even needed for a given left/right
+        # This hurts, but is useful for periodicity. Probably should check
+        # first if it is even needed for a given left/right
         for i in range(3):
-            pos[:,i] = np.mod(pos[:,i] - left[i], domain_width[i]) + left[i]
+            pos[:, i] = np.mod(pos[:, i] - left[i], domain_width[i]) + left[i]
 
         # Now get all particles that are within the bbox
         if mask is None:
-            mask = np.all(pos >= left, axis=1) 
+            mask = np.all(pos >= left, axis=1)
             np.logical_and(mask, np.all(pos < right, axis=1), mask)
         else:
             np.logical_and(mask, np.all(pos >= left, axis=1), mask)
@@ -73,15 +77,17 @@ def bbox_filter(left, right, domain_width):
 
     return myfilter
 
+
 def sphere_filter(center, radius, domain_width):
 
     def myfilter(chunk, mask=None):
         pos = np.array([chunk['x'], chunk['y'], chunk['z']]).T
+        left = center-radius
 
-        # This hurts, but is useful for periodicity. Probably should check first
-        # if it is even needed for a given left/right
+        # This hurts, but is useful for periodicity. Probably should check
+        # first if it is even needed for a given left/right
         for i in range(3):
-            pos[:,i] = np.mod(pos[:,i] - left[i], domain_width[i]) + left[i]
+            pos[:, i] = np.mod(pos[:, i] - left[i], domain_width[i]) + left[i]
 
         # Now get all particles that are within the radius
         if mask is None:
@@ -92,10 +98,12 @@ def sphere_filter(center, radius, domain_width):
 
     return myfilter
 
-def ensure_xzy_fields(fields):
+
+def _ensure_xyz_fields(fields):
     for f in 'xyz':
         if f not in fields:
             fields.append(f)
+
 
 class DataStruct(object):
     """docstring for DataStruct"""
@@ -120,13 +128,13 @@ class DataStruct(object):
 
     def build_memmap(self):
         assert(self.size != -1)
-        self.handle = np.memmap(self.filename, dtype=self.dtype,
-                        mode='r', shape=self.size, offset=self._offset)
+        self.handle = np.memmap(self.filename, dtype=self.dtype, mode='r',
+                                shape=self.size, offset=self._offset)
         for k in self.dtype.names:
             self.data[k] = self.handle[k]
 
     def __del__(self):
-        if self.handle:
+        if self.handle is not None:
             try:
                 self.handle.close()
             except AttributeError:
@@ -203,12 +211,45 @@ class HTTPDataStruct(DataStruct):
 
 class SDFRead(dict):
 
-    """docstring for SDFRead"""
-
     _eof = 'SDF-EO'
     _data_struct = DataStruct
 
     def __init__(self, filename, header=None):
+        r""" Read an SDF file, loading parameters and variables.
+
+        Given an SDF file (see http://bitbucket.org/JohnSalmon/sdf), parse the
+        ASCII header and construct numpy memmap array
+        access.
+
+        Parameters
+        ----------
+        filename: string
+        The filename associated with the data to be loaded.
+        header: string, optional
+        If separate from the data file, a file containing the
+        header can be specified. Default: None.
+
+        Returns
+        -------
+        self : SDFRead object
+        Dict-like container of parameters and data.
+
+
+        References
+        ----------
+        SDF is described here:
+
+            J. K. Salmon and M. S. Warren. Self-Describing File (SDF) Library.
+            Zenodo, Jun 2014. URL http://bitbucket.org/JohnSalmon/sdf.
+
+        Examples
+        --------
+
+        >>> sdf = SDFRead("data.sdf", header="data.hdr")
+        >>> print sdf.parameters
+        >>> print sdf['x']
+
+        """
         self.filename = filename
         if header is None:
             header = filename
@@ -219,6 +260,16 @@ class SDFRead(dict):
         self.parse_header()
         self.set_offsets()
         self.load_memmaps()
+
+    def __repr__(self):
+        disp = "<SDFRead Object> file: %s\n" % self.filename
+        disp += "parameters: \n"
+        for k, v in self.parameters.iteritems():
+            disp += "\t%s: %s\n" % (k, v)
+        disp += "arrays: \n"
+        for k, v in self.iteritems():
+            disp += "\t%s[%s]\n" % (k, v.size)
+        return disp
 
     def parse_header(self):
         """docstring for parse_header"""
@@ -248,8 +299,8 @@ class SDFRead(dict):
             self.comments.append(line)
             return
 
-        spl = lstrip(line.split("="))
-        vtype, vname = lstrip(spl[0].split())
+        spl = _lstrip(line.split("="))
+        vtype, vname = _lstrip(spl[0].split())
         vname = vname.strip("[]")
         vval = spl[-1].strip(";")
         if vtype == 'parameter':
@@ -273,7 +324,7 @@ class SDFRead(dict):
         str_lines = []
         l = ascfile.readline()
         while "}" not in l:
-            vtype, vnames = get_struct_vars(l)
+            vtype, vnames = _get_struct_vars(l)
             for v in vnames:
                 str_types.append((v, vtype))
             l = ascfile.readline()
@@ -303,7 +354,41 @@ class SDFRead(dict):
 
 class HTTPSDFRead(SDFRead):
 
-    """docstring for SDFRead"""
+    r""" Read an SDF file hosted on the internet.
+
+    Given an SDF file (see http://bitbucket.org/JohnSalmon/sdf), parse the
+    ASCII header and construct numpy memmap array
+    access.
+
+    Parameters
+    ----------
+    filename: string
+    The filename associated with the data to be loaded.
+    header: string, optional
+    If separate from the data file, a file containing the
+    header can be specified. Default: None.
+
+    Returns
+    -------
+    self : SDFRead object
+    Dict-like container of parameters and data.
+
+
+    References
+    ----------
+    SDF is described here:
+
+        J. K. Salmon and M. S. Warren. Self-Describing File (SDF) Library.
+        Zenodo, Jun 2014. URL http://bitbucket.org/JohnSalmon/sdf.
+
+    Examples
+    --------
+
+    >>> sdf = SDFRead("data.sdf", header="data.hdr")
+    >>> print sdf.parameters
+    >>> print sdf['x']
+
+    """
 
     _data_struct = HTTPDataStruct
 
@@ -331,6 +416,41 @@ class HTTPSDFRead(SDFRead):
 
 
 def load_sdf(filename, header=None):
+    r""" Load an SDF file.
+
+    Given an SDF file (see http://bitbucket.org/JohnSalmon/sdf), parse the
+    ASCII header and construct numpy memmap array access. The file can
+    be either local (on a hard drive, for example), or remote (on the World
+    Wide Web).
+
+    Parameters
+    ----------
+    filename: string
+        The filename or WWW address associated with the data to be loaded.
+    header: string, optional
+        If separate from the data file, a file containing the
+        header can be specified. Default: None.
+
+    Returns
+    -------
+    sdf : SDFRead object
+        Dict-like container of parameters and data.
+
+    References
+    ----------
+    SDF is described here:
+
+        J. K. Salmon and M. S. Warren. Self-Describing File (SDF) Library.
+        Zenodo, Jun 2014. URL http://bitbucket.org/JohnSalmon/sdf.
+
+    Examples
+    --------
+
+    >>> sdf = SDFRead("data.sdf", header="data.hdr")
+    >>> print sdf.parameters
+    >>> print sdf['x']
+
+    """
     if 'http' in filename:
         sdf = HTTPSDFRead(filename, header=header)
     else:
@@ -463,8 +583,8 @@ class SDFIndex(object):
             self.domain_buffer = (self.domain_dims - int(self.domain_dims/(1.0 + expand_root)))/2
             self.domain_active_dims = self.domain_dims - 2*self.domain_buffer
 
-        mylog.debug("SINDEX rmin: %s, rmax: %s" % (self.rmin, self.rmax))
-        mylog.debug("SINDEX: domain_width: %s, domain_dims: %s, domain_active_dims: %s " %
+        mylog.debug("MIDX rmin: %s, rmax: %s" % (self.rmin, self.rmax))
+        mylog.debug("MIDX: domain_width: %s, domain_dims: %s, domain_active_dims: %s " %
                     (self.domain_width, self.domain_dims, self.domain_active_dims))
 
     def spread_bits(self, ival, level=None):
@@ -564,7 +684,7 @@ class SDFIndex(object):
         #print 'Getting data from ileft to iright:',  ileft, iright
 
         ix, iy, iz = (iright-ileft)*1j
-        mylog.debug('SINDEX IBBOX: %s %s %s %s %s' % (ileft, iright, ix, iy, iz))
+        mylog.debug('MIDX IBBOX: %s %s %s %s %s' % (ileft, iright, ix, iy, iz))
 
         # plus 1 that is sliced, plus a bit since mgrid is not inclusive
         Z, Y, X = np.mgrid[ileft[2]:iright[2]+1.01,
@@ -680,7 +800,7 @@ class SDFIndex(object):
     def iter_data(self, inds, fields):
         num_inds = len(inds)
         num_reads = 0
-        mylog.debug('SINDEX Reading %i chunks' % num_inds)
+        mylog.debug('MIDX Reading %i chunks' % num_inds)
         i = 0
         while (i < num_inds):
             ind = inds[i]
@@ -809,8 +929,8 @@ class SDFIndex(object):
                 yield f, data[f][mask]
 
     def iter_bbox_data(self, left, right, fields):
-        ensure_xzy_fields(fields)
-        mylog.debug('SINDEX Loading region from %s to %s' %(left, right))
+        _ensure_xyz_fields(fields)
+        mylog.debug('MIDX Loading region from %s to %s' %(left, right))
         inds = self.get_bbox(left, right)
         # Need to put left/right in float32 to avoid fp roundoff errors
         # in the bbox later.
@@ -829,8 +949,8 @@ class SDFIndex(object):
         #    yield dd
 
     def iter_sphere_data(self, center, radius, fields):
-        ensure_xzy_fields(fields)
-        mylog.debug('SINDEX Loading spherical region %s to %s' %(center, radius))
+        _ensure_xyz_fields(fields)
+        mylog.debug('MIDX Loading spherical region %s to %s' %(center, radius))
         inds = self.get_bbox(center-radius, center+radius)
 
         my_filter = sphere_filter(center, radius, self.true_domain_width)
@@ -841,7 +961,7 @@ class SDFIndex(object):
             yield dd
 
     def iter_ibbox_data(self, left, right, fields):
-        mylog.debug('SINDEX Loading region from %s to %s' %(left, right))
+        mylog.debug('MIDX Loading region from %s to %s' %(left, right))
         inds = self.get_ibbox(left, right)
         return self.iter_data(inds, fields)
 
@@ -979,7 +1099,7 @@ class SDFIndex(object):
 
         """
 
-        ensure_xzy_fields(fields)
+        _ensure_xyz_fields(fields)
         bbox = self.get_cell_bbox(level, cell_iarr)
         filter_left = bbox[:, 0] - pad
         filter_right = bbox[:, 1] + pad
@@ -1063,7 +1183,7 @@ class SDFIndex(object):
                                              8.0, ['x','y','z','ident'])
 
         """
-        ensure_xzy_fields(fields)
+        _ensure_xyz_fields(fields)
         bbox = self.get_cell_bbox(level, cell_iarr)
         filter_left = bbox[:, 0] - pad
         filter_right = bbox[:, 1] + pad
