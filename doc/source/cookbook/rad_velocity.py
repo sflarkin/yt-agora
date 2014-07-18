@@ -1,6 +1,3 @@
-### THIS RECIPE IS CURRENTLY BROKEN IN YT-3.0
-### DO NOT TRUST THIS RECIPE UNTIL THIS LINE IS REMOVED
-
 import yt
 import matplotlib.pyplot as plt
 
@@ -16,32 +13,28 @@ bulk_vel = sp0.quantities["BulkVelocity"]()
 # Get the second sphere
 sp1 = ds.sphere(ds.domain_center, (500., "kpc"))
 
-# Set the bulk velocity field parameter 
+# Set the bulk velocity field parameter
 sp1.set_field_parameter("bulk_velocity", bulk_vel)
 
 # Radial profile without correction
 
-rp0 = yt.ProfilePlot(sp0, 'radius', 'radial_velocity')
-rp0.set_unit('radius', 'kpc')
-rp0.set_log('radius', False)
+rp0 = yt.create_profile(sp0, 'radius', 'radial_velocity',
+                        units = {'radius': 'kpc'},
+                        logs = {'radius': False})
 
 # Radial profile with correction for bulk velocity
 
-rp1 = yt.ProfilePlot(sp1, 'radius', 'radial_velocity')
-rp1.set_unit('radius', 'kpc')
-rp1.set_log('radius', False)
-
-#rp0.save('radial_velocity_profile_uncorrected.png')
-#rp1.save('radial_velocity_profile_corrected.png')
+rp1 = yt.create_profile(sp1, 'radius', 'radial_velocity',
+                        units = {'radius': 'kpc'},
+                        logs = {'radius': False})
 
 # Make a plot using matplotlib
 
 fig = plt.figure()
 ax = fig.add_subplot(111)
 
-# Here we scale the velocities by 1.0e5 to get into km/s
-ax.plot(rad_profile0["radius"], rad_profile0["radial_velocity"],
-		rad_profile1["radius"], rad_profile1["radial_velocity"])
+ax.plot(rp0.x, rp0["radial_velocity"].in_units("km/s"),
+        rp1.x, rp1["radial_velocity"].in_units("km/s"))
 
 ax.set_xlabel(r"$\mathrm{r\ (kpc)}$")
 ax.set_ylabel(r"$\mathrm{v_r\ (km/s)}$")

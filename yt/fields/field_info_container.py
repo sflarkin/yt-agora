@@ -66,14 +66,22 @@ class FieldInfoContainer(dict):
         pass
 
     def setup_particle_fields(self, ptype, ftype='gas', num_neighbors=64 ):
+        skip_output_units = ("code_length",)
         for f, (units, aliases, dn) in sorted(self.known_particle_fields):
             units = self.ds.field_units.get((ptype, f), units)
+            if (f in aliases or ptype not in self.ds.particle_types_raw) and \
+                units not in skip_output_units:
+                u = Unit(units, registry = self.pf.unit_registry)
+                output_units = str(u.get_cgs_equivalent())
+            else:
+                output_units = units
             self.add_output_field((ptype, f),
-                units = units, particle_type = True, display_name = dn)
+                units = units, particle_type = True, display_name = dn,
+                output_units = output_units)
             if (ptype, f) not in self.field_list:
                 continue
             for alias in aliases:
-                self.alias((ptype, alias), (ptype, f))
+                self.alias((ptype, alias), (ptype, f), units = output_units)
 
         # We'll either have particle_position or particle_position_[xyz]
         if (ptype, "particle_position") in self.field_list or \
@@ -82,6 +90,16 @@ class FieldInfoContainer(dict):
                    "particle_position", "particle_velocity",
                    self)
         else:
+            # We need to check to make sure that there's a "known field" that
+            # overlaps with one of the vector fields.  For instance, if we are
+            # in the Stream frontend, and we have a set of scalar position
+            # fields, they will overlap with -- and be overridden by -- the
+            # "known" vector field that the frontend creates.  So the easiest
+            # thing to do is to simply remove the on-disk field (which doesn't
+            # exist) and replace it with a derived field.
+            if (ptype, "particle_position") in self and \
+                 self[ptype, "particle_position"]._function == NullFunc:
+                self.pop((ptype, "particle_position"))
             particle_vector_functions(ptype,
                     ["particle_position_%s" % ax for ax in 'xyz'],
                     ["particle_velocity_%s" % ax for ax in 'xyz'],
@@ -158,6 +176,28 @@ class FieldInfoContainer(dict):
         available fields.  This respects a number of arguments, all of which
         are passed on to the constructor for
         :class:`~yt.data_objects.api.DerivedField`.
+
+        Parameters
+        ----------
+
+        name : str
+           is the name of the field.
+        function : callable
+           A function handle that defines the field.  Should accept
+           arguments (field, data)
+        units : str
+           A plain text string encoding the unit.  Powers must be in
+           python syntax (** instead of ^).
+        take_log : bool
+           Describes whether the field should be logged
+        validators : list
+           A list of :class:`FieldValidator` objects
+        particle_type : bool
+           Is this a particle (1D) field?
+        vector_field : bool
+           Describes the dimensionality of the field.  Currently unused.
+        display_name : str
+           A name used in the plots
 
         """
         override = kwargs.pop("force_override", False)

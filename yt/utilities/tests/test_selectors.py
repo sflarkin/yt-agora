@@ -1,7 +1,6 @@
 import numpy as np
 from yt.testing import \
-    fake_random_ds, assert_equal, assert_array_less, \
-    YTArray
+    fake_random_ds, assert_equal, assert_array_less
 from yt.utilities.math_utils import periodic_dist
 
 
@@ -9,6 +8,26 @@ def setup():
     from yt.config import ytcfg
     ytcfg["yt", "__withintesting"] = "True"
 
+def test_point_selector():
+    # generate fake amr data
+    pf = fake_random_pf(64, nprocs=51)
+    assert(all(pf.periodicity))
+
+    dd = pf.h.all_data()
+    positions = np.array([dd[ax] for ax in 'xyz'])
+    delta = 0.5*np.array([dd['d'+ax] for ax in 'xyz'])
+    # ensure cell centers and corners always return one and 
+    # only one point object
+    for p in positions:
+        data = pf.point(p)
+        assert_equal(data["ones"].shape[0], 1) 
+    for p in positions - delta:
+        data = pf.point(p)
+        assert_equal(data["ones"].shape[0], 1)
+    for p in positions + delta:
+        data = pf.point(p)
+        assert_equal(data["ones"].shape[0], 1)
+ 
 def test_sphere_selector():
     # generate fake data with a number of non-cubical grids
     ds = fake_random_ds(64, nprocs=51)

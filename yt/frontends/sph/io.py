@@ -77,7 +77,7 @@ class IOHandlerOWLS(BaseIOHandler):
         for chunk in chunks:
             for obj in chunk.objs:
                 data_files.update(obj.data_files)
-        for data_file in data_files:
+        for data_file in sorted(data_files):
             f = _get_h5_handle(data_file.filename)
             # This double-reads
             for ptype, field_list in sorted(ptf.items()):
@@ -93,7 +93,7 @@ class IOHandlerOWLS(BaseIOHandler):
         for chunk in chunks:
             for obj in chunk.objs:
                 data_files.update(obj.data_files)
-        for data_file in data_files:
+        for data_file in sorted(data_files):
             f = _get_h5_handle(data_file.filename)
             for ptype, field_list in sorted(ptf.items()):
                 g = f["/%s" % ptype]
@@ -251,7 +251,7 @@ class IOHandlerGadgetBinary(BaseIOHandler):
         for chunk in chunks:
             for obj in chunk.objs:
                 data_files.update(obj.data_files)
-        for data_file in data_files:
+        for data_file in sorted(data_files):
             poff = data_file.field_offsets
             tp = data_file.total_particles
             f = open(data_file.filename, "rb")
@@ -268,7 +268,7 @@ class IOHandlerGadgetBinary(BaseIOHandler):
         for chunk in chunks:
             for obj in chunk.objs:
                 data_files.update(obj.data_files)
-        for data_file in data_files:
+        for data_file in sorted(data_files):
             poff = data_file.field_offsets
             tp = data_file.total_particles
             f = open(data_file.filename, "rb")
@@ -388,6 +388,7 @@ class IOHandlerTipsyBinary(BaseIOHandler):
     _ptypes = ( "Gas",
                 "DarkMatter",
                 "Stars" )
+    _chunksize = 64*64*64
 
     _aux_fields = None
     _fields = ( ("Gas", "Mass"),
@@ -497,17 +498,20 @@ class IOHandlerTipsyBinary(BaseIOHandler):
         for chunk in chunks:
             for obj in chunk.objs:
                 data_files.update(obj.data_files)
-        for data_file in data_files:
+        for data_file in sorted(data_files):
             poff = data_file.field_offsets
             tp = data_file.total_particles
             f = open(data_file.filename, "rb")
             for ptype, field_list in sorted(ptf.items(), key=lambda a: poff[a[0]]):
-                if tp[ptype] == 0: continue
                 f.seek(poff[ptype], os.SEEK_SET)
-                p = np.fromfile(f, self._pdtypes[ptype], count=tp[ptype])
-                d = [p["Coordinates"][ax].astype("float64") for ax in 'xyz']
-                del p
-                yield ptype, d
+                total = 0
+                while total < tp[ptype]:
+                    p = np.fromfile(f, self._pdtypes[ptype],
+                            count=min(self._chunksize, tp[ptype] - total))
+                    total += p.size
+                    d = [p["Coordinates"][ax].astype("float64") for ax in 'xyz']
+                    del p
+                    yield ptype, d
 
     def _read_particle_fields(self, chunks, ptf, selector):
         chunks = list(chunks)
@@ -515,21 +519,25 @@ class IOHandlerTipsyBinary(BaseIOHandler):
         for chunk in chunks:
             for obj in chunk.objs:
                 data_files.update(obj.data_files)
-        for data_file in data_files:
+        for data_file in sorted(data_files):
             poff = data_file.field_offsets
             tp = data_file.total_particles
             f = open(data_file.filename, "rb")
             for ptype, field_list in sorted(ptf.items(), key=lambda a: poff[a[0]]):
                 f.seek(poff[ptype], os.SEEK_SET)
-                p = np.fromfile(f, self._pdtypes[ptype], count=tp[ptype])
-                mask = selector.select_points(
-                    p["Coordinates"]['x'].astype("float64"),
-                    p["Coordinates"]['y'].astype("float64"),
-                    p["Coordinates"]['z'].astype("float64"), 0.0)
-                if mask is None: continue
-                tf = self._fill_fields(field_list, p, mask, data_file)
-                for field in field_list:
-                    yield (ptype, field), tf.pop(field)
+                total = 0
+                while total < tp[ptype]:
+                    p = np.fromfile(f, self._pdtypes[ptype],
+                        count=min(self._chunksize, tp[ptype] - total))
+                    total += p.size
+                    mask = selector.select_points(
+                        p["Coordinates"]['x'].astype("float64"),
+                        p["Coordinates"]['y'].astype("float64"),
+                        p["Coordinates"]['z'].astype("float64"), 0.0)
+                    if mask is None: continue
+                    tf = self._fill_fields(field_list, p, mask, data_file)
+                    for field in field_list:
+                        yield (ptype, field), tf.pop(field)
             f.close()
 
     def _update_domain(self, data_file):
@@ -717,7 +725,7 @@ class IOHandlerHTTPStream(BaseIOHandler):
         for chunk in chunks:
             for obj in chunk.objs:
                 data_files.update(obj.data_files)
-        for data_file in data_files:
+        for data_file in sorted(data_files):
             for ptype in ptf:
                 s = self._open_stream(data_file, (ptype, "Coordinates"))
                 c = np.frombuffer(s, dtype="float64")
@@ -730,7 +738,7 @@ class IOHandlerHTTPStream(BaseIOHandler):
         for chunk in chunks:
             for obj in chunk.objs:
                 data_files.update(obj.data_files)
-        for data_file in data_files:
+        for data_file in sorted(data_files):
             for ptype, field_list in sorted(ptf.items()):
                 s = self._open_stream(data_file, (ptype, "Coordinates"))
                 c = np.frombuffer(s, dtype="float64")

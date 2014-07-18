@@ -19,9 +19,8 @@ import types
 import sys
 import warnings
 
-from matplotlib.delaunay.triangulate import Triangulation as triang
+from distutils.version import LooseVersion
 from matplotlib.mathtext import MathTextParser
-from distutils import version
 from numbers import Number
 
 from ._mpl_imports import FigureCanvasAgg
@@ -66,8 +65,7 @@ from yt.utilities.exceptions import \
 # included in matplotlib (not in gentoo, yes in everything else)
 # Also accounting for the fact that in 1.2.0, pyparsing got renamed.
 try:
-    if version.LooseVersion(matplotlib.__version__) < \
-        version.LooseVersion("1.2.0"):
+    if LooseVersion(matplotlib.__version__) < LooseVersion("1.2.0"):
         from matplotlib.pyparsing import ParseFatalException
     else:
         if sys.version_info[0] == 3:
@@ -296,9 +294,11 @@ class PlotWindow(ImagePlotContainer):
         self._set_window(bounds) # this automatically updates the data and plot
         self.origin = origin
         if self.data_source.center is not None and oblique == False:
-            center = [self.data_source.center[i] for i in
-                      range(len(self.data_source.center))
-                      if i != self.data_source.axis]
+            ax = self.data_source.axis
+            xax = self.pf.coordinates.x_axis[ax]
+            yax = self.pf.coordinates.y_axis[ax]
+            center = [self.data_source.center[xax],
+                      self.data_source.center[yax]]
             self.set_center(center)
         for field in self.data_source._determine_fields(self.frb.data.keys()):
             finfo = self.data_source.ds._get_field_info(*field)
@@ -386,6 +386,7 @@ class PlotWindow(ImagePlotContainer):
         ----------
         deltas : Two-element sequence of floats, quantities, or (float, unit)
                  tuples.
+
             (delta_x, delta_y).  If a unit is not supplied the unit is assumed
             to be code_length.
 
@@ -522,6 +523,7 @@ class PlotWindow(ImagePlotContainer):
         ----------
         width : float, array of floats, (float, unit) tuple, or tuple of
                 (float, unit) tuples.
+
              Width can have four different formats to support windows with
              variable x and y widths.  They are:
 
@@ -803,12 +805,14 @@ class PWViewerMPL(PlotWindow):
                 msg = None
                 if zlim != (None, None):
                     pass
-                elif image.max() == image.min():
+                elif np.nanmax(image) == np.nanmin(image):
                     msg = "Plot image for field %s has zero dynamic " \
-                          "range. Min = Max = %d." % (f, image.max())
-                elif image.max() <= 0:
+                          "range. Min = Max = %d." % (f, np.nanmax(image))
+                elif np.nanmax(image) <= 0:
                     msg = "Plot image for field %s has no positive " \
-                          "values.  Max = %d." % (f, image.max())
+                          "values.  Max = %d." % (f, np.nanmax(image))
+                elif not np.any(np.isfinite(image)):
+                    msg = "Plot image for field %s is filled with NaNs." % (f,)
                 if msg is not None:
                     mylog.warning(msg)
                     mylog.warning("Switching to linear colorbar scaling.")
@@ -1523,7 +1527,13 @@ class PWViewerExtJS(PlotWindow):
         y = raw_data['py']
         z = raw_data[field]
         if logit: z = np.log10(z)
-        fvals = triang(x,y).nn_interpolator(z)(xi,yi).transpose()[::-1,:]
+        if LooseVersion(matplotlib.__version__) < LooseVersion("1.4.0"):
+            from matplotlib.delaunay.triangulate import Triangulation as triang
+            fvals = triang(x,y).nn_interpolator(z)(xi,yi).transpose()[::-1,:]
+        else:
+            from matplotlib.tri import Triangulation, LinearTriInterpolator
+            t = Triangulation(x, y)
+            fvals = LinearTriInterpolator(t, z)(xi, yi).transpose()[::-1,:]
 
         ax.contour(fvals, number, colors='w')
 
@@ -1674,6 +1684,7 @@ class PWViewerExtJS(PlotWindow):
 
 
 class WindowPlotMPL(ImagePlotMPL):
+    """A container for a single PlotWindow matplotlib figure and axes"""
     def __init__(self, data, cbname, cmap, extent, zlim, figure_size, fontsize,
                  unit_aspect, figure, axes, cax):
         self._draw_colorbar = True
@@ -1691,7 +1702,7 @@ class WindowPlotMPL(ImagePlotMPL):
         else:
             fsize = figure_size
         self._cb_size = 0.0375*fsize
-        self._ax_text_size = [0.9*fontscale, 0.7*fontscale]
+        self._ax_text_size = [1.2*fontscale, 0.9*fontscale]
         self._top_buff_size = 0.30*fontscale
         self._aspect = ((extent[1] - extent[0])/(extent[3] - extent[2]))
 
@@ -1718,11 +1729,12 @@ def SlicePlot(ds, normal=None, fields=None, axis=None, *args, **kwargs):
     the distinction being determined by the specified normal vector to the
     slice.
 
-        The returned plot object can be updated using one of the many helper
+    The returned plot object can be updated using one of the many helper
     functions defined in PlotWindow.
 
     Parameters
     ----------
+
     ds : :class:`yt.data_objects.api.Dataset`
         This is the dataset object corresponding to the
         simulation output to be plotted.
@@ -1816,6 +1828,7 @@ def SlicePlot(ds, normal=None, fields=None, axis=None, *args, **kwargs):
 
     Raises
     ------
+
     AssertionError
         If a proper normal axis is not specified via the normal or axis
         keywords, and/or if a field to plot is not specified.
@@ -1848,7 +1861,7 @@ def SlicePlot(ds, normal=None, fields=None, axis=None, *args, **kwargs):
         if np.count_nonzero(normal) == 1:
             normal = ("x","y","z")[np.nonzero(normal)[0][0]]
         else:
-            normal = np.array(normal)
+            normal = np.array(normal, dtype='float64')
             np.divide(normal, np.dot(normal,normal), normal)
 
     # by now the normal should be properly set to get either a On/Off Axis plot

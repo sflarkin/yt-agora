@@ -14,6 +14,7 @@ Fixed resolution buffer support, along with a primitive image analysis tool.
 #-----------------------------------------------------------------------------
 
 from yt.funcs import *
+from yt.units.unit_object import Unit
 from .volume_rendering.api import off_axis_projection
 from yt.data_objects.image_array import ImageArray
 from yt.utilities.lib.misc_utilities import \
@@ -340,7 +341,11 @@ class FixedResolutionBuffer(object):
         return rv
 
 class CylindricalFixedResolutionBuffer(FixedResolutionBuffer):
-
+    """
+    This object is a subclass of
+    :class:`yt.visualization.fixed_resolution.FixedResolutionBuffer`
+    that supports non-aligned input data objects, primarily cutting planes.
+    """
     def __init__(self, data_source, radius, buff_size, antialias = True) :
 
         self.data_source = data_source
@@ -365,7 +370,8 @@ class CylindricalFixedResolutionBuffer(FixedResolutionBuffer):
         
 class ObliqueFixedResolutionBuffer(FixedResolutionBuffer):
     """
-    This object is a subclass of :class:`yt.visualization.fixed_resolution.FixedResolutionBuffer`
+    This object is a subclass of
+    :class:`yt.visualization.fixed_resolution.FixedResolutionBuffer`
     that supports non-aligned input data objects, primarily cutting planes.
     """
     def __getitem__(self, item):
@@ -390,7 +396,12 @@ class ObliqueFixedResolutionBuffer(FixedResolutionBuffer):
 
 
 class OffAxisProjectionFixedResolutionBuffer(FixedResolutionBuffer):
-    def __init__(self, data_source, bounds, buff_size, antialias = True,                                                         
+    """
+    This object is a subclass of
+    :class:`yt.visualization.fixed_resolution.FixedResolutionBuffer`
+    that supports off axis projections.  This calls the volume renderer.
+    """
+    def __init__(self, data_source, bounds, buff_size, antialias = True,
                  periodic = False):
         self.data = {}
         FixedResolutionBuffer.__init__(self, data_source, bounds, buff_size, antialias, periodic)
@@ -408,7 +419,10 @@ class OffAxisProjectionFixedResolutionBuffer(FixedResolutionBuffer):
                                    weight=ds.weight_field, volume=ds.volume,
                                    no_ghost=ds.no_ghost, interpolated=ds.interpolated,
                                    north_vector=ds.north_vector)
-        ia = ImageArray(buff.swapaxes(0,1), info=self._get_info(item))
+        units = Unit(ds.pf.field_info[item].units, registry=ds.pf.unit_registry)
+        if ds.weight_field is None:
+            units *= Unit('cm', registry=ds.pf.unit_registry)
+        ia = ImageArray(buff.swapaxes(0,1), input_units=units, info=self._get_info(item))
         self[item] = ia
         return ia 
 

@@ -623,11 +623,13 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
                                         fluids, self, self._current_chunk)
         for f, v in read_fluids.items():
             self.field_data[f] = self.ds.arr(v, input_units = finfos[f].units)
+            self.field_data[f].convert_to_units(finfos[f].output_units)
 
         read_particles, gen_particles = self.index._read_particle_fields(
                                         particles, self, self._current_chunk)
         for f, v in read_particles.items():
             self.field_data[f] = self.ds.arr(v, input_units = finfos[f].units)
+            self.field_data[f].convert_to_units(finfos[f].output_units)
 
         fields_to_generate += gen_fluids + gen_particles
         self._generate_fields(fields_to_generate)
@@ -722,6 +724,12 @@ class YTSelectionContainer(YTDataContainer, ParallelAnalysisInterface):
         if self._current_chunk is None:
             self.index._identify_base_chunk(self)
         return self._current_chunk.fwidth
+
+class YTSelectionContainer0D(YTSelectionContainer):
+    _spatial = False
+    def __init__(self, pf, field_parameters):
+        super(YTSelectionContainer0D, self).__init__(
+            pf, field_parameters)
 
 class YTSelectionContainer1D(YTSelectionContainer):
     _spatial = False
