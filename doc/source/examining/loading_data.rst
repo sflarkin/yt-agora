@@ -551,7 +551,7 @@ positions, times, and energies of X-ray events.
   installations of this package and the `PyWCS <http://stsdas.stsci
   .edu/astrolib/pywcs/>`_ package are not supported.
 
-Though FITS a image is composed of one data cube in the FITS file,
+Though a FITS image is composed of a single array in the FITS file,
 upon being loaded into yt it is automatically decomposed into grids:
 
 .. code-block:: python
@@ -562,11 +562,11 @@ upon being loaded into yt it is automatically decomposed into grids:
 
 .. parsed-literal::
 
-   level	  # grids	    # cells	   # cells^3
+   level  # grids         # cells     # cells^3
    ----------------------------------------------
-     0	     512	  981940800	         994
+     0	     512	  981940800       994
    ----------------------------------------------
-              512	  981940800
+             512	  981940800
 
 yt will generate its own domain decomposition, but the number of grids can be
 set manually by passing the ``nprocs`` parameter to the ``load`` call:
@@ -676,8 +676,14 @@ which may be used to make deposited image fields from the event data for differe
 Additional Options
 ++++++++++++++++++
 
+The following are additional options that may be passed to the ``load`` command when analyzing
+FITS data:
+
+``nan_mask``
+~~~~~~~~~~~~
+
 FITS image data may include ``NaNs``. If you wish to mask this data out,
-you may supply a ``nan_mask`` parameter to ``load``, which may either be a
+you may supply a ``nan_mask`` parameter, which may either be a
 single floating-point number (applies to all fields) or a Python dictionary
 containing different mask values for different fields:
 
@@ -689,14 +695,91 @@ containing different mask values for different fields:
    # passing a dict
    ds = load("m33_hi.fits", nan_mask={"intensity":-1.0,"temperature":0.0})
 
+``suppress_astropy_warnings``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 Generally, AstroPy may generate a lot of warnings about individual FITS
 files, many of which you may want to ignore. If you want to see these
-warnings, set ``suppress_astropy_warnings = False`` in the call to ``load``.
+warnings, set ``suppress_astropy_warnings = False``.
+
+``z_axis_decomp``
+~~~~~~~~~~~~~~~~~
+
+For some applications, decomposing 3D FITS data into grids that span the x-y plane with short
+strides along the z-axis may result in a significant improvement in I/O speed. To enable this feature, set ``z_axis_decomp=True``.
+
+``spectral_factor``
+~~~~~~~~~~~~~~~~~~~
+
+Often, the aspect ratio of 3D spectral cubes can be far from unity. Because yt
+sets the pixel scale as the ``code_length``, certain visualizations (such as
+volume renderings) may look extended or distended in ways that are
+undesirable. To adjust the width in ``code_length`` of the spectral axis, set
+``spectral_factor`` equal to a constant which gives the desired scaling, or set
+it to ``"auto"`` to make the width the same as the largest axis in the sky
+plane.
+
+Miscellaneous Tools for Use with FITS Data
+++++++++++++++++++++++++++++++++++++++++++
+
+A number of tools have been prepared for use with FITS data that enhance yt's visualization and
+analysis capabilities for this particular type of data. These are included in the ``yt.frontends.fits.misc`` module, and can be imported like so:
+
+.. code-block:: python
+
+  from yt.frontends.fits.misc import setup_counts_fields, PlotWindowWCS, ds9_region
+
+``setup_counts_fields``
+~~~~~~~~~~~~~~~~~~~~~~~
+
+This function can be used to create image fields from X-ray counts data in different energy bands:
+
+.. code-block:: python
+
+  ebounds = [(0.1,2.0),(2.0,5.0)] # Energies are in keV
+  setup_counts_fields(ds, ebounds)
+
+which would make two fields, ``"counts_0.1-2.0"`` and ``"counts_2.0-5.0"``,
+and add them to the field registry for the dataset ``ds``.
+
+
+``ds9_region``
+~~~~~~~~~~~~~~
+
+This function takes a `ds9 <http://ds9.si.edu/site/Home.html>`_ region and creates a "cut region"
+data container from it, that can be used to select the cells in the FITS dataset that fall within
+the region. To use this functionality, the `pyregion <http://leejjoon.github.io/pyregion/>`_
+package must be installed.
+
+.. code-block:: python
+
+  ds = yt.load("m33_hi.fits")
+  circle_region = ds9_region(ds, "circle.reg")
+  print circle_region.quantities.extrema("flux")
+
+
+``PlotWindowWCS``
+~~~~~~~~~~~~~~~~~
+
+This class takes a on-axis ``SlicePlot`` or ``ProjectionPlot`` of FITS data and adds celestial
+coordinates to the plot axes. To use it, the `WCSAxes <http://wcsaxes.readthedocs.org>`_
+package must be installed.
+
+.. code-block:: python
+
+  wcs_slc = PlotWindowWCS(slc)
+  wcs_slc.show() # for the IPython notebook
+  wcs_slc.save()
+
+``WCSAxes`` is still in an experimental state, but as its functionality improves it will be
+utilized more here.
+
 
 Examples of Using FITS Data
 +++++++++++++++++++++++++++
 
-The following IPython notebooks show examples of working with FITS data in yt:
+The following IPython notebooks show examples of working with FITS data in yt,
+which we recommend you look at in the following order:
 
 * :ref:`radio_cubes`
 * :ref:`xray_fits`
@@ -711,10 +794,10 @@ MOAB Data
 PyNE Data
 ---------
 
-.. _loading-numpy-array:
-
 Generic Array Data
 ------------------
+
+See :ref:`loading-numpy-array` for more detail.
 
 Even if your data is not strictly related to fields commonly used in
 astrophysical codes or your code is not supported yet, you can still feed it to
@@ -767,6 +850,8 @@ arrays. If no particle arrays are supplied then ``number_of_particles`` is assum
 Generic AMR Data
 ----------------
 
+See :ref:`loading-numpy-array` for more detail.
+
 It is possible to create native ``yt`` parameter file from Python's dictionary
 that describes set of rectangular patches of data of possibly varying
 resolution. 
@@ -817,3 +902,4 @@ setting the ``number_of_particles`` key to each ``grid``'s dict:
 Generic Particle Data
 ---------------------
 
+.. notebook:: Loading_Generic_Particle_Data.ipynb

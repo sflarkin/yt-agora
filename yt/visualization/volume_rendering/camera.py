@@ -125,13 +125,14 @@ class Camera(ParallelAnalysisInterface):
     Examples
     --------
 
-    >>> cam = vr.Camera(c, L, W, (N,N), transfer_function = tf, pf = pf)
-    >>> image = cam.snapshot()
-
     >>> from yt.mods import *
     >>> import yt.visualization.volume_rendering.api as vr
+
+    >>> pf = load('DD1701') # Load a dataset
+
+    >>> cam = vr.Camera(c, L, W, (N,N), transfer_function = tf, pf = pf)
+    >>> image = cam.snapshot()
     
-    >>> pf = EnzoDataset('DD1701') # Load pf
     >>> c = [0.5]*3 # Center
     >>> L = [1.0,1.0,1.0] # Viewpoint
     >>> W = np.sqrt(3) # Width
@@ -581,7 +582,8 @@ class Camera(ParallelAnalysisInterface):
         return image
 
     def _render(self, double_check, num_threads, image, sampler):
-        pbar = get_pbar("Ray casting", (self.volume.brick_dimensions + 1).prod(axis=-1).sum())
+        ncells = sum(b.source_mask.size for b in self.volume.bricks)
+        pbar = get_pbar("Ray casting", ncells)
         total_cells = 0
         if double_check:
             for brick in self.volume.bricks:
@@ -592,7 +594,7 @@ class Camera(ParallelAnalysisInterface):
         view_pos = self.front_center + self.orienter.unit_vectors[2] * 1.0e6 * self.width[2]
         for brick in self.volume.traverse(view_pos):
             sampler(brick, num_threads=num_threads)
-            total_cells += np.prod(brick.my_data[0].shape)
+            total_cells += brick.source_mask.size
             pbar.update(total_cells)
 
         pbar.finish()
@@ -609,7 +611,7 @@ class Camera(ParallelAnalysisInterface):
             self.transfer_function.show(ax=self._tf_figure.axes)
         self._pylab.draw()
 
-    def annotate(self, ax, enhance=True):
+    def annotate(self, ax, enhance=True, label_fmt=None):
         ax.get_xaxis().set_visible(False)
         ax.get_xaxis().set_ticks([])
         ax.get_yaxis().set_visible(False)
@@ -618,15 +620,15 @@ class Camera(ParallelAnalysisInterface):
         label = self.pf._get_field_info(self.fields[0]).get_label()
         if self.log_fields[0]:
             label = '$\\rm{log}\\/ $' + label
-        self.transfer_function.vert_cbar(ax=cb.ax, label=label)
+        self.transfer_function.vert_cbar(ax=cb.ax, label=label, label_fmt=label_fmt)
 
-    def show_mpl(self, im, enhance=True):
+    def show_mpl(self, im, enhance=True, clear_fig=True):
         if self._pylab is None:
             import pylab
             self._pylab = pylab
         if self._render_figure is None:
             self._render_figure = self._pylab.figure(1)
-        self._render_figure.clf()
+        if clear_fig: self._render_figure.clf()
 
         if enhance:
             nz = im[im > 0.0]
@@ -642,10 +644,33 @@ class Camera(ParallelAnalysisInterface):
     def draw(self):
         self._pylab.draw()
     
-    def save_annotated(self, fn, image, enhance=True, dpi=100):
+    def save_annotated(self, fn, image, enhance=True, dpi=100, clear_fig=True, 
+                       label_fmt=None):
+        """
+        Save an image with the transfer function represented as a colorbar.
+
+        Parameters
+        ----------
+        fn : str
+           The output filename
+        image : ImageArray
+           The image to annotate
+        enhance : bool, optional
+           Enhance the contrast (default: True)
+        dpi : int, optional
+           Dots per inch in the output image (default: 100)
+        clear_fig : bool, optional
+           Reset the figure (through pylab.clf()) before drawing.  Setting 
+           this to false can allow us to overlay the image onto an 
+           existing figure
+        label_fmt : str, optional
+           A format specifier (e.g., label_fmt="%.2g") to use in formatting 
+           the data values that label the transfer function colorbar. 
+        
+        """
         image = image.swapaxes(0,1) 
-        ax = self.show_mpl(image, enhance=enhance)
-        self.annotate(ax.axes, enhance)
+        ax = self.show_mpl(image, enhance=enhance, clear_fig=clear_fig)
+        self.annotate(ax.axes, enhance, label_fmt=label_fmt)
         self._pylab.savefig(fn, bbox_inches='tight', facecolor='black', dpi=dpi)
         
     def save_image(self, image, fn=None, clip_ratio=None, transparent=False):
@@ -744,8 +769,8 @@ class Camera(ParallelAnalysisInterface):
             if clip_ratio is not None: clip_ratio *= image.std()
             data = write_bitmap(image, None, clip_ratio)
             publish_display_data(
-                'yt.visualization.volume_rendering.camera.Camera',
-                {'image/png' : data}
+                data={'image/png': data},
+                source='yt.visualization.volume_rendering.camera.Camera',
             )
         else:
             raise YTNotInsideNotebook
