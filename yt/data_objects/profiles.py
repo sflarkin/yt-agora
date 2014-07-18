@@ -110,7 +110,7 @@ class BinnedProfile(ParallelAnalysisInterface):
                 data[field][ub] /= weight_data[field][ub]
                 std_data[field][ub] /= weight_data[field][ub]
             self[field] = data[field]
-            #self["%s_std" % field] = np.sqrt(std_data[field])
+            self["%s_std" % field] = np.sqrt(std_data[field])
         self["UsedBins"] = used
 
         if fractional:
@@ -911,7 +911,7 @@ class ProfileND(ParallelAnalysisInterface):
         if self.weight_field is not None:
             weight_data = chunk[self.weight_field]
         else:
-            weight_data = np.ones(chunk.ires.size, dtype="float64")
+            weight_data = np.ones(filter.size, dtype="float64")
         weight_data = weight_data[filter]
         # So that we can pass these into
         return arr, weight_data, bin_fields
@@ -1255,7 +1255,8 @@ def create_profile(data_source, bin_fields, fields, n_bins=64,
     extrema : dict of min, max tuples
         Minimum and maximum values of the bin_fields for the profiles.
         The keys correspond to the field names. Defaults to the extrema
-        of the bin_fields of the dataset.
+        of the bin_fields of the dataset. If a units dict is provided, extrema
+        are understood to be in the units specified in the dictionary.
     logs : dict of boolean values
         Whether or not to log the bin_fields for the profiles.
         The keys correspond to the field names. Defaults to the take_log
@@ -1304,6 +1305,16 @@ def create_profile(data_source, bin_fields, fields, n_bins=64,
         raise NotImplementedError
     bin_fields = data_source._determine_fields(bin_fields)
     fields = data_source._determine_fields(fields)
+    if units is not None:
+        dummy = {}
+        for item in units:
+            dummy[data_source._determine_fields(item)[0]] = units[item]
+        units.update(dummy)
+    if extrema is not None:
+        dummy = {}
+        for item in extrema:
+            dummy[data_source._determine_fields(item)[0]] = extrema[item]
+        extrema.update(dummy)
     if weight_field is not None:
         weight_field, = data_source._determine_fields([weight_field])
     if not iterable(n_bins):
@@ -1321,12 +1332,16 @@ def create_profile(data_source, bin_fields, fields, n_bins=64,
     else:
         ex = []
         for bin_field in bin_fields:
-            bf_units = data_source.pf._get_field_info(bin_field[0],
-                                                      bin_field[1]).units
+            bf_units = data_source.pf._get_field_info(
+                bin_field[0], bin_field[1]).units
             try:
                 field_ex = list(extrema[bin_field[-1]])
             except KeyError:
                 field_ex = list(extrema[bin_field])
+            if units is not None and bin_field in units:
+                fe = data_source.pf.arr(field_ex, units[bin_field])
+                fe.convert_to_units(bf_units)
+                field_ex = [fe[0].v, fe[1].v]
             if iterable(field_ex[0]):
                 field_ex[0] = data_source.pf.quan(field_ex[0][0], field_ex[0][1])
                 field_ex[0] = field_ex[0].in_units(bf_units)
