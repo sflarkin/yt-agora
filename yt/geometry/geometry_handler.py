@@ -38,6 +38,7 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
 from yt.utilities.exceptions import YTFieldNotFound
 
 class Index(ParallelAnalysisInterface):
+    """The base index class"""
     _global_mesh = True
     _unsupported_objects = ()
     _index_properties = ()
@@ -71,7 +72,6 @@ class Index(ParallelAnalysisInterface):
         self._parallel_locking = False
         self._data_file = None
         self._data_mode = None
-        self._max_locations = {}
         self.num_grids = None
 
     def _initialize_data_storage(self):

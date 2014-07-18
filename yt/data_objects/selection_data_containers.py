@@ -21,15 +21,44 @@ from yt.funcs import *
 from yt.utilities.lib.alt_ray_tracers import cylindrical_ray_trace
 from yt.utilities.orientation import Orientation
 from .data_containers import \
-    YTSelectionContainer1D, YTSelectionContainer2D, YTSelectionContainer3D
+    YTSelectionContainer0D, YTSelectionContainer1D, \
+    YTSelectionContainer2D, YTSelectionContainer3D
 from yt.data_objects.derived_quantities import \
     DerivedQuantityCollection
-from yt.utilities.exceptions import YTSphereTooSmall
+from yt.utilities.exceptions import \
+    YTSphereTooSmall, \
+    YTIllDefinedCutRegion, \
+    YTMixedCutRegion
 from yt.utilities.linear_interpolators import TrilinearFieldInterpolator
 from yt.utilities.minimal_representation import \
     MinimalSliceData
 from yt.utilities.math_utils import get_rotation_matrix
 from yt.units.yt_array import YTQuantity
+
+
+class YTPointBase(YTSelectionContainer0D):
+    """
+    A 0-dimensional object defined by a single point
+
+    Parameters
+    ----------
+    p: array_like
+        A points defined within the domain.  If the domain is
+        periodic its position will be corrected to lie inside
+        the range [DLE,DRE) to ensure one and only one cell may
+        match that point
+
+    Examples
+    --------
+    >>> pf = load("DD0010/moving7_0010")
+    >>> c = [0.5,0.5,0.5]
+    >>> point = pf.point(c)
+    """
+    _type_name = "point"
+    _con_args = ('p',)
+    def __init__(self, p, pf = None, field_parameters = None):
+        super(YTPointBase, self).__init__(pf, field_parameters)
+        self.p = p
 
 class YTOrthoRayBase(YTSelectionContainer1D):
     """
@@ -120,7 +149,6 @@ class YTRayBase(YTSelectionContainer1D):
         self.end_point = self.pf.arr(end_point,
                             'code_length', dtype='float64')
         self.vec = self.end_point - self.start_point
-        #self.vec /= np.sqrt(np.dot(self.vec, self.vec))
         self._set_center(self.start_point)
         self.set_field_parameter('center', self.start_point)
         self._dts, self._ts = None, None
@@ -394,8 +422,8 @@ class YTCuttingPlaneBase(YTSelectionContainer2D):
         """
         normal = self.normal
         center = self.center
-        self.fields = [k for k in self.field_data.keys()
-                       if k not in self._key_fields]
+        self.fields = ensure_list(fields) + [k for k in self.field_data.keys()
+                                             if k not in self._key_fields]
         from yt.visualization.plot_window import get_oblique_window_parameters, PWViewerMPL
         from yt.visualization.fixed_resolution import ObliqueFixedResolutionBuffer
         (bounds, center_rot) = get_oblique_window_parameters(normal, center, width, self.pf)
@@ -406,6 +434,7 @@ class YTCuttingPlaneBase(YTSelectionContainer2D):
             plot_type='OffAxisSlice')
         if axes_unit is not None:
             pw.set_axes_unit(axes_unit)
+        pw._setup_plots()
         return pw
 
     def to_frb(self, width, resolution, height=None):
@@ -447,12 +476,12 @@ class YTCuttingPlaneBase(YTSelectionContainer2D):
         >>> write_image(np.log10(frb["Density"]), 'density_1pc.png')
         """
         if iterable(width):
-            assert_valid_width_tuple(width)
+            validate_width_tuple(width)
             width = self.pf.quan(width[0], width[1])
         if height is None:
             height = width
         elif iterable(height):
-            assert_valid_width_tuple(height)
+            validate_width_tuple(height)
             height = self.pf.quan(height[0], height[1])
         if not iterable(resolution):
             resolution = (resolution, resolution)
@@ -526,7 +555,7 @@ class YTDataCollectionBase(YTSelectionContainer3D):
 
 class YTSphereBase(YTSelectionContainer3D):
     """
-    A sphere f points defined by a *center* and a *radius*.
+    A sphere of points defined by a *center* and a *radius*.
 
     Parameters
     ----------
@@ -683,6 +712,9 @@ class YTCutRegionBase(YTSelectionContainer3D):
         self.base_object.get_data(fields)
         ind = self._cond_ind
         for field in fields:
+            f = self.base_object[field]
+            if f.shape != ind.shape:
+                raise YTMixedCutRegion(self.conditionals, field)
             self.field_data[field] = self.base_object[field][ind]
 
     @property
@@ -693,6 +725,8 @@ class YTCutRegionBase(YTSelectionContainer3D):
             for cond in self.conditionals:
                 res = eval(cond)
                 if ind is None: ind = res
+                if ind.shape != res.shape:
+                    raise YTIllDefinedCutRegion(self.conditionals)
                 np.logical_and(res, ind, ind)
         return ind
 

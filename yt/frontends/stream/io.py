@@ -96,6 +96,7 @@ class IOHandlerStream(BaseIOHandler):
 
 class StreamParticleIOHandler(BaseIOHandler):
 
+    _vector_fields = ("particle_position", "particle_velocity")
     _dataset_type = "stream_particles"
 
     def __init__(self, pf):
@@ -108,7 +109,7 @@ class StreamParticleIOHandler(BaseIOHandler):
         for chunk in chunks:
             for obj in chunk.objs:
                 data_files.update(obj.data_files)
-        for data_file in data_files:
+        for data_file in sorted(data_files):
             f = self.fields[data_file.filename]
             # This double-reads
             for ptype, field_list in sorted(ptf.items()):
@@ -116,16 +117,34 @@ class StreamParticleIOHandler(BaseIOHandler):
                               f[ptype, "particle_position_y"],
                               f[ptype, "particle_position_z"])
             
+    def _count_particles_chunks(self, chunks, ptf, selector):
+        # This is allowed to over-estimate.  We probably *will*, too, because
+        # we're going to count *all* of the particles, not just individual
+        # types.
+        count = 0
+        psize = {}
+        for chunk in chunks:
+            for obj in chunk.objs:
+                count += selector.count_octs(obj.oct_handler, obj.domain_id)
+        for ptype in ptf:
+            psize[ptype] = self.pf.n_ref * count / float(obj.nz)
+        return psize
+
     def _read_particle_fields(self, chunks, ptf, selector):
         data_files = set([])
         for chunk in chunks:
             for obj in chunk.objs:
                 data_files.update(obj.data_files)
-        for data_file in data_files:
+        for data_file in sorted(data_files):
             f = self.fields[data_file.filename]
             for ptype, field_list in sorted(ptf.items()):
-                x, y, z = (f[ptype, "particle_position_%s" % ax]
-                           for ax in 'xyz')
+                if (ptype, "particle_position") in f:
+                    x = f[ptype, "particle_position"][:,0]
+                    y = f[ptype, "particle_position"][:,1]
+                    z = f[ptype, "particle_position"][:,2]
+                else:
+                    x, y, z = (f[ptype, "particle_position_%s" % ax]
+                               for ax in 'xyz')
                 mask = selector.select_points(x, y, z, 0.0)
                 if mask is None: continue
                 for field in field_list:
@@ -134,24 +153,29 @@ class StreamParticleIOHandler(BaseIOHandler):
 
     def _initialize_index(self, data_file, regions):
         # self.fields[g.id][fname] is the pattern here
-        pos = np.column_stack(self.fields[data_file.filename][
-                              ("io", "particle_position_%s" % ax)]
-                              for ax in 'xyz')
-        if np.any(pos.min(axis=0) < data_file.pf.domain_left_edge) or \
-           np.any(pos.max(axis=0) > data_file.pf.domain_right_edge):
-            raise YTDomainOverflow(pos.min(axis=0), pos.max(axis=0),
-                                   data_file.pf.domain_left_edge,
-                                   data_file.pf.domain_right_edge)
-        regions.add_data_file(pos, data_file.file_id)
-        morton = compute_morton(
-                pos[:,0], pos[:,1], pos[:,2],
-                data_file.pf.domain_left_edge,
-                data_file.pf.domain_right_edge)
-        return morton
+        morton = []
+        for ptype in self.pf.particle_types_raw:
+            pos = np.column_stack(self.fields[data_file.filename][
+                                  (ptype, "particle_position_%s" % ax)]
+                                  for ax in 'xyz')
+            if np.any(pos.min(axis=0) < data_file.pf.domain_left_edge) or \
+               np.any(pos.max(axis=0) > data_file.pf.domain_right_edge):
+                raise YTDomainOverflow(pos.min(axis=0), pos.max(axis=0),
+                                       data_file.pf.domain_left_edge,
+                                       data_file.pf.domain_right_edge)
+            regions.add_data_file(pos, data_file.file_id)
+            morton.append(compute_morton(
+                    pos[:,0], pos[:,1], pos[:,2],
+                    data_file.pf.domain_left_edge,
+                    data_file.pf.domain_right_edge))
+        return np.concatenate(morton)
 
     def _count_particles(self, data_file):
-        npart = self.fields[data_file.filename]["io", "particle_position_x"].size
-        return {'io': npart}
+        pcount = {}
+        for ptype in self.pf.particle_types_raw:
+            d = self.fields[data_file.filename]
+            pcount[ptype] = d[ptype, "particle_position_x"].size
+        return pcount
 
     def _identify_fields(self, data_file):
         return self.fields[data_file.filename].keys(), {}
