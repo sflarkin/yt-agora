@@ -402,7 +402,7 @@ def set_particle_types(data) :
 def assign_particle_data(ds, pdata) :
 
     """
-    Assign particle data to the grids using find_points. This
+    Assign particle data to the grids using MatchPointsToGrids. This
     will overwrite any existing particle data, so be careful!
     """
     
@@ -519,16 +519,17 @@ def load_uniform_grid(data, domain_dimensions, length_unit=None, bbox=None,
 
     This should allow a uniform grid of data to be loaded directly into yt and
     analyzed as would any others.  This comes with several caveats:
-        * Units will be incorrect unless the unit system is explicitly
-          specified.
-        * Some functions may behave oddly, and parallelism will be
-          disappointing or non-existent in most cases.
-        * Particles may be difficult to integrate.
+
+    * Units will be incorrect unless the unit system is explicitly
+      specified.
+    * Some functions may behave oddly, and parallelism will be
+      disappointing or non-existent in most cases.
+    * Particles may be difficult to integrate.
 
     Particle fields are detected as one-dimensional fields. The number of
     particles is set by the "number_of_particles" key in data.
     
-Parameters
+    Parameters
     ----------
     data : dict
         This is a dict of numpy arrays or (numpy array, unit spec) tuples.
@@ -690,13 +691,16 @@ def load_amr_grids(grid_data, domain_dimensions,
     This should allow a sequence of grids of varying resolution of data to be
     loaded directly into yt and analyzed as would any others.  This comes with
     several caveats:
-        * Units will be incorrect unless the unit system is explicitly specified.
-        * Some functions may behave oddly, and parallelism will be
-          disappointing or non-existent in most cases.
-        * Particles may be difficult to integrate.
-        * No consistency checks are performed on the index
-Parameters
+
+    * Units will be incorrect unless the unit system is explicitly specified.
+    * Some functions may behave oddly, and parallelism will be
+      disappointing or non-existent in most cases.
+    * Particles may be difficult to integrate.
+    * No consistency checks are performed on the index
+
+    Parameters
     ----------
+
     grid_data : list of dicts
         This is a list of dicts. Each dict must have entries "left_edge",
         "right_edge", "dimensions", "level", and then any remaining entries are
@@ -965,16 +969,17 @@ class StreamParticlesDataset(StreamDataset):
 def load_particles(data, length_unit = None, bbox=None,
                    sim_time=0.0, mass_unit = None, time_unit = None,
                    velocity_unit=None, periodicity=(True, True, True),
-                   n_ref = 64, over_refine_factor = 1):
+                   n_ref = 64, over_refine_factor = 1, geometry = "cartesian"):
     r"""Load a set of particles into yt as a
     :class:`~yt.frontends.stream.data_structures.StreamParticleHandler`.
 
     This should allow a collection of particle data to be loaded directly into
     yt and analyzed as would any others.  This comes with several caveats:
-        * Units will be incorrect unless the data has already been converted to
-          cgs.
-        * Some functions may behave oddly, and parallelism will be
-          disappointing or non-existent in most cases.
+
+    * Units will be incorrect unless the data has already been converted to
+      cgs.
+    * Some functions may behave oddly, and parallelism will be
+      disappointing or non-existent in most cases.
 
     This will initialize an Octree of data.  Note that fluid fields will not
     work yet, or possibly ever.
@@ -1077,7 +1082,7 @@ def load_particles(data, length_unit = None, bbox=None,
     handler.simulation_time = sim_time
     handler.cosmology_simulation = 0
 
-    sds = StreamParticlesDataset(handler)
+    sds = StreamParticlesDataset(handler, geometry=geometry)
     sds.n_ref = n_ref
     sds.over_refine_factor = over_refine_factor
 
@@ -1142,11 +1147,12 @@ def load_hexahedral_mesh(data, connectivity, coordinates,
 
     This should allow a semistructured grid of data to be loaded directly into
     yt and analyzed as would any others.  This comes with several caveats:
-        * Units will be incorrect unless the data has already been converted to
-          cgs.
-        * Some functions may behave oddly, and parallelism will be
-          disappointing or non-existent in most cases.
-        * Particles may be difficult to integrate.
+
+    * Units will be incorrect unless the data has already been converted to
+      cgs.
+    * Some functions may behave oddly, and parallelism will be
+      disappointing or non-existent in most cases.
+    * Particles may be difficult to integrate.
 
     Particle fields are detected as one-dimensional fields. The number of particles
     is set by the "number_of_particles" key in data.

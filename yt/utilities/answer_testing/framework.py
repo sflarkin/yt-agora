@@ -691,7 +691,7 @@ def requires_ds(ds_fn, big_data = False, file_check = False):
     else:
         return ftrue
 
-def small_patch_amr(ds_fn, fields):
+def small_patch_amr(pf_fn, fields, input_center="max", input_weight="density"):
     if not can_run_ds(ds_fn): return
     dso = [ None, ("sphere", ("max", (0.1, 'unitary')))]
     yield GridHierarchyTest(ds_fn)
@@ -700,14 +700,14 @@ def small_patch_amr(ds_fn, fields):
         yield GridValuesTest(ds_fn, field)
         for axis in [0, 1, 2]:
             for dobj_name in dso:
-                for weight_field in [None, "density"]:
+                for weight_field in [None, input_weight]:
                     yield ProjectionValuesTest(
                         ds_fn, axis, field, weight_field,
                         dobj_name)
                 yield FieldValuesTest(
                         ds_fn, field, dobj_name)
 
-def big_patch_amr(ds_fn, fields):
+def big_patch_amr(pf_fn, fields, input_center="max", input_weight="density"):
     if not can_run_ds(ds_fn): return
     dso = [ None, ("sphere", ("max", (0.1, 'unitary')))]
     yield GridHierarchyTest(ds_fn)
@@ -716,7 +716,7 @@ def big_patch_amr(ds_fn, fields):
         yield GridValuesTest(ds_fn, field)
         for axis in [0, 1, 2]:
             for dobj_name in dso:
-                for weight_field in [None, "density"]:
+                for weight_field in [None, input_weight]:
                     yield PixelizedProjectionValuesTest(
                         ds_fn, axis, field, weight_field,
                         dobj_name)

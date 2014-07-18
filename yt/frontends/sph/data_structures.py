@@ -508,6 +508,13 @@ class TipsyDataset(ParticleDataset):
 
         f.close()
 
+    def _set_derived_attrs(self):
+        if self.domain_left_edge is None or self.domain_right_edge is None:
+            self.domain_left_edge = np.nan
+            self.domain_right_edge = np.nan
+            self.index
+        super(TipsyDataset, self)._set_derived_attrs()
+
     def _set_code_unit_attributes(self):
         if self.cosmological_simulation:
             mu = self.parameters.get('dMsolUnit', 1.)
@@ -642,6 +649,9 @@ class HTTPStreamDataset(ParticleDataset):
 
     @classmethod
     def _is_valid(self, *args, **kwargs):
-        if args[0].startswith("http://"):
+        if not args[0].startswith("http://"):
+            return False
+        hreq = requests.get(args[0] + "/yt_index.json")
+        if hreq.status_code == 200:
             return True
         return False

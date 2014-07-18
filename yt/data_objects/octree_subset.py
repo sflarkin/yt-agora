@@ -199,7 +199,7 @@ class OctreeSubset(YTSelectionContainer):
         op.process_octree(self.oct_handler, mdom_ind, positions, 
             self.fcoords, fields,
             self.domain_id, self._domain_offset, self.ds.periodicity,
-            index_fields, particle_octree, pdom_ind)
+            index_fields, particle_octree, pdom_ind, self.ds.geometry)
         vals = op.finalize()
         if vals is None: return
         if isinstance(vals, list):
@@ -328,8 +328,10 @@ class YTPositionArray(YTArray):
     def morton(self):
         self.validate()
         eps = np.finfo(self.dtype).eps
-        LE = self.min(axis=0) - eps * self.uq
-        RE = self.max(axis=0) + eps * self.uq
+        LE = self.min(axis=0)
+        LE -= np.abs(LE) * eps
+        RE = self.max(axis=0)
+        RE += np.abs(RE) * eps
         morton = compute_morton(
             self[:,0], self[:,1], self[:,2],
             LE, RE)
@@ -340,8 +342,10 @@ class YTPositionArray(YTArray):
         mi = self.morton
         mi.sort()
         eps = np.finfo(self.dtype).eps
-        LE = self.min(axis=0) - eps * self.uq
-        RE = self.max(axis=0) + eps * self.uq
+        LE = self.min(axis=0)
+        LE -= np.abs(LE) * eps
+        RE = self.max(axis=0)
+        RE += np.abs(RE) * eps
         octree = ParticleOctreeContainer(dims, LE, RE, 
             over_refine = over_refine_factor)
         octree.n_ref = n_ref
