@@ -477,7 +477,7 @@ Additional Tips
     
        import yt
        import time
-       
+
        ds = yt.load("DD0152")
        t0 = time.time()
        bigstuff, hugestuff = StuffFinder(pf)
