@@ -165,7 +165,7 @@ Overplot Halo Annotations
    data_ds = yt.load('Enzo_64/RD0006/RedshiftOutput0006')
    halos_ds = yt.load('rockstar_halos/halos_0.0.bin')
 
-   hc = HaloCatalog(halos_pf=halos_ds)
+   hc = HaloCatalog(halos_ds=halos_ds)
    hc.create()
 
    prj = yt.ProjectionPlot(data_ds, 'z', 'density')
