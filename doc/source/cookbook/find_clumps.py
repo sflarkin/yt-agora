@@ -3,10 +3,12 @@ import numpy as np
 import yt
 from yt.analysis_modules.level_sets.api import *
 
-fn = "IsolatedGalaxy/galaxy0030/galaxy0030" # parameter file to load
-field = "Density" # this is the field we look for contours over -- we could do
-                  # this over anything.  Other common choices are 'AveragedDensity'
-                  # and 'Dark_Matter_Density'.
+fn = "IsolatedGalaxy/galaxy0030/galaxy0030"  # dataset to load
+# this is the field we look for contours over -- we could do
+# this over anything.  Other common choices are 'AveragedDensity'
+# and 'Dark_Matter_Density'.
+field = "density"
+
 step = 2.0 # This is the multiplicative interval between contours.
 
 ds = yt.load(fn) # load data
