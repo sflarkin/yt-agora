@@ -21,6 +21,11 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelDummy, \
     ParallelAnalysisInterface, \
     parallel_blocking_call
+from yt.utilities.physical_constants import \
+    cm_per_mpc, \
+    mass_sun_cgs
+from yt.utilities.physical_ratios import \
+    rho_crit_g_cm3_h2
 
 class HaloMassFcn(ParallelAnalysisInterface):
     """
@@ -65,12 +70,12 @@ class HaloMassFcn(ParallelAnalysisInterface):
     :param mass_column (int): The column of halo_file that contains the
     masses of the haloes. Default=4.
     """
-    def __init__(self, pf, halo_file=None, omega_matter0=None, omega_lambda0=None,
+    def __init__(self, ds, halo_file=None, omega_matter0=None, omega_lambda0=None,
     omega_baryon0=0.05, hubble0=None, sigma8input=0.86, primordial_index=1.0,
     this_redshift=None, log_mass_min=None, log_mass_max=None, num_sigma_bins=360,
     fitting_function=4, mass_column=5):
         ParallelAnalysisInterface.__init__(self)
-        self.pf = pf
+        self.ds = ds
         self.halo_file = halo_file
         self.omega_matter0 = omega_matter0
         self.omega_lambda0 = omega_lambda0
@@ -92,10 +97,10 @@ class HaloMassFcn(ParallelAnalysisInterface):
         else:
             # Make the fit using the same cosmological parameters as the dataset.
             self.mode = 'haloes'
-            self.omega_matter0 = self.pf.omega_matter
-            self.omega_lambda0 = self.pf.omega_lambda
-            self.hubble0 = self.pf.hubble_constant
-            self.this_redshift = self.pf.current_redshift
+            self.omega_matter0 = self.ds.omega_matter
+            self.omega_lambda0 = self.ds.omega_lambda
+            self.hubble0 = self.ds.hubble_constant
+            self.this_redshift = self.ds.current_redshift
             self.read_haloes()
             if self.log_mass_min == None:
                 self.log_mass_min = math.log10(min(self.haloes))
@@ -202,7 +207,7 @@ class HaloMassFcn(ParallelAnalysisInterface):
             dis[self.num_sigma_bins-i-3] += dis[self.num_sigma_bins-i-2]
             if i == (self.num_sigma_bins - 3): break
 
-        self.dis = dis  / (self.pf.domain_width * self.pf.units["mpccm"]).prod()
+        self.dis = dis  / (self.ds.domain_width * self.ds.units["mpccm"]).prod()
 
     def sigmaM(self):
         """
@@ -249,7 +254,9 @@ class HaloMassFcn(ParallelAnalysisInterface):
         sigma8_unnorm = math.sqrt(self.sigma_squared_of_R(R));
         sigma_normalization = self.sigma8input / sigma8_unnorm;
 
-        rho0 = self.omega_matter0 * 2.78e+11; # in units of h^2 Msolar/Mpc^3
+        # rho0 in units of h^2 Msolar/Mpc^3
+        rho0 = self.omega_matter0 * \
+                rho_crit_g_cm3_h2 * cm_per_mpc**3 / mass_sun_cgs
 
         # spacing in mass of our sigma calculation
         dm = (float(self.log_mass_max) - self.log_mass_min)/self.num_sigma_bins;
@@ -284,7 +291,9 @@ class HaloMassFcn(ParallelAnalysisInterface):
     def dndm(self):
         
         # constants - set these before calling any functions!
-        rho0 = self.omega_matter0 * 2.78e+11; # in units of h^2 Msolar/Mpc^3
+        # rho0 in units of h^2 Msolar/Mpc^3
+        rho0 = self.omega_matter0 * \
+            rho_crit_g_cm3_h2 * cm_per_mpc**3 / mass_sun_cgs
         self.delta_c0 = 1.69;  # critical density for turnaround (Press-Schechter)
         
         nofmz_cum = 0.0;  # keep track of cumulative number density
