@@ -156,7 +156,7 @@ Gadget Data
 yt has support for reading Gadget data in both raw binary and HDF5 formats.  It
 is able to access the particles as it would any other particle dataset, and it
 can apply smoothing kernels to the data to produce both quantitative analysis
-and visualization.  See also the section :ref:`loading-sph-data` 
+and visualization. See :ref:`loading-sph-data` for more details.
 
 Gadget data in HDF5 format can be loaded with the ``load`` command:
 
@@ -364,11 +364,12 @@ yt will utilize length, mass and time to set up all other units.
 Tipsy Data
 ----------
 
+See :ref:`tipsy-notebook` and :ref:`loading-sph-data` for more details.
+
 yt also supports loading Tipsy data.  Many of its characteristics are similar
 to how Gadget data is loaded; specifically, it shares its definition of
 indexing and mesh-identification with that described in
-:ref:`particle-indexing-criteria`.  Like with gadget, see 
-:ref:`loading-sph-data for more details`.  
+:ref:`particle-indexing-criteria`.
 
 .. code-block:: python
 
@@ -390,8 +391,6 @@ default units.  The parameters recognized are of this form:
                            'hubble_constant': 0.702}
 
 These will be used set the units, if they are specified.
-
-See :ref:`tipsy-notebook` for more details.
 
 .. _loading-artio-data:
 
@@ -782,54 +781,44 @@ which we recommend you look at in the following order:
 * :ref:`radio_cubes`
 * :ref:`xray_fits`
 
-.. _loading-moab-data:
-
-MOAB Data
----------
-
 .. _loading-pyne-data:
 
 PyNE Data
 ---------
 
-`PyNE <http://pyne.io/>`_ Hex8 meshes are supported by yt and cared for by the PyNE development team
-(`pyne-dev@googlegroups.com <pyne-dev%40googlegroups.com>`_). 
-PyNE meshes are based on faceted geometries contained in hdf5 files (suffix ".h5m").
+`PyNE <http://pyne.io/>`_ is an open source nuclear engineering toolkit
+maintained by the PyNE developement team (`pyne-dev@googlegroups.com
+<pyne-dev%40googlegroups.com>`_). PyNE meshes utilize the Mesh-Oriented datABase
+`(MOAB) <http://trac.mcs.anl.gov/projects/ITAPS/wiki/MOAB/>`_ and can be
+Cartesian or tetrahedral. In addition to field data, pyne meshes store pyne
+Material objects which provide a rich set of capabilities for nuclear
+engineering tasks. PyNE Cartesian (Hex8) meshes are supported by yt.
 
-To load a pyne mesh:
+To create a pyne mesh:
 
 .. code-block:: python
 
   from pyne.mesh import Mesh
-  from pyne.dagmc import load
+  num_divisions = 50
+  coords = linspace(-1, 1, num_divisions)
+  m = Mesh(structured=True, structured_coords=[coords, coords, coords])
 
-  from yt.config import ytcfg; ytcfg["yt","suppressStreamLogging"] = "True"
-  from yt.frontends.moab.api import PyneMoabHex8StaticOutput
-  from yt.visualization.plot_window import SlicePlot
-
-  load("faceted_file.h5m")
-  
-Set up parameters for the mesh:
+Field data can then be added:
 
 .. code-block:: python
 
-  num_divisions = 50
-  coords0 = linspace(-6, 6, num_divisions)
-  coords1 = linspace(0, 7, num_divisions)
-  coords2 = linspace(-4, 4, num_divisions)
+  from pyne.mesh import iMeshTag
+  m.neutron_flux = IMeshTag()
+  # neutron_flux_data is a list or numpy array of size num_divisions^3
+  m.neutron_flux[:] = neutron_flux_data
 
-Generate the Hex8 mesh and convert to a yt dataset using PyneHex8StaticOutput:
+Any field data or material data on the mesh can then be viewed just like any other yt dataset!
 
-.. code-block:: python 
+.. code-block:: python
 
-  m = Mesh(structured=True, structured_coords=[coords0, coords1, coords2], structured_ordering='zyx')
-  pf = PyneMoabHex8StaticOutput(m)
-
-Any field (tag) data on the mesh can then be viewed just like any other yt dataset!
-
-.. code-block:: python 
-
-  s = SlicePlot(pf, 'z', 'density')
+  import yt
+  pf = yt.frontends.moab.data_structures.PyneMoabHex8Dataset(m)
+  s = yt.SlicePlot(pf, 'z', 'neutron_flux')
   s.display()
 
 
@@ -837,7 +826,7 @@ Generic Array Data
 ------------------
 
 See :ref:`loading-numpy-array` and
-:ref:`~yt.frontends.stream.data_structures.load_uniform_grid` for more detail.
+:meth:`~yt.frontends.stream.data_structures.load_uniform_grid` for more detail.
 
 Even if your data is not strictly related to fields commonly used in
 astrophysical codes or your code is not supported yet, you can still feed it to
@@ -891,7 +880,7 @@ Generic AMR Data
 ----------------
 
 See :ref:`loading-numpy-array` and
-:ref:`~yt.frontends.sph.data_structures.load_amr_grids` for more detail.
+:meth:`~yt.frontends.sph.data_structures.load_amr_grids` for more detail.
 
 It is possible to create native ``yt`` dataset from Python's dictionary
 that describes set of rectangular patches of data of possibly varying
@@ -944,7 +933,7 @@ Generic Particle Data
 ---------------------
 
 See :ref:`generic-particle-data` and
-:ref:`~yt.frontends.stream.data_structures.load_particles` for more detail.
+:meth:`~yt.frontends.stream.data_structures.load_particles` for more detail.
 
 You can also load generic particle data using the same ``stream`` functionality
 discussed above to load in-memory grid data.  For example, if your particle
@@ -991,7 +980,7 @@ The ``load_particles`` function also accepts the following keyword parameters:
      ``bbox``
        The bounding box for the particle positions.
 
-.. _loading_sph_data:
+.. _loading-sph-data:
 
 SPH Particle Data
 -----------------
