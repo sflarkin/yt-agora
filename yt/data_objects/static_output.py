@@ -543,7 +543,7 @@ class Dataset(object):
               min_val, mx, my, mz)
         return min_val, self.arr([mx, my, mz], 'code_length', dtype="float64")
 
-    def find_field_values_at_point(self, fields, coord):
+    def find_field_values_at_point(self, fields, coords):
         """
         Returns the values [field1, field2,...] of the fields at the given
         coordinates. Returns a list of field values in the same order as 
@@ -573,10 +573,25 @@ class Dataset(object):
 
     # Now all the object related stuff
     def all_data(self, find_max=False):
+        """
+        all_data is a wrapper to the Region object for creating a region
+        which covers the entire simulation domain.
+        """
         if find_max: c = self.find_max("density")[1]
         else: c = (self.domain_right_edge + self.domain_left_edge)/2.0
         return self.region(c,
             self.domain_left_edge, self.domain_right_edge)
+
+    def box(self, left_edge, right_edge, **kwargs):
+        """
+        box is a wrapper to the Region object for creating a region
+        without having to specify a *center* value.  It assumes the center
+        is the midpoint between the left_edge and right_edge.
+        """
+        left_edge = np.array(left_edge)
+        right_edge = np.array(right_edge)
+        c = (left_edge + right_edge)/2.0
+        return self.region(c, left_edge, right_edge, **kwargs)
 
     def _setup_particle_type(self, ptype):
         orig = set(self.field_info.items())
