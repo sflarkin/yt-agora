@@ -102,6 +102,48 @@ unit conversions from its natural units.  (This rule is occasionally violated
 for fields which are mesh-dependent, specifically particle masses in some
 cosmology codes.)
 
+.. _field_parameters:
+
+Field Parameters
+++++++++++++++++
+
+Certain fields require external information in order to be calculated.  For 
+example, the radius field has to be defined based on some point of reference 
+and the radial velocity field needs to know the bulk velocity of the data object 
+so that it can be subtracted.  This information is passed into a field function 
+by setting field parameters, which are user-specified data that can be associated 
+with a data object.  The 
+:meth:`~yt.data_objects.data_containers.YTDataContainer.set_field_parameter` 
+and 
+:meth:`~yt.data_objects.data_containers.YTDataContainer.get_field_parameter` 
+functions are 
+used to set and retrieve field parameter values for a given data object.  In the 
+cases above, the field parameters are ``center`` and ``bulk_velocity`` respectively -- 
+the two most commonly used field parameters.
+
+.. code-block:: python
+
+   ds = yt.load("my_data")
+   ad = ds.all_data()
+
+   ad.set_field_parameter("wickets", 13)
+
+   print ad.get_field_parameter("wickets")
+
+If a field parameter is not set, ``get_field_parameter`` will return None.  
+Within a field function, these can then be retrieved and used in the same way.
+
+.. code-block:: python
+
+   def _wicket_density(field, data):
+       n_wickets = data.get_field_parameter("wickets")
+       if n_wickets is None:
+           # use a default if unset
+           n_wickets = 88
+       return data["gas", "density"] * n_wickets
+
+For a practical application of this, see :ref:`cookbook-radial-velocity`.
+
 Field types known to yt
 +++++++++++++++++++++++
 
