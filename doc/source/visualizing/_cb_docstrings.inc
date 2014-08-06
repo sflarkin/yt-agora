@@ -53,6 +53,8 @@ Clump Finder Callback
    prj.annotate_clumps(leaf_clumps)
    prj.save('clumps')
 
+.. _annotate-contours:
+
 Overplot Contours
 ~~~~~~~~~~~~~~~~~
 
@@ -81,7 +83,7 @@ Overplot quivers
 Axis-Aligned data sources
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. function:: annotate_quiver(self, field_x, field_y, factor, scale=None,
+.. function:: annotate_quiver(self, field_x, field_y, factor, scale=None, \
                               scale_units=None, normalize=False):
 
    (This is a proxy for
@@ -121,10 +123,12 @@ Off-axis Data Sources
    s.zoom(1.5)
    s.save()
 
+.. _annotate-grids:
+
 Overplot grids
 ~~~~~~~~~~~~~~
 
-.. function:: annotate_grids(self, alpha=1.0, min_pix=1, annotate=False,
+.. function:: annotate_grids(self, alpha=1.0, min_pix=1, annotate=False, \
                              periodic=True):
 
    (This is a proxy for
@@ -142,16 +146,19 @@ Overplot grids
    slc.annotate_grids()
    slc.save()
 
+.. _annotate-halos:
+
 Overplot Halo Annotations
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. function:: annotate_halos(self, halo_catalog, col='white', alpha =1,
+.. function:: annotate_halos(self, halo_catalog, col='white', alpha=1, \
                              width=None):
 
    (This is a proxy for
    :class:`~yt.visualization.plot_modifications.HaloCatalogCallback`.)
 
-   Accepts a :class:`yt.HaloCatalog` and plots a circle at the location of each
+   Accepts a :class:`~yt.analysis_modules.halo_analysis.halo_catalog.HaloCatalog` 
+   and plots a circle at the location of each
    halo with the radius of the circle corresponding to the virial radius of the
    halo.  If ``width`` is set to None (default) all halos are plotted.
    Otherwise, only halos that fall within a slab with width ``width`` centered
@@ -176,8 +183,7 @@ Overplot Halo Annotations
 Overplot a Straight Line
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. function:: annotate_image_line(self, p1, p2, data_coords=False,
-                                  plot_args=None):
+.. function:: annotate_image_line(self, p1, p2, data_coords=False, plot_args=None):
 
    (This is a proxy for
    :class:`~yt.visualization.plot_modifications.ImageLineCallback`.)
@@ -218,7 +224,7 @@ Overplot a line plot
 Overplot Magnetic Field Quivers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. function:: annotate_magnetic_field(self, factor=16, scale=None,
+.. function:: annotate_magnetic_field(self, factor=16, scale=None, \
                                       scale_units=None, normalize=False):
 
    (This is a proxy for
@@ -261,12 +267,13 @@ Annotate a Point With a Marker
    s.annotate_marker([0.5, 0.5, 0.5], plot_args={'s':10000})
    s.save()
 
+.. _annotate-particles:
+
 Overplotting Particle Positions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. function:: annotate_particles(self, width, p_size=1.0, col='k', marker='o',
-                                 stride=1.0, ptype=None, stars_only=False,
-                                 dm_only=False, minimum_mass=None):
+.. function:: annotate_particles(self, width, p_size=1.0, col='k', marker='o', \
+                                 stride=1.0, ptype=None, minimum_mass=None):
 
    (This is a proxy for
    :class:`~yt.visualization.plot_modifications.ParticleCallback`.)
@@ -308,7 +315,7 @@ Annotate a point with text
 Overplot a circle on a plot
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. function:: annotate_sphere(self, center, radius, circle_args=None, text=None,
+.. function:: annotate_sphere(self, center, radius, circle_args=None, text=None, \
                               text_args=None):
 
    (This is a proxy for
@@ -329,9 +336,9 @@ Overplot a circle on a plot
 Overplot streamlines
 ~~~~~~~~~~~~~~~~~~~~
 
-.. function:: annotate_streamlines(self, field_x, field_y, factor=6.0, nx=16,
-                                   ny=16, xstart=(0, 1), ystart=(0, 1),
-                                   nsample=256, start_at_xedge=False,
+.. function:: annotate_streamlines(self, field_x, field_y, factor=6.0, nx=16, \
+                                   ny=16, xstart=(0, 1), ystart=(0, 1), \
+                                   nsample=256, start_at_xedge=False, \
                                    start_at_yedge=False, plot_args=None):
 
    (This is a proxy for
@@ -391,10 +398,12 @@ Add a title to the plot
    p.annotate_title('Density Plot')
    p.save()
 
+.. _annotate-velocity:
+
 Overplot quivers for the velocity field
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. function:: annotate_velocity(self, factor=16, scale=None, scale_units=None,
+.. function:: annotate_velocity(self, factor=16, scale=None, scale_units=None, \
                                 normalize=False):
 
    (This is a proxy for
@@ -419,7 +428,7 @@ Overplot quivers for the velocity field
 Add a Timestamp Inset Box
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. function:: annotate_timestamp(x, y, units=None, format="{time:.3G} {units}", 
+.. function:: annotate_timestamp(x, y, units=None, format="{time:.3G} {units}", \
                                  **kwargs, normalized=False, bbox_dict=None)
 
    (This is a proxy for
