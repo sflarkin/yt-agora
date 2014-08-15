@@ -78,6 +78,7 @@ cdef import from "config_vars.h":
     char *MASS_DEFINITION
     np.int64_t MIN_HALO_OUTPUT_SIZE
     np.float64_t FORCE_RES
+    np.float64_t INITIAL_METRIC_SCALING
 
     np.float64_t SCALE_NOW
     np.float64_t h0
@@ -259,18 +260,19 @@ cdef class RockstarInterface:
                        int parallel = False, int num_readers = 1,
                        int num_writers = 1,
                        int writing_port = -1, int block_ratio = 1,
-                       int periodic = 1, force_res=None,
+                       int periodic = 1, force_res=None, initial_metric_scaling=1,
                        int min_halo_size = 25, outbase = "None",
                        callbacks = None, int restart_num = 0):
         global PARALLEL_IO, PARALLEL_IO_SERVER_ADDRESS, PARALLEL_IO_SERVER_PORT
         global FILENAME, FILE_FORMAT, NUM_SNAPS, STARTING_SNAP, h0, Ol, Om
         global BOX_SIZE, PERIODIC, PARTICLE_MASS, NUM_BLOCKS, NUM_READERS
         global FORK_READERS_FROM_WRITERS, PARALLEL_IO_WRITER_PORT, NUM_WRITERS
-        global rh, SCALE_NOW, OUTBASE, MIN_HALO_OUTPUT_SIZE
+        global rh, SCALE_NOW, OUTBASE, MIN_HALO_OUTPUT_SIZE, INITIAL_METRIC_SCALING
         global OVERLAP_LENGTH, TOTAL_PARTICLES, FORCE_RES, RESTART_SNAP
         if force_res is not None:
             FORCE_RES=np.float64(force_res)
             #print "set force res to ",FORCE_RES
+        INITIAL_METRIC_SCALING=np.float64(initial_metric_scaling)    
         OVERLAP_LENGTH = 0.0
         if parallel:
             PARALLEL_IO = 1
