@@ -147,6 +147,13 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
         last data snapshot (i.e. the one where time has evolved the
         longest) in the time series:
         ``ds_last.index.get_smallest_dx().in_units("Mpc/h")``.
+    initial_metric_scaling: float
+        The position element of the fof distance metric is divided by this
+        parameter, set to 1 by default. If the initial_metric_scaling=0.1 the
+        position element will have 10 times more weight than the velocity element,
+        biasing the metric towards position information more so than velocity 
+        information. That was found to be needed for hydro-ART simulations
+        with 10's of parsecs resolution.
     total_particles : int
         If supplied, this is a pre-calculated total number of particles present
         in the simulation. For example, this is useful when analyzing a series
@@ -194,8 +201,8 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
     """
     def __init__(self, ts, num_readers = 1, num_writers = None,
             outbase="rockstar_halos", particle_type="all",
-            force_res=None, total_particles=None, dm_only=False,
-            particle_mass=None):
+            force_res=None,  initial_metric_scaling=1, total_particles=None,
+            dm_only=False, particle_mass=None):
         if is_root():
             mylog.info("The citation for the Rockstar halo finder can be found at")
             mylog.info("http://adsabs.harvard.edu/abs/2013ApJ...762..109B")
@@ -224,6 +231,7 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
             del tds
         else:
             self.force_res = force_res
+        self.initial_metric_scaling = initial_metric_scaling     
         self.total_particles = total_particles
         self.dm_only = dm_only
         self.particle_mass = particle_mass
@@ -341,6 +349,7 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
                     block_ratio = block_ratio,
                     outbase = self.outbase,
                     force_res = self.force_res,
+                    initial_metric_scaling = self.initial_metric_scaling,               
                     callbacks = callbacks,
                     restart_num = restart_num)
         # Make the directory to store the halo lists in.
