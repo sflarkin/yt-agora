@@ -53,6 +53,8 @@ class Camera:
         #TODO : users should have control over perspective frustrum
         self.stdmatrix  = mth.perspective( [0.0, 0.0, 0.25] )
 
+    def perspective(self, x = 0.0, y = 0.0, z = 0.25):
+        self.stdmatrix  = mth.perspective( [x, y, z] )    
 
     def zoom(self, percentage = 10.0):
         r"""This will zoom the camera by percentage specified.
@@ -136,4 +138,6 @@ class Camera:
         dist   : float
             The amount of movement. **This unit is unknown!**
         """
-        return mth.rotate_x(self.rot[0]) * mth.rotate_y(self.rot[1]) * mth.rotate_z(self.rot[2]) * mth.scale((self.scale, self.scale, self.scale)) * mth.perspective([0.0, 0.0, 0.25]) *mth.translate((self.pos[0], self.pos[1], self.pos[2])) 
+        
+        return mth.rotate_x(self.rot[0]) * mth.rotate_y(self.rot[1]) * mth.rotate_z(self.rot[2]) * mth.scale((self.scale, self.scale, self.scale)) * self.stdmatrix * mth.translate((self.pos[0], self.pos[1], self.pos[2])) 
+
