@@ -226,7 +226,7 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
         self.outbase = outbase
         if force_res is None:
             tds = ts[-1] # Cache a reference
-            self.force_res = tds.index.get_smallest_dx().in_units("Mpc/h")
+            self.force_res = tds.arr(tds.index.get_smallest_dx(), 'code_length').in_units("Mpc/h")
             # We have to delete now to wipe the index
             del tds
         else:
