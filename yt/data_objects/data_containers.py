@@ -15,6 +15,7 @@ Various non-grid data containers.
 
 import itertools
 import types
+import uuid
 
 data_object_registry = {}
 
@@ -127,6 +128,15 @@ class YTDataContainer(object):
             return self._index
         self._index = self.ds.index
         return self._index
+
+    def _debug(self):
+        """
+        When called from within a derived field, this will run pdb.  However,
+        during field detection, it will not.  This allows you to more easily
+        debug fields that are being called on actual objects.
+        """
+        import pdb
+        pdb.set_trace()
 
     def _set_default_field_parameters(self):
         self.field_parameters = {}
@@ -437,8 +447,14 @@ class YTDataContainer(object):
 
     @contextmanager
     def _field_parameter_state(self, field_parameters):
+        # What we're doing here is making a copy of the incoming field
+        # parameters, and then updating it with our own.  This means that we'll
+        # be using our own center, if set, rather than the supplied one.  But
+        # it also means that any additionally set values can override it.
         old_field_parameters = self.field_parameters
-        self.field_parameters = field_parameters
+        new_field_parameters = field_parameters.copy()
+        new_field_parameters.update(old_field_parameters)
+        self.field_parameters = new_field_parameters
         yield
         self.field_parameters = old_field_parameters
 
@@ -1118,11 +1134,22 @@ class YTSelectionContainer3D(YTSelectionContainer):
             else:
                 mv = cons[level+1]
             from yt.analysis_modules.level_sets.api import identify_contours
+            from yt.analysis_modules.level_sets.clump_handling import \
+                add_contour_field
             nj, cids = identify_contours(self, field, cons[level], mv)
-            for cid in range(nj):
-                contours[level][cid] = self.cut_region(
-                    ["obj['contours'] == %s" % (cid + 1)],
-                    {'contour_slices': cids})
+            unique_contours = set([])
+            for sl_list in cids.values():
+                for sl, ff in sl_list:
+                    unique_contours.update(np.unique(ff))
+            contour_key = uuid.uuid4().hex
+            # In case we're a cut region already...
+            base_object = getattr(self, 'base_object', self)
+            add_contour_field(base_object.ds, contour_key)
+            for cid in sorted(unique_contours):
+                if cid == -1: continue
+                contours[level][cid] = base_object.cut_region(
+                    ["obj['contours_%s'] == %s" % (contour_key, cid)],
+                    {'contour_slices_%s' % contour_key: cids})
         return cons, contours
 
     def paint_grids(self, field, value, default_value=None):

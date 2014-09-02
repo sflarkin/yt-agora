@@ -222,7 +222,6 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
             self.func = np.sum # for the future
         else:
             raise NotImplementedError(style)
-        self.weight_field = weight_field
         self._set_center(center)
         if data_source is None: data_source = self.ds.all_data()
         for k, v in data_source.field_parameters.items():
@@ -230,7 +229,10 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
               self._is_default_field_parameter(k):
                 self.set_field_parameter(k, v)
         self.data_source = data_source
-        self.weight_field = weight_field
+        if weight_field is None:
+            self.weight_field = weight_field
+        else:
+            self.weight_field = self._determine_fields(weight_field)[0]
         self.get_data(field)
 
     @property
@@ -336,8 +338,8 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
                                   registry=self.ds.unit_registry)
             if self.weight_field is None and not self._sum_only:
                 u_obj = Unit(units, registry=self.ds.unit_registry)
-                if (u_obj.is_code_unit and not u_obj.is_dimensionless) and \
-                  input_units != units or self.ds.no_cgs_equiv_length:
+                if ((u_obj.is_code_unit or self.ds.no_cgs_equiv_length) and
+                    not u_obj.is_dimensionless) and input_units != units:
                     final_unit = "(%s) * code_length" % units
                     self[field].convert_to_units(final_unit)
         for i in data.keys(): self[i] = data.pop(i)
