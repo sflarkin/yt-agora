@@ -28,13 +28,13 @@ Table of Contents
          </p>
        </td>
        <td width="75%">
-         <p class="linkdescr">Getting and Installing yt</p>
+         <p class="linkdescr">Getting, installing, and updating yt</p>
        </td>
      </tr>
      <tr valign="top">
        <td width="25%">
          <p>
-           <a href="bootcamp/index.html">yt Bootcamp</a>
+           <a href="quickstart/index.html">yt Quickstart</a>
          </p>
        </td>
        <td width="75%">
@@ -78,7 +78,7 @@ Table of Contents
          </p>
        </td>
        <td width="75%">
-         <p class="linkdescr">Use analysis tools to extract results from your data</p>
+         <p class="linkdescr">Use analysis  tools to extract results from your data</p>
        </td>
      </tr>
      <tr valign="top">
@@ -127,7 +127,7 @@ Table of Contents
    :hidden:
 
    installing
-   yt Bootcamp <bootcamp/index>
+   yt Quickstart <quickstart/index>
    yt3differences
    cookbook/index
    visualizing/index
