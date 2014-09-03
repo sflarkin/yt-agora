@@ -3,19 +3,18 @@
 yt Bootcamp
 ===========
 
-yt Bootcamp is a series of worked examples of how to use much of the 
-funtionality of yt.  These are not meant to be detailed walkthroughs but simple,
-short introductions to give you a taste of what the code can do.
+The bootcamp is a series of worked examples of how to use much of the
+funtionality of yt.  These are simple, short introductions to give you a taste
+of what the code can do and are not meant to be detailed walkthroughs.
 
 There are two ways in which you can go through the bootcamp: interactively and 
 non-interactively.  We recommend the interactive method, but if you're pressed 
-on time, you can non-interactively go through the following pages and view the 
+on time, you can non-interactively go through the linked pages below and view the 
 worked examples.
 
 To execute the bootcamp interactively, you need to download the repository and
 start the IPython notebook.  If you do not already have the yt repository, the
-easiest way to get the repository is to use your already-installed mercurial
-program to grab it:
+easiest way to get the repository is to clone it using mercurial:
 
 .. code-block:: bash
 
@@ -29,7 +28,8 @@ Now start the IPython notebook from within the repository:
    yt notebook
 
 This command will give you information about the notebook server and how to
-access it.  You will basically just redirect your web browser to point to it.
+access it.  You will basically just pick a password (for security reasons) and then 
+redirect your web browser to point to the notebook server.
 Once you have done so, choose "Introduction" from the list of
 notebooks, which includes an introduction and information about how to download
 the sample data.

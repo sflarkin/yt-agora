@@ -1,28 +1,28 @@
 .. _streamlines:
 
-Streamlining
-================
-.. versionadded:: 2.1
+Streamlines
+===========
 
-Streamlines, as implemented in ``yt``, are defined as being parallel to a
+Streamlines, as implemented in yt, are defined as being parallel to a
 vector field at all points.  While commonly used to follow the
 velocity flow or magnetic field lines, they can be defined to follow
 any three-dimensional vector field.  Once an initial condition and
 total length of the streamline are specified, the streamline is
-uniquely defined.    
+uniquely defined.  Relatedly, yt also has the ability to follow 
+:ref:`particle-trajectories`.
 
 Method
-----------------
+------
 
 Streamlining through a volume is useful for a variety of analysis
 tasks.  By specifying a set of starting positions, the user is
 returned a set of 3D positions that can, in turn, be used to visualize
 the 3D path of the streamlines.  Additionally, individual streamlines
 can be converted into
-:class:`~yt.data_objects.data_containers.AMRStreamlineBase` objects,
+:class:`~yt.data_objects.construction_data_containers.YTStreamlineBase` objects,
 and queried for all the available fields along the streamline.
 
-The implementation of streamlining  in ``yt`` is described below.
+The implementation of streamlining  in yt is described below.
 
 #. Decompose the volume into a set of non-overlapping, fully domain
    tiling bricks, using the
@@ -46,7 +46,7 @@ The implementation of streamlining  in ``yt`` is described below.
             intermediate position.
 
 #. The set set of streamline positions are stored in the
-   :obj:`~yt.visualization.streamlines.Streamlines.streamlines` object.
+   :class:`~yt.visualization.streamlines.Streamlines` object.
 
 Example Script
 ++++++++++++++
@@ -80,7 +80,7 @@ Data Access Along the Streamline
 --------------------------------
 
 Once the streamlines are found, a
-:class:`~yt.data_objects.data_containers.AMRStreamlineBase` object can
+:class:`~yt.data_objects.construction_data_containers.YTStreamlineBase` object can
 be created using the
 :meth:`~yt.visualization.streamlines.Streamlines.path` function, which
 takes as input the index of the streamline requested. This conversion
@@ -112,4 +112,5 @@ splitting the streamlines up between the processors.  Upon completion,
 each processor has access to all of the streamlines through the use of
 a reduction operation.
 
-Parallel usage is specified using the standard ``--parallel`` flag.
+For more information on enabling parallelism in yt, see 
+:ref:`parallel-computation`.

@@ -341,7 +341,7 @@ Version 2.3
  * Real, extensive answer tests
  * Boolean data regions (see :ref:`boolean_data_objects`)
  * Isocontours / flux calculations (see :ref:`extracting-isocontour-information`)
- * Field reorganization (see :ref:`types_of_fields`)
+ * Field reorganization
  * PHOP memory improvements
  * Bug fixes for tests
  * Parallel data loading for RAMSES, along with other speedups and improvements
@@ -393,7 +393,7 @@ Version 2.1
  * Contour finder has been sped up by a factor of a few
  * Constrained two-point functions are now possible, for LOS power spectra
  * Time series analysis (:ref:`time-series-analysis`) now much easier
- * Stream Lines now a supported 1D data type (:class:`AMRStreamlineBase`)
+ * Stream Lines now a supported 1D data type
  * Stream Lines now able to be calculated and plotted (:ref:`streamlines`)
  * In situ Enzo visualization now much faster
  * "gui" source directory reorganized and cleaned up
@@ -482,7 +482,7 @@ finder (see :ref:`halo_finding`)
  * Optimized data structures such as the index
  * Star particle analysis routines
    (see :ref:`star_analysis`)
- * Halo mass function routines (see :ref:`hmf_howto`)
+ * Halo mass function routines
  * Completely rewritten, massively faster and more memory efficient Particle IO
  * Fixes for plots, including normalized phase plots
  * Better collective communication in parallel routines

@@ -1000,8 +1000,7 @@ class HaloCatalogCallback(PlotCallback):
 class ParticleCallback(PlotCallback):
     """
     annotate_particles(width, p_size=1.0, col='k', marker='o', stride=1.0,
-                       ptype=None, stars_only=False, dm_only=False,
-                       minimum_mass=None, alpha=1.0)
+                       ptype=None, minimum_mass=None, alpha=1.0)
 
     Adds particle positions, based on a thick slab along *axis* with a
     *width* along the line of sight.  *p_size* controls the number of
@@ -1173,7 +1172,19 @@ class TriangleFacetsCallback(PlotCallback):
         xax = plot.data.ds.coordinates.x_axis[ax]
         yax = plot.data.ds.coordinates.y_axis[ax]
 
-        l_cy = triangle_plane_intersect(plot.data.axis, plot.data.coord, self.vertices)[:,:,(xax, yax)]
+        if not hasattr(self.vertices, "in_units"):
+            vertices = plot.data.pf.arr(self.vertices, "code_length")
+        else:
+            vertices = self.vertices
+        l_cy = triangle_plane_intersect(plot.data.axis, plot.data.coord, vertices)[:,:,(xax, yax)]
+        # reformat for conversion to plot coordinates
+        l_cy = np.rollaxis(l_cy,0,3)
+        # convert all line starting points
+        l_cy[0] = self.convert_to_plot(plot,l_cy[0])
+        l_cy[1] = self.convert_to_plot(plot,l_cy[1])
+        # convert all line ending points
+        l_cy = np.rollaxis(l_cy,2,0)
+        # create line collection and add it to the plot
         lc = matplotlib.collections.LineCollection(l_cy, **self.plot_args)
         plot._axes.add_collection(lc)
         plot._axes.hold(False)

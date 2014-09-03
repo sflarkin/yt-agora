@@ -75,6 +75,8 @@ used if you simply need to access the NumPy arrays:
     print 'Density of "overpressure and fast" data: ad["density"][overpressure_and_fast] = \n%s' % \
            ad['density'][overpressure_and_fast]
 
+.. _cut-regions:
+
 Cut Regions
 ^^^^^^^^^^^
 
@@ -83,6 +85,9 @@ of a cut region is an entirely new data object, which can be treated like any
 other data object to generate images, examine its values, etc.
 
 .. notebook:: mesh_filter.ipynb
+
+Cut regions can also operator on particle fields, but a single cut region object
+cannot operate on both particle fields and mesh fields at the same time.
 
 .. _filtering-particles:
 
@@ -134,6 +139,32 @@ the grid as mesh fields.
 
 .. notebook:: particle_filter.ipynb
 
+.. _particle-unions:
+
+Particle Unions
+---------------
+
+Multiple types of particles can be combined into a single, conceptual type.  As
+an example, the NMSU-ART code has multiple "species" of dark matter, which we
+union into a single ``darkmatter`` field.  The ``all`` particle type is a
+special case of this.
+
+To create a particle union, you need to import the ``ParticleUnion`` class from
+``yt.data_objects.particle_unions``, which you then create and pass into
+``add_particle_union`` on a dataset object.
+
+Here is an example, where we union the ``halo`` and ``disk`` particle types
+into a single type, ``star``.  yt will then determine which fields are
+accessible to this new particle type and it will add them.
+
+.. code-block:: python
+
+   from yt.data_objects.particle_unions import \
+       ParticleUnion
+
+   u = ParticleUnion("star", ["halo", "disk"])
+   ds.add_particle_union(u)
+
 .. _filtering-by-location:
 
 Filtering Fields by Spatial Location: Geometric Objects
@@ -144,7 +175,8 @@ a field based on spatial location.  The most commonly used of these are
 spheres, regions (3D prisms), ellipsoids, disks, and rays.  The `all_data`
 object which gets used throughout this documentation section is an example of 
 a geometric object, but it defaults to including all the data in the dataset
-volume.
+volume.  To see all of the geometric objects available, see 
+:ref:`available-objects`.
 
 Consult the object documentation section for all of the different objects
 one can use, but here is a simple example using a sphere object to filter
@@ -165,4 +197,3 @@ distributed throughout the dataset.
 
     # Mark the center with a big X
     prj.annotate_marker(center, 'x', plot_args={'s':100})
-    prj.save()

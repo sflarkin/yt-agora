@@ -3,7 +3,7 @@
 Creating Derived Fields
 =======================
 
-One of the more powerful means of extending ``yt`` is through the usage of derived
+One of the more powerful means of extending yt is through the usage of derived
 fields.  These are fields that describe a value at each cell in a simulation.
 
 Defining a New Field
@@ -25,14 +25,13 @@ this approach.
        return (data.ds.gamma - 1.0) * \
               data["density"] * data["thermal_energy"]
 
-Note that we do a couple different things here.  We access the "gamma"
-parameter from the dataset, we access the "density" field and we access
-the "thermal_energy" field.  "thermal_energy" is, in fact, another derived field!
-("thermal_energy" deals with the distinction in storage of energy between dual
-energy formalism and non-DEF.)  We don't do any loops, we don't do any
+Note that we do a couple different things here.  We access the ``gamma``
+parameter from the dataset, we access the ``density`` field and we access
+the ``thermal_energy`` field.  ``thermal_energy`` is, in fact, another derived 
+field!  We don't do any loops, we don't do any
 type-checking, we can simply multiply the three items together.
 
-Once we've defined our function, we need to notify ``yt`` that the field is
+Once we've defined our function, we need to notify yt that the field is
 available.  The :func:`add_field` function is the means of doing this; it has a
 number of fairly specific parameters that can be passed in, but here we'll only
 look at the most basic ones needed for a simple scalar baryon field.
@@ -42,7 +41,7 @@ look at the most basic ones needed for a simple scalar baryon field.
    yt.add_field("pressure", function=_pressure, units="dyne/cm**2")
 
 We feed it the name of the field, the name of the function, and the
-units.  Note that the units parameter is a "raw" string, in the format that ``yt`` uses
+units.  Note that the units parameter is a "raw" string, in the format that yt uses
 in its `symbolic units implementation <units>`_ (e.g., employing only unit names, numbers,
 and mathematical operators in the string, and using ``"**"`` for exponentiation). We suggest
 that you name the function that creates a derived field with the intended field name prefixed
@@ -68,8 +67,8 @@ a new field.
 Defining derived fields in the above fashion must be done before a dataset is loaded,
 in order for the dataset to recognize it. If you want to set up a derived field after you
 have loaded a dataset, or if you only want to set up a derived field for a particular
-dataset, there is an :meth:`add_field` method that hangs off dataset objects. The calling
-syntax is the same:
+dataset, there is an :func:`~yt.data_objects.static_output.Dataset.add_field` 
+method that hangs off dataset objects. The calling syntax is the same:
 
 .. code-block:: python
 
@@ -85,8 +84,9 @@ A More Complicated Example
 But what if we want to do something a bit more fancy?  Here's an example of getting
 parameters from the data object and using those to define the field;
 specifically, here we obtain the ``center`` and ``bulk_velocity`` parameters
-and use those to define a field for radial velocity (there is already a ``"radial_velocity"``
-field in ``yt``, but we create this one here just as a transparent and simple example).
+and use those to define a field for radial velocity (there is already 
+a ``radial_velocity`` field in yt, but we create this one here just as a 
+transparent and simple example).
 
 .. code-block:: python
 
@@ -122,11 +122,11 @@ that we do not wish to display this field as logged, that we require both
 ``bulk_velocity`` and ``center`` to be present in a given data object we wish
 to calculate this for, and we say that it should not be displayed in a
 drop-down box of fields to display. This is done through the parameter
-*validators*, which accepts a list of :class:`FieldValidator` objects. These
-objects define the way in which the field is generated, and when it is able to
-be created. In this case, we mandate that parameters *center* and
-*bulk_velocity* are set before creating the field. These are set via
-:meth:`~yt.data_objects.data_containers.set_field_parameter`, which can 
+*validators*, which accepts a list of :class:`~yt.fields.derived_field.FieldValidator` 
+objects. These objects define the way in which the field is generated, and 
+when it is able to be created. In this case, we mandate that parameters 
+``center`` and ``bulk_velocity`` are set before creating the field. These are 
+set via :meth:`~yt.data_objects.data_containers.set_field_parameter`, which can 
 be called on any object that has fields:
 
 .. code-block:: python
@@ -135,11 +135,12 @@ be called on any object that has fields:
    sp = ds.sphere("max", (200.,"kpc"))
    sp.set_field_parameter("bulk_velocity", yt.YTArray([-100.,200.,300.], "km/s"))
 
-In this case, we already know what the *center* of the sphere is, so we do not set it. Also,
-note that *center* and *bulk_velocity* need to be :class:`YTArray` objects with units.
+In this case, we already know what the ``center`` of the sphere is, so we do 
+not set it. Also, note that ``center`` and ``bulk_velocity`` need to be 
+:class:`~yt.units.yt_array.YTArray` objects with units.
 
-Other examples for creating derived fields can be found in the cookbook recipes
-:ref:`cookbook-simple-derived-fields` and :ref:`cookbook-complex-derived-fields`.
+Other examples for creating derived fields can be found in the cookbook recipe
+:ref:`cookbook-simple-derived-fields`.
 
 .. _derived-field-options:
 
@@ -150,30 +151,30 @@ The arguments to :func:`add_field` are passed on to the constructor of :class:`D
 There are a number of options available, but the only mandatory ones are ``name``,
 ``units``, and ``function``.
 
-   ``name``
+``name``
      This is the name of the field -- how you refer to it.  For instance,
      ``pressure`` or ``magnetic_field_strength``.
-   ``function``
+``function``
      This is a function handle that defines the field
-   ``units``
+``units``
      This is a string that describes the units. Powers must be in
      Python syntax (``**`` instead of ``^``).
-   ``display_name``
+``display_name``
      This is a name used in the plots, for instance ``"Divergence of
      Velocity"``.  If not supplied, the ``name`` value is used.
-   ``take_log``
+``take_log``
      This is *True* or *False* and describes whether the field should be logged
      when plotted.
-   ``particle_type``
+``particle_type``
      Is this field a *particle* field?
-   ``validators``
+``validators``
      (*Advanced*) This is a list of :class:`FieldValidator` objects, for instance to mandate
      spatial data.
-   ``display_field``
+``display_field``
      (*Advanced*) Should this field appear in the dropdown box in Reason?
-   ``not_in_all``
+``not_in_all``
      (*Advanced*) If this is *True*, the field may not be in all the grids.
-   ``output_units``
+``output_units``
      (*Advanced*) For fields that exist on disk, which we may want to convert to other
      fields or that get aliased to themselves, we can specify a different
      desired output unit than the unit found on disk.
@@ -181,7 +182,7 @@ There are a number of options available, but the only mandatory ones are ``name`
 Units for Cosmological Datasets
 -------------------------------
 
-``yt`` has additional capabilities to handle the comoving coordinate system used
+yt has additional capabilities to handle the comoving coordinate system used
 internally in cosmological simulations. Simulations that use comoving
 coordinates, all length units have three other counterparts correspoding to
 comoving units, scaled comoving units, and scaled proper units. In all cases
