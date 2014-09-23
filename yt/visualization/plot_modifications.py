@@ -558,7 +558,6 @@ class LabelCallback(PlotCallback):
         plot._axes.set_ylabel(self.label)
 
 def get_smallest_appropriate_unit(v, ds):
-    max_nu = 1e30
     good_u = None
     for unit in ['Mpc', 'kpc', 'pc', 'au', 'rsun', 'km', 'cm']:
         uq = YTQuantity(1.0, unit)
@@ -708,10 +707,6 @@ class ClumpContourCallback(PlotCallback):
         dxf = "d%s" % xf
         dyf = "d%s" % yf
 
-        DomainRight = plot.data.ds.domain_right_edge
-        DomainLeft = plot.data.ds.domain_left_edge
-        DomainWidth = DomainRight - DomainLeft
-
         nx, ny = plot.image._A.shape
         buff = np.zeros((nx,ny),dtype='float64')
         for i,clump in enumerate(reversed(self.clumps)):
@@ -790,7 +785,6 @@ class PointAnnotateCallback(PlotCallback):
                         plot.data.ds.coordinates.y_axis[ax])
             pos = self.pos[xi], self.pos[yi]
         else: pos = self.pos
-        width,height = plot.image._A.shape
         x,y = self.convert_to_plot(plot, pos)
         
         plot._axes.text(x, y, self.text, **self.text_args)
@@ -907,7 +901,7 @@ class TextLabelCallback(PlotCallback):
 class HaloCatalogCallback(PlotCallback):
     """
     annotate_halos(halo_catalog, circle_kwargs=None,
-        width = None, annotate_field = False,
+        width=None, annotate_field=None,
         font_kwargs=None, factor = 1.0)
 
     Plots circles at the locations of all the halos
@@ -936,7 +930,7 @@ class HaloCatalogCallback(PlotCallback):
     _descriptor = None
 
     def __init__(self, halo_catalog, circle_kwargs=None, 
-            width = None, annotate_field = False,
+            width=None, annotate_field=None,
             font_kwargs=None, factor = 1.0):
 
         PlotCallback.__init__(self)
