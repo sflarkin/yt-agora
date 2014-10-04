@@ -285,7 +285,8 @@ class AthenaHierarchy(GridIndex):
 
         # Need to reset the units in the dataset based on the correct
         # domain left/right/dimensions.
-        self.dataset._set_code_unit_attributes()
+        # DEV: Is this really necessary?
+        #self.dataset._set_code_unit_attributes()
 
         if self.dataset.dimensionality <= 2 :
             self.dataset.domain_dimensions[2] = np.int(1)
@@ -352,12 +353,21 @@ class AthenaDataset(Dataset):
     _dataset_type = "athena"
 
     def __init__(self, filename, dataset_type='athena',
-                 storage_filename=None, parameters=None):
+                 storage_filename=None, parameters=None,
+                 units_override=None):
         self.fluid_types += ("athena",)
         if parameters is None:
             parameters = {}
         self.specified_parameters = parameters
-        Dataset.__init__(self, filename, dataset_type)
+        if units_override is None:
+            units_override = {}
+        # This is for backwards-compatibility
+        for k,v in self.specified_parameters.items():
+            if k.endswith("_unit") and k not in units_override:
+                raise DeprecationWarning("Supplying unit conversions from the parameters dict is deprecated, "+
+                                         "and will be removed in a future release. Use units_override instead.")
+                units_override[k] = self.specified_parameters.pop(k)
+        Dataset.__init__(self, filename, dataset_type, units_override=units_override)
         self.filename = filename
         if storage_filename is None:
             storage_filename = '%s.yt' % filename.split('/')[-1]
@@ -373,22 +383,23 @@ class AthenaDataset(Dataset):
         Generates the conversion to various physical _units based on the parameter file
         """
         for unit, cgs in [("length", "cm"), ("time", "s"), ("mass", "g")]:
-            val = self.specified_parameters.get("%s_unit" % unit, None)
+            # We check to see if these will be overridden. If not, we simply
+            # set them to the unity values in cgs. 
+            val = self.units_override.get("%s_unit" % unit, None)
             if val is None:
                 if unit == "length": self.no_cgs_equiv_length = True
                 mylog.warning("No %s conversion to cgs provided.  " +
                               "Assuming 1.0 = 1.0 %s", unit, cgs)
-                val = 1.0
-            if not isinstance(val, tuple):
-                val = (val, cgs)
-            setattr(self, "%s_unit" % unit, self.quan(val[0], val[1]))
-        self.velocity_unit = self.length_unit/self.time_unit
-        self.magnetic_unit = np.sqrt(4*np.pi * self.mass_unit /
-                                  (self.time_unit**2 * self.length_unit))
-        self.magnetic_unit.convert_to_units("gauss")
+                setattr(self, "%s_unit" % unit, self.quan(1.0, cgs))
 
     def set_code_units(self):
         super(AthenaDataset, self).set_code_units()
+        mag_unit = getattr(self, "magnetic_unit", None)
+        if mag_unit is None:
+            self.magnetic_unit = np.sqrt(4*np.pi * self.mass_unit /
+                                         (self.time_unit**2 * self.length_unit))
+        self.magnetic_unit.convert_to_units("gauss")
+
         self.unit_registry.modify("code_magnetic", self.magnetic_unit)
 
     def _parse_parameter_file(self):
