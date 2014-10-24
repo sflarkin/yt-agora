@@ -20,7 +20,8 @@ from yt.utilities.physical_ratios import \
     metallicity_sun, erg_per_eV, amu_grams, mass_electron_grams, \
     cm_per_ang, jansky_cgs, mass_jupiter_grams, mass_earth_grams, \
     boltzmann_constant_erg_per_K, kelvin_per_rankine, \
-    speed_of_light_cm_per_s
+    speed_of_light_cm_per_s, planck_length, planck_charge, \
+    planck_energy, planck_mass, planck_temperature, planck_time
 import numpy as np
 
 # Lookup a unit symbol with the symbol string, and provide a tuple with the
@@ -37,20 +38,25 @@ default_unit_symbol_lut = {
     # other cgs
     "dyne": (1.0, dimensions.force),
     "erg":  (1.0, dimensions.energy),
-    "esu":  (1.0, dimensions.charge),
-    "gauss": (1.0, dimensions.magnetic_field),
-    "C" : (1.0, dimensions.temperature, -273.15),
+    "esu":  (1.0, dimensions.charge_cgs),
+    "gauss": (1.0, dimensions.magnetic_field_cgs),
+    "degC": (1.0, dimensions.temperature, -273.15),
+    "statA": (1.0, dimensions.current_cgs),
 
     # some SI
     "m": (1.0e2, dimensions.length),
     "J": (1.0e7, dimensions.energy),
     "W": (1.0e7, dimensions.power),
     "Hz": (1.0, dimensions.rate),
+    "N": (1.0e5, dimensions.force),
+    "C": (0.1*speed_of_light_cm_per_s, dimensions.charge_mks),
+    "A": (0.1*speed_of_light_cm_per_s, dimensions.current_mks),
+    "T": (1.0e4, dimensions.magnetic_field_mks),
 
     # Imperial units
     "ft": (30.48, dimensions.length),
     "mile": (160934, dimensions.length),
-    "F": (kelvin_per_rankine, dimensions.temperature, -459.67),
+    "degF": (kelvin_per_rankine, dimensions.temperature, -459.67),
     "R": (kelvin_per_rankine, dimensions.temperature),
 
     # dimensionless stuff
@@ -93,12 +99,9 @@ default_unit_symbol_lut = {
     # misc
     "eV": (erg_per_eV, dimensions.energy),
     "amu": (amu_grams, dimensions.mass),
-    "me": (mass_electron_grams, dimensions.mass),
     "angstrom": (cm_per_ang, dimensions.length),
     "Jy": (jansky_cgs, dimensions.specific_flux),
     "counts": (1.0, dimensions.dimensionless),
-    "kB": (boltzmann_constant_erg_per_K,
-           dimensions.energy/dimensions.temperature),
     "photons": (1.0, dimensions.dimensionless),
 
     # for AstroPy compatibility
@@ -109,10 +112,18 @@ default_unit_symbol_lut = {
     "sr": (1.0, dimensions.solid_angle),
     "rad": (1.0, dimensions.solid_angle),
     "deg": (np.pi/180., dimensions.angle),
-    "Fr":  (1.0, dimensions.charge),
-    "G": (1.0, dimensions.magnetic_field),
+    "Fr":  (1.0, dimensions.charge_cgs),
+    "G": (1.0, dimensions.magnetic_field_cgs),
     "d": (1.0, dimensions.time),
     "Angstrom": (cm_per_ang, dimensions.length),
+
+    # Planck units
+    "m_pl": (planck_mass, dimensions.mass),
+    "l_pl": (planck_length, dimensions.length),
+    "t_pl": (planck_time, dimensions.time),
+    "T_pl": (planck_temperature, dimensions.temperature),
+    "q_pl": (planck_charge, dimensions.charge_cgs),
+    "E_pl": (planck_energy, dimensions.energy),
 
 }
 
@@ -178,6 +189,10 @@ prefixable_units = (
     "W",
     "gauss",
     "Jy",
+    "N",
+    "T",
+    "A",
+    "C",
 )
 
 cgs_base_units = {
@@ -194,4 +209,11 @@ mks_base_units = {
     dimensions.time:'s',
     dimensions.temperature:'K',
     dimensions.angle:'radian',
+    dimensions.current_mks:'A',
+}
+
+cgs_conversions = {
+    "C":("mks","esu"),
+    "T":("mks","gauss"),
+    "A":("mks","statA"),
 }
