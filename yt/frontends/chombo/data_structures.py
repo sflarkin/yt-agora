@@ -113,7 +113,8 @@ class ChomboHierarchy(GridIndex):
         self.directory = ds.fullpath
         self._handle = ds._handle
 
-        self.float_type = self._handle['Chombo_global'].attrs['testReal'].dtype.name
+        tr = self._handle['Chombo_global'].attrs.get("testReal", "float32")
+            
         self._levels = [key for key in self._handle.keys() if key.startswith('level')]
         GridIndex.__init__(self, ds, dataset_type)
 
@@ -156,12 +157,18 @@ class ChomboHierarchy(GridIndex):
         for key, val in self._handle.attrs.items():
             if key.startswith("particle"):
                 particle_fields.append(val)
-        self.field_list.extend([("io", c) for c in particle_fields])        
+        self.field_list.extend([("io", c) for c in particle_fields])
 
     def _count_grids(self):
         self.num_grids = 0
         for lev in self._levels:
-            self.num_grids += self._handle[lev]['Processors'].len()
+            d = self._handle[lev]
+            if 'Processors' in d:
+                self.num_grids += d['Processors'].len()
+            elif 'boxes' in d:
+                self.num_grids += d['boxes'].len()
+            else:
+                raise RuntimeError("Uknown file specification")
 
     def _parse_index(self):
         f = self._handle # shortcut
@@ -243,7 +250,8 @@ class ChomboDataset(Dataset):
     _field_info_class = ChomboFieldInfo
 
     def __init__(self, filename, dataset_type='chombo_hdf5',
-                 storage_filename = None, ini_filename = None):
+                 storage_filename = None, ini_filename = None,
+                 units_override=None):
         self.fluid_types += ("chombo",)
         self._handle = HDF5FileHandler(filename)
         self.dataset_type = dataset_type
@@ -258,7 +266,8 @@ class ChomboDataset(Dataset):
         self.geometry = "cartesian"
         self.ini_filename = ini_filename
         self.fullplotdir = os.path.abspath(filename)
-        Dataset.__init__(self,filename, self.dataset_type)
+        Dataset.__init__(self,filename, self.dataset_type,
+                         units_override=units_override)
         self.storage_filename = storage_filename
         self.cosmological_simulation = False
 
@@ -447,10 +456,12 @@ class PlutoDataset(ChomboDataset):
     _field_info_class = PlutoFieldInfo
 
     def __init__(self, filename, dataset_type='pluto_chombo_native',
-                 storage_filename = None, ini_filename = None):
+                 storage_filename = None, ini_filename = None,
+                 units_override=None):
 
         ChomboDataset.__init__(self, filename, dataset_type, 
-                    storage_filename, ini_filename)
+                               storage_filename, ini_filename,
+                               units_override=units_override)
 
     def _parse_parameter_file(self):
         """
@@ -534,7 +545,8 @@ class Orion2Hierarchy(ChomboHierarchy):
 
         # look for particle fields
         self.particle_filename = self.index_filename[:-4] + 'sink'
-        if not os.path.exists(self.particle_filename): return
+        if not os.path.exists(self.particle_filename):
+            return
         pfield_list = [("io", c) for c in self.io.particle_field_index.keys()]
         self.field_list.extend(pfield_list)
 
@@ -578,10 +590,12 @@ class Orion2Dataset(ChomboDataset):
     _field_info_class = Orion2FieldInfo
 
     def __init__(self, filename, dataset_type='orion_chombo_native',
-                 storage_filename = None, ini_filename = None):
+                 storage_filename = None, ini_filename = None,
+                 units_override=None):
 
         ChomboDataset.__init__(self, filename, dataset_type,
-                    storage_filename, ini_filename)
+                               storage_filename, ini_filename,
+                               units_override=units_override)
 
     def _parse_parameter_file(self):
         """
@@ -664,10 +678,12 @@ class ChomboPICDataset(ChomboDataset):
     _field_info_class = ChomboPICFieldInfo3D
 
     def __init__(self, filename, dataset_type='chombo_hdf5',
-                 storage_filename=None, ini_filename=None):
+                 storage_filename=None, ini_filename=None,
+                 units_override=None):
 
         ChomboDataset.__init__(self, filename, dataset_type,
-                               storage_filename, ini_filename)
+                               storage_filename, ini_filename,
+                               units_override=units_override)
 
         if self.dimensionality == 1:
             self._field_info_class = ChomboPICFieldInfo1D
