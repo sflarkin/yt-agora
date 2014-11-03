@@ -27,6 +27,7 @@ cdef import from "particle.h":
     struct particle:
         np.int64_t id
         float pos[6]
+        float mass
 
 ctypedef struct particleflat:
     np.int64_t id
@@ -36,6 +37,7 @@ ctypedef struct particleflat:
     float vel_x
     float vel_y
     float vel_z
+    float mass
 
 cdef import from "halo.h":
     struct halo:
@@ -44,6 +46,7 @@ cdef import from "halo.h":
         float m, r, child_r, mgrav, vmax, rvmax, rs, vrms, J[3], energy, spin
         np.int64_t num_p, num_child_particles, p_start, desc, flags, n_core
         float min_pos_err, min_vel_err, min_bulkvel_err
+        float m_hires, m_lowres
 
 cdef import from "io_generic.h":
     ctypedef void (*LPG) (char *filename, particle **p, np.int64_t *num_p)
@@ -166,16 +169,27 @@ cdef void rh_analyze_halo(halo *h, particle *hp):
     if h.num_p == 0: return
     cdef particleflat[:] pslice
     pslice = <particleflat[:h.num_p]> (<particleflat *>hp)
-    parray = np.asarray(pslice)
-    for cb in rh.callbacks:
-        cb(rh.ds, parray)
-    # This is where we call our functions
+
+    # After adding the mass to the particle and particleflat structs,
+    # the line below returns the following errors:
+
+    #parray = np.asarray(pslice) #line causing error
+ 
+    #project/projectdirs/agora/.AGORA_PIPE_INSTALL/yt-agora_install/lib/python2.7/site-packages/numpy/core/numeric.py:320: RuntimeWarning: Item size computed from the PEP 3118 buffer format string does not match the actual item size.
+    #return array(a, dtype, copy=False, order=order)
+    #Exception TypeError: 'expected a readable buffer object' in 'yt.analysis_modules.halo_finding.rockstar.rockstar_interface.rh_analyze_halo' ignored
+
+    # This is where we call our functions   
+    #for cb in rh.callbacks:
+    #    cb(rh.ds, parray)
+ 
 
 cdef void rh_read_particles(char *filename, particle **p, np.int64_t *num_p):
     global SCALE_NOW
     cdef np.float64_t left_edge[6]
     cdef np.ndarray[np.int64_t, ndim=1] arri
     cdef np.ndarray[np.float64_t, ndim=1] arr
+    cdef np.ndarray[np.float64_t, ndim=1] marr
     cdef unsigned long long pi,fi,i
     cdef np.int64_t local_parts = 0
     ds = rh.ds = rh.tsl.next()
@@ -191,7 +205,8 @@ cdef void rh_read_particles(char *filename, particle **p, np.int64_t *num_p):
     dd = ds.all_data()
 
     # Add particle type filter if not defined
-    if rh.particle_type not in ds.particle_types and rh.particle_type != 'all':
+    particle_types = np.unique([field[0] for field in ds.field_list if 'particle' in field[1]])
+    if rh.particle_type not in particle_types and rh.particle_type != 'all':
         ds.add_particle_filter(rh.particle_type)
 
     if NUM_BLOCKS > 1:
@@ -212,13 +227,15 @@ cdef void rh_read_particles(char *filename, particle **p, np.int64_t *num_p):
     fields = [ (rh.particle_type, f) for f in
                 ["particle_position_%s" % ax for ax in 'xyz'] + 
                 ["particle_velocity_%s" % ax for ax in 'xyz'] +
-                ["particle_index"]]
+                ["particle_index"] + ["particle_mass"]]
     for chunk in parallel_objects(dd.chunks(fields, "io")):
         arri = np.asarray(chunk[rh.particle_type, "particle_index"],
                           dtype="int64")
+        marr = chunk[rh.particle_type, "particle_mass"].in_units("Msun/h").astype("float64")	
         npart = arri.size
         for i in range(npart):
             p[0][i+pi].id = <np.int64_t> arri[i]
+            p[0][i+pi].mass = <np.float64_t> marr[i]
         fi = 0
         for field in ["particle_position_x", "particle_position_y",
                       "particle_position_z",
