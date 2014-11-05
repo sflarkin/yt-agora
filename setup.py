@@ -103,7 +103,7 @@ def generate_a_pyrex_source(self, base, ext_name, source, extension):
         options = Cython.Compiler.Main.CompilationOptions(
             defaults=Cython.Compiler.Main.default_options,
             include_path=extension.include_dirs,
-            language=extension.language, cplus=cplus,
+            cplus=cplus,
             output_file=target_file)
         cython_result = Cython.Compiler.Main.compile(source,
                                                      options=options)
@@ -118,7 +118,7 @@ build_src.build_src.generate_a_pyrex_source = generate_a_pyrex_source
 # End snippet
 ######
 
-VERSION = "3.0"
+VERSION = "3.0.2"
 
 if os.path.exists('MANIFEST'):
     os.remove('MANIFEST')
