@@ -98,7 +98,12 @@ from yt.utilities.logger import ytLogger as mylog
 
 import yt.utilities.physical_constants as physical_constants
 import yt.units as units
-from yt.units.yt_array import YTArray, YTQuantity
+from yt.units.yt_array import \
+    YTArray, \
+    YTQuantity, \
+    uconcatenate, \
+    uintersect1d, \
+    uunion1d
 
 from yt.fields.api import \
     field_plugins, \
@@ -150,7 +155,7 @@ from yt.visualization.volume_rendering.api import \
     TransferFunctionHelper
 
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
-    parallel_objects, enable_parallelism
+    parallel_objects, enable_parallelism, communication_system
 
 from yt.convenience import \
     load, simulation
