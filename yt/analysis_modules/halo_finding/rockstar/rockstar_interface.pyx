@@ -173,11 +173,11 @@ cdef void rh_analyze_halo(halo *h, particle *hp):
     # After adding the mass to the particle and particleflat structs,
     # the line below returns the following errors:
 
-    #parray = np.asarray(pslice) #line causing error
- 
     #project/projectdirs/agora/.AGORA_PIPE_INSTALL/yt-agora_install/lib/python2.7/site-packages/numpy/core/numeric.py:320: RuntimeWarning: Item size computed from the PEP 3118 buffer format string does not match the actual item size.
     #return array(a, dtype, copy=False, order=order)
     #Exception TypeError: 'expected a readable buffer object' in 'yt.analysis_modules.halo_finding.rockstar.rockstar_interface.rh_analyze_halo' ignored
+
+    #parray = np.asarray(pslice) #line causing error
 
     # This is where we call our functions   
     #for cb in rh.callbacks:
