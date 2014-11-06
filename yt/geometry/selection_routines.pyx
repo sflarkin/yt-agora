@@ -112,7 +112,7 @@ def mask_fill(np.ndarray[np.float64_t, ndim=1] out,
 
 cdef class SelectorObject:
 
-    def __cinit__(self, dobj):
+    def __cinit__(self, dobj, *args):
         self.min_level = getattr(dobj, "min_level", 0)
         self.max_level = getattr(dobj, "max_level", 99)
         self.overlap_cells = 0
@@ -727,9 +727,14 @@ cdef class RegionSelector(SelectorObject):
                 if dobj.left_edge[i] < dobj.ds.domain_left_edge[i] or \
                    dobj.right_edge[i] > dobj.ds.domain_right_edge[i]:
                     raise RuntimeError(
-                        "Error: bad Region in non-periodic domain along dimension %s. "
-                        "Region left edge = %s, Region right edge = %s"
-                        "Dataset left edge = %s, Dataset right edge = %s" % \
+                        "Error: yt attempted to read outside the boundaries of "
+                        "a non-periodic domain along dimension %s.\n"
+                        "Region left edge = %s, Region right edge = %s\n"
+                        "Dataset left edge = %s, Dataset right edge = %s\n\n"
+                        "This commonly happens when trying to compute ghost cells "
+                        "up to the domain boundary. Two possible solutions are to "
+                        "load a smaller region that does not border the edge or "
+                        "override the periodicity for this dataset." % \
                         (i, dobj.left_edge[i], dobj.right_edge[i],
                          dobj.ds.domain_left_edge[i], dobj.ds.domain_right_edge[i])
                     )
@@ -1720,6 +1725,65 @@ cdef class AlwaysSelector(SelectorObject):
         return ("always", 1,)
 
 always_selector = AlwaysSelector
+
+cdef class ComposeSelector(SelectorObject):
+    cdef SelectorObject selector1
+    cdef SelectorObject selector2
+
+    def __init__(self, dobj, selector1, selector2):
+        self.selector1 = selector1
+        self.selector2 = selector2
+
+    def select_grids(self,
+                     np.ndarray[np.float64_t, ndim=2] left_edges,
+                     np.ndarray[np.float64_t, ndim=2] right_edges,
+                     np.ndarray[np.int32_t, ndim=2] levels):
+        return np.logical_or(
+                    self.selector1.select_grids(left_edges, right_edges, levels),
+                    self.selector2.select_grids(left_edges, right_edges, levels))
+
+    cdef int select_cell(self, np.float64_t pos[3], np.float64_t dds[3]) nogil:
+        if self.selector1.select_cell(pos, dds) and \
+                self.selector2.select_cell(pos, dds):
+            return 1
+        else:
+            return 0
+
+    cdef int select_grid(self, np.float64_t left_edge[3],
+                         np.float64_t right_edge[3], np.int32_t level,
+                         Oct *o = NULL) nogil:
+        if self.selector1.select_grid(left_edge, right_edge, level, o) or \
+                self.selector2.select_grid(left_edge, right_edge, level, o):
+            return 1
+        else:
+            return 0
+        
+    cdef int select_point(self, np.float64_t pos[3]) nogil:
+        if self.selector1.select_point(pos) and \
+                self.selector2.select_point(pos):
+            return 1
+        else:
+            return 0
+
+    cdef int select_sphere(self, np.float64_t pos[3], np.float64_t radius) nogil:
+        if self.selector1.select_sphere(pos, radius) and \
+                self.selector2.select_sphere(pos, radius):
+            return 1
+        else:
+            return 0
+
+    cdef int select_bbox(self, np.float64_t left_edge[3],
+                               np.float64_t right_edge[3]) nogil:
+        if self.selector1.select_bbox(left_edge, right_edge) and \
+                self.selector2.select_bbox(left_edge, right_edge):
+            return 1
+        else:
+            return 0
+
+    def _hash_vals(self):
+        return (hash(self.selector1), hash(self.selector2))
+
+compose_selector = ComposeSelector
 
 cdef class HaloParticlesSelector(SelectorObject):
     cdef public object base_source
