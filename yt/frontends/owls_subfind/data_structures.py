@@ -37,7 +37,7 @@ from yt.geometry.particle_geometry_handler import \
 from yt.data_objects.static_output import \
     Dataset, \
     ParticleFile
-from yt.frontends.sph.data_structures import \
+from yt.frontends.gadget.data_structures import \
     _fix_unit_ordering
 import yt.utilities.fortran_utils as fpu
 from yt.units.yt_array import \
@@ -113,10 +113,11 @@ class OWLSSubfindDataset(Dataset):
     _suffix = ".hdf5"
 
     def __init__(self, filename, dataset_type="subfind_hdf5",
-                 n_ref = 16, over_refine_factor = 1):
+                 n_ref = 16, over_refine_factor = 1, units_override=None):
         self.n_ref = n_ref
         self.over_refine_factor = over_refine_factor
-        super(OWLSSubfindDataset, self).__init__(filename, dataset_type)
+        super(OWLSSubfindDataset, self).__init__(filename, dataset_type,
+                                                 units_override=units_override)
 
     def _parse_parameter_file(self):
         handle = h5py.File(self.parameter_filename, mode="r")
