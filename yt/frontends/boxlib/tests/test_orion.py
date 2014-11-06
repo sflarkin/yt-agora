@@ -55,3 +55,9 @@ def test_star():
 @requires_file(rt)
 def test_OrionDataset():
     assert isinstance(data_dir_load(rt), OrionDataset)
+
+@requires_file(rt)
+def test_units_override():
+    for test in units_override_check(rt):
+        yield test
+
