@@ -42,7 +42,7 @@ from yt.utilities.data_point_utilities import CombineGrids,\
 from yt.utilities.minimal_representation import \
     MinimalProjectionData
 from yt.utilities.parallel_tools.parallel_analysis_interface import \
-    parallel_objects, parallel_root_only, ParallelAnalysisInterface
+    parallel_objects, parallel_root_only 
 from yt.units.unit_object import Unit
 import yt.geometry.particle_deposit as particle_deposit
 from yt.utilities.grid_data_format.writer import write_to_gdf
@@ -183,7 +183,7 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
     center : array_like, optional
         The 'center' supplied to fields that use it.  Note that this does
         not have to have `coord` as one value.  Strictly optional.
-    data_source : `yt.data_objects.api.AMRData`, optional
+    data_source : `yt.data_objects.data_containers.YTSelectionContainer`, optional
         If specified, this will be the data source used for selecting
         regions to project.
     method : string, optional
@@ -191,6 +191,8 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         "integrate" : integration along the axis
         "mip" : maximum intensity projection
         "sum" : same as "integrate", except that we don't multiply by the path length
+        WARNING: The "sum" option should only be used for uniform resolution grid
+        datasets, as other datasets may result in unphysical images.
     style : string, optional
         The same as the method keyword.  Deprecated as of version 3.0.2.  
         Please use method keyword instead.
@@ -315,7 +317,12 @@ class YTQuadTreeProjBase(YTSelectionContainer2D):
         np.add(py, oy, py)
         np.multiply(pdy, self.ds.domain_width[yax], pdy)
         if self.weight_field is not None:
-            np.divide(nvals, nwvals[:,None], nvals)
+            # If there are 0s remaining in the weight vals
+            # this will not throw an error, but silently
+            # return nans for vals where dividing by 0
+            # Leave as NaNs to be auto-masked by Matplotlib
+            with np.errstate(invalid='ignore'):
+                np.divide(nvals, nwvals[:,None], nvals)
         # We now convert to half-widths and center-points
         data = {}
         #non_nan = ~np.any(np.isnan(nvals), axis=-1)
@@ -713,6 +720,16 @@ class LevelState(object):
     fields = None
     data_source = None
 
+    # These are all cached here as numpy arrays, without units, in
+    # code_lengths.
+    domain_width = None
+    domain_left_edge = None
+    domain_right_edge = None
+    left_edge = None
+    right_edge = None
+    base_dx = None
+    dds = None
+
 class YTSmoothedCoveringGridBase(YTCoveringGridBase):
     """A 3D region with all data extracted and interpolated to a
     single, specified resolution. (Identical to covering_grid,
@@ -756,14 +773,14 @@ class YTSmoothedCoveringGridBase(YTCoveringGridBase):
         # interpolation but are not directly inside our bounds
         level_state.data_source = self.ds.region(
             self.center,
-            self.left_edge - level_state.current_dx,
-            self.right_edge + level_state.current_dx)
+            level_state.left_edge - level_state.current_dx,
+            level_state.right_edge + level_state.current_dx)
         level_state.data_source.min_level = level_state.current_level
         level_state.data_source.max_level = level_state.current_level
         self._pdata_source = self.ds.region(
             self.center,
-            self.left_edge - level_state.current_dx,
-            self.right_edge + level_state.current_dx)
+            level_state.left_edge - level_state.current_dx,
+            level_state.right_edge + level_state.current_dx)
         self._pdata_source.min_level = level_state.current_level
         self._pdata_source.max_level = level_state.current_level
 
@@ -789,7 +806,17 @@ class YTSmoothedCoveringGridBase(YTCoveringGridBase):
 
     def _initialize_level_state(self, fields):
         ls = LevelState()
-        ls.current_dx = self._base_dx
+        ls.domain_width = self.ds.domain_width
+        ls.domain_left_edge = self.ds.domain_left_edge
+        ls.domain_right_edge = self.ds.domain_right_edge
+        ls.left_edge = self.left_edge
+        ls.right_edge = self.right_edge
+        ls.base_dx = self._base_dx
+        ls.dds = self.dds
+        for att in ("domain_width", "domain_left_edge", "domain_right_edge",
+                    "left_edge", "right_edge", "base_dx", "dds"):
+            setattr(ls, att, getattr(ls, att).in_units("code_length").d)
+        ls.current_dx = ls.base_dx
         ls.current_level = 0
         LL = self.left_edge - self.ds.domain_left_edge
         ls.global_startindex = np.rint(LL / ls.current_dx).astype('int64') - 1
@@ -813,15 +840,15 @@ class YTSmoothedCoveringGridBase(YTCoveringGridBase):
         rf = float(self.ds.relative_refinement(
                     ls.current_level, ls.current_level + 1))
         ls.current_level += 1
-        ls.current_dx = self._base_dx / \
+        ls.current_dx = ls.base_dx / \
             self.ds.relative_refinement(0, ls.current_level)
         self._setup_data_source(ls)
-        LL = self.left_edge - self.ds.domain_left_edge
+        LL = ls.left_edge - ls.domain_left_edge
         ls.old_global_startindex = ls.global_startindex
         ls.global_startindex = np.rint(LL / ls.current_dx).astype('int64') - 1
-        ls.domain_iwidth = np.rint(self.ds.domain_width/ls.current_dx).astype('int64') 
+        ls.domain_iwidth = np.rint(ls.domain_width/ls.current_dx).astype('int64') 
         input_left = (level_state.old_global_startindex + 0.5) * rf 
-        width = (self.ActiveDimensions*self.dds)
+        width = (self.ActiveDimensions*ls.dds)
         output_dims = np.rint(width/level_state.current_dx+0.5).astype("int32") + 2
         level_state.current_dims = output_dims
         new_fields = []
@@ -833,7 +860,7 @@ class YTSmoothedCoveringGridBase(YTCoveringGridBase):
             new_fields.append(output_field)
         level_state.fields = new_fields
 
-class YTSurfaceBase(YTSelectionContainer3D, ParallelAnalysisInterface):
+class YTSurfaceBase(YTSelectionContainer3D):
     r"""This surface object identifies isocontours on a cell-by-cell basis,
     with no consideration of global connectedness, and returns the vertices
     of the Triangles in that isocontour.
@@ -850,7 +877,7 @@ class YTSurfaceBase(YTSelectionContainer3D, ParallelAnalysisInterface):
     
     Parameters
     ----------
-    data_source : AMR3DDataObject
+    data_source : YTSelectionContainer
         This is the object which will used as a source
     surface_field : string
         Any field that can be obtained in a data object.  This is the field
@@ -886,7 +913,6 @@ class YTSurfaceBase(YTSelectionContainer3D, ParallelAnalysisInterface):
                          ("index", "z"))
     vertices = None
     def __init__(self, data_source, surface_field, field_value):
-        ParallelAnalysisInterface.__init__(self)
         self.data_source = data_source
         self.surface_field = surface_field
         self.field_value = field_value

@@ -124,11 +124,16 @@ coordinates on the axes such that the origin is at the center of the
 slice.  To instead use the coordinates as defined in the dataset, use
 the optional argument: ``origin="native"``
 
-If supplied
-without units, the center is assumed by in code units.  Optionally, you can
-supply 'c' or 'm' for the center.  These two choices will center the plot on the
-center of the simulation box and the coordinate of the maximum density cell,
-respectively.
+If supplied without units, the center is assumed by in code units.  There are also
+the following alternative options for the `center` keyword:
+
+* `"center"`, "c"`: the domain center
+* `"max"`, `"m"`: the position of the maximum density
+* `("min", field)`: the position of the minimum of `field`
+* `("max", field)`: the position of the maximum of `field`
+
+where for the last two objects any spatial field, such as `"density"`, `"velocity_z"`,
+etc., may be used, e.g. `center=("min","temperature")`
 
 Here is an example that combines all of the options we just discussed.
 
@@ -166,6 +171,10 @@ image. Both plots will be centered on the center of the simulation box.
 With these sorts of manipulations, one can easily pan and zoom onto an 
 interesting region in the simulation and adjust the boundaries of the
 region to visualize on the fly.
+
+If you want to slice through a subset of the full dataset volume,
+you can use the ``data_source`` keyword with a :ref:`data object <data-objects>`
+or a :ref:`cut region <cut-regions>`.
 
 See :class:`~yt.visualization.plot_window.AxisAlignedSlicePlot` for the 
 full class description.
@@ -278,7 +287,8 @@ following:
     straight summation of the field along the given axis. The units of the 
     projected field will be the same as those of the unprojected field. This 
     method is typically only useful for datasets such as 3D FITS cubes where 
-    the third axis of the dataset is something like velocity or frequency.
+    the third axis of the dataset is something like velocity or frequency, and
+    should _only_ be used with fixed-resolution grid-based datasets.
 
 .. _off-axis-projections:
 

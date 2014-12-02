@@ -292,8 +292,8 @@ class StreamDataset(Dataset):
     _field_info_class = StreamFieldInfo
     _dataset_type = 'stream'
 
-    def __init__(self, stream_handler, storage_filename = None,
-                 geometry = "cartesian"):
+    def __init__(self, stream_handler, storage_filename=None,
+                 geometry="cartesian"):
         #if parameter_override is None: parameter_override = {}
         #self._parameter_override = parameter_override
         #if conversion_override is None: conversion_override = {}
@@ -492,7 +492,7 @@ def unitify_data(data):
         data = new_data
     elif all([iterable(val) for val in data.values()]):
         field_units = {field:'' for field in data.keys()}
-        data = dict((field, np.array(val)) for field, val in data.iteritems())
+        data = dict((field, np.asarray(val)) for field, val in data.iteritems())
     else:
         raise RuntimeError("The data dict appears to be invalid. "
                            "The data dictionary must map from field "
