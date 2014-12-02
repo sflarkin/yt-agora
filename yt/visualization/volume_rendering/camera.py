@@ -2171,7 +2171,8 @@ def plot_allsky_healpix(image, nside, fn, label = "", rotation = None,
 class ProjectionCamera(Camera):
     def __init__(self, center, normal_vector, width, resolution,
             field, weight=None, volume=None, no_ghost = False, 
-            north_vector=None, ds=None, interpolated=False):
+            north_vector=None, ds=None, interpolated=False,
+            method="integrate"):
 
         if not interpolated:
             volume = 1
@@ -2180,6 +2181,7 @@ class ProjectionCamera(Camera):
         self.field = field
         self.weight = weight
         self.resolution = resolution
+        self.method = method
 
         fields = [field]
         if self.weight is not None:
@@ -2250,13 +2252,14 @@ class ProjectionCamera(Camera):
         dd = ds.all_data()
         field = dd._determine_fields([self.field])[0]
         finfo = ds._get_field_info(*field)
-        if self.weight is None:
-            dl = self.width[2]
-            image *= dl
-        else:
-            image[:,:,0] /= image[:,:,1]
+        dl = 1.0
+        if self.method == "integrate":
+            if self.weight is None:
+                dl = self.width[2].in_units("cm")
+            else:
+                image[:,:,0] /= image[:,:,1]
 
-        return image[:,:,0]
+        return ImageArray(image[:,:,0], finfo.units)*dl
 
 
     def _render(self, double_check, num_threads, image, sampler):
@@ -2339,10 +2342,183 @@ class ProjectionCamera(Camera):
 
 data_object_registry["projection_camera"] = ProjectionCamera
 
+class SphericalCamera(Camera):
+    def __init__(self, *args, **kwargs):
+        Camera.__init__(self, *args, **kwargs)
+        if(self.resolution[0]/self.resolution[1] != 2):
+            mylog.info('Warning: It\'s recommended to set the aspect ratio to 2:1')
+        self.resolution = np.asarray(self.resolution) + 2
+
+    def get_sampler_args(self, image):
+        px = np.linspace(-np.pi, np.pi, self.resolution[0], endpoint=True)[:,None]
+        py = np.linspace(-np.pi/2., np.pi/2., self.resolution[1], endpoint=True)[None,:]
+        
+        vectors = np.zeros((self.resolution[0], self.resolution[1], 3),
+                           dtype='float64', order='C')
+        vectors[:,:,0] = np.cos(px) * np.cos(py)
+        vectors[:,:,1] = np.sin(px) * np.cos(py)
+        vectors[:,:,2] = np.sin(py)
+
+        vectors = vectors * self.width[0]
+        positions = self.center + vectors * 0
+        R1 = get_rotation_matrix(0.5*np.pi, [1,0,0])
+        R2 = get_rotation_matrix(0.5*np.pi, [0,0,1])
+        uv = np.dot(R1, self.orienter.unit_vectors)
+        uv = np.dot(R2, uv)
+        vectors.reshape((self.resolution[0]*self.resolution[1], 3))
+        vectors = np.dot(vectors, uv)
+        vectors.reshape((self.resolution[0], self.resolution[1], 3))
+
+        dummy = np.ones(3, dtype='float64')
+        image.shape = (self.resolution[0]*self.resolution[1],1,4)
+        vectors.shape = (self.resolution[0]*self.resolution[1],1,3)
+        positions.shape = (self.resolution[0]*self.resolution[1],1,3)
+        args = (positions, vectors, self.back_center,
+                (0.0,1.0,0.0,1.0),
+                image, dummy, dummy,
+                np.zeros(3, dtype='float64'),
+                self.transfer_function, self.sub_samples)
+        return args
+
+    def _render(self, double_check, num_threads, image, sampler):
+        ncells = sum(b.source_mask.size for b in self.volume.bricks)
+        pbar = get_pbar("Ray casting", ncells)
+        total_cells = 0
+        if double_check:
+            for brick in self.volume.bricks:
+                for data in brick.my_data:
+                    if np.any(np.isnan(data)):
+                        raise RuntimeError
+
+        for brick in self.volume.traverse(self.front_center):
+            sampler(brick, num_threads=num_threads)
+            total_cells += brick.source_mask.size
+            pbar.update(total_cells)
+
+        pbar.finish()
+        image = self.finalize_image(sampler.aimage)
+        return image
+
+    def finalize_image(self, image):
+        view_pos = self.front_center
+        image.shape = self.resolution[0], self.resolution[1], 4
+        image = self.volume.reduce_tree_images(image, view_pos)
+        if self.transfer_function.grey_opacity is False:
+            image[:,:,3]=1.0
+        image = image[1:-1,1:-1,:]
+        return image
+
+data_object_registry["spherical_camera"] = SphericalCamera
+
+class StereoSphericalCamera(Camera):
+    def __init__(self, *args, **kwargs):
+        self.disparity = kwargs.pop('disparity', 0.)
+        Camera.__init__(self, *args, **kwargs)
+        self.disparity = self.ds.arr(self.disparity, input_units="code_length")
+        self.disparity_s = self.ds.arr(0., input_units="code_length")
+        if(self.resolution[0]/self.resolution[1] != 2):
+            mylog.info('Warning: It\'s recommended to set the aspect ratio to be 2:1')
+        self.resolution = np.asarray(self.resolution) + 2
+        if(self.disparity<=0.):
+            self.disparity = self.width[0]/1000.
+            mylog.info('Warning: Invalid value of disparity; ' \
+                       'now reset it to %f' % self.disparity)
+
+    def get_sampler_args(self, image):
+        px = np.linspace(-np.pi, np.pi, self.resolution[0], endpoint=True)[:,None]
+        py = np.linspace(-np.pi/2., np.pi/2., self.resolution[1], endpoint=True)[None,:]
+
+        vectors = np.zeros((self.resolution[0], self.resolution[1], 3),
+                           dtype='float64', order='C')
+        vectors[:,:,0] = np.cos(px) * np.cos(py)
+        vectors[:,:,1] = np.sin(px) * np.cos(py)
+        vectors[:,:,2] = np.sin(py)
+        vectors2 = np.zeros((self.resolution[0], self.resolution[1], 3), 
+                            dtype='float64', order='C')
+        vectors2[:,:,0] = -np.sin(px) * np.ones((1, self.resolution[1]))
+        vectors2[:,:,1] = np.cos(px) * np.ones((1, self.resolution[1]))
+        vectors2[:,:,2] = 0
+
+        positions = self.center + vectors2 * self.disparity_s
+        vectors = vectors * self.width[0]
+        R1 = get_rotation_matrix(0.5*np.pi, [1,0,0])
+        R2 = get_rotation_matrix(0.5*np.pi, [0,0,1])
+        uv = np.dot(R1, self.orienter.unit_vectors)
+        uv = np.dot(R2, uv)
+        vectors.reshape((self.resolution[0]*self.resolution[1], 3))
+        vectors = np.dot(vectors, uv)
+        vectors.reshape((self.resolution[0], self.resolution[1], 3))
+
+        dummy = np.ones(3, dtype='float64')
+        image.shape = (self.resolution[0]*self.resolution[1],1,4)
+        vectors.shape = (self.resolution[0]*self.resolution[1],1,3)
+        positions.shape = (self.resolution[0]*self.resolution[1],1,3)
+        args = (positions, vectors, self.back_center,
+                (0.0,1.0,0.0,1.0),
+                image, dummy, dummy,
+                np.zeros(3, dtype='float64'),
+                self.transfer_function, self.sub_samples)
+        return args
+
+    def snapshot(self, fn = None, clip_ratio = None, double_check = False,
+                 num_threads = 0, transparent=False):
+        
+        if num_threads is None:
+            num_threads=get_num_threads()
+
+        self.disparity_s = self.disparity
+        image1 = self.new_image()
+        args1 = self.get_sampler_args(image1)
+        sampler1 = self.get_sampler(args1)
+        self.initialize_source()
+        image1 = self._render(double_check, num_threads,
+                              image1, sampler1, '(Left) ')
+
+        self.disparity_s = -self.disparity
+        image2 = self.new_image()
+        args2 = self.get_sampler_args(image2)
+        sampler2 = self.get_sampler(args2)
+        self.initialize_source()
+        image2 = self._render(double_check, num_threads,
+                              image2, sampler2, '(Right)')
+
+        image = np.hstack([image1, image2])
+        image = self.volume.reduce_tree_images(image, self.center)
+        image = ImageArray(image, info = self.get_information())
+        self.save_image(image, fn=fn, clip_ratio=clip_ratio,
+                        transparent=transparent)
+        return image
+
+    def _render(self, double_check, num_threads, image, sampler, msg):
+        ncells = sum(b.source_mask.size for b in self.volume.bricks)
+        pbar = get_pbar("Ray casting "+msg, ncells)
+        total_cells = 0
+        if double_check:
+            for brick in self.volume.bricks:
+                for data in brick.my_data:
+                    if np.any(np.isnan(data)):
+                        raise RuntimeError
+
+        for brick in self.volume.traverse(self.front_center):
+            sampler(brick, num_threads=num_threads)
+            total_cells += brick.source_mask.size 
+            pbar.update(total_cells)
+
+        pbar.finish()
+
+        image = sampler.aimage.copy()
+        image.shape = self.resolution[0], self.resolution[1], 4
+        if self.transfer_function.grey_opacity is False:
+            image[:,:,3]=1.0
+        image = image[1:-1,1:-1,:]
+        return image
+
+data_object_registry["stereospherical_camera"] = StereoSphericalCamera
+
 def off_axis_projection(ds, center, normal_vector, width, resolution,
                         field, weight = None, 
                         volume = None, no_ghost = False, interpolated = False,
-                        north_vector = None):
+                        north_vector = None, method = "integrate"):
     r"""Project through a dataset, off-axis, and return the image plane.
 
     This function will accept the necessary items to integrate through a volume
@@ -2386,6 +2562,20 @@ def off_axis_projection(ds, center, normal_vector, width, resolution,
         If True, the data is first interpolated to vertex-centered data, 
         then tri-linearly interpolated along the ray. Not suggested for 
         quantitative studies.
+    method : string
+         The method of projection.  Valid methods are:
+
+         "integrate" with no weight_field specified : integrate the requested
+         field along the line of sight.
+
+         "integrate" with a weight_field specified : weight the requested
+         field by the weighting field and integrate along the line of sight.
+
+         "sum" : This method is the same as integrate, except that it does not
+         multiply by a path length when performing the integration, and is
+         just a straight summation of the field along the given axis. WARNING:
+         This should only be used for uniform resolution grid datasets, as other
+         datasets may result in unphysical images.
 
     Returns
     -------
@@ -2403,7 +2593,7 @@ def off_axis_projection(ds, center, normal_vector, width, resolution,
     projcam = ProjectionCamera(center, normal_vector, width, resolution,
                                field, weight=weight, ds=ds, volume=volume,
                                no_ghost=no_ghost, interpolated=interpolated, 
-                               north_vector=north_vector)
+                               north_vector=north_vector, method=method)
     image = projcam.snapshot()
     return image[:,:]
 
