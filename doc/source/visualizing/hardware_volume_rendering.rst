@@ -42,7 +42,7 @@ on a 1024 cube of float32 scalars.
 .. code-block:: python
 
    from yt.visualization.volume_rendering.theia.scene import TheiaScene
-   from yt.visualization.volume_rendering.algorithms.front_to_back import FrontToBackRaycaster
+   from yt.visualization.volume_rendering.theia.algorithms.front_to_back import FrontToBackRaycaster
    import numpy as np
 
    #load 3D numpy array of float32
