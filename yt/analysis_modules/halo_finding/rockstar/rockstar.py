@@ -13,6 +13,7 @@ Operations to get Rockstar loaded up
 # The full license is in the file COPYING.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 
+import numpy as np
 from yt.config import ytcfg
 from yt.data_objects.time_series import \
      DatasetSeries
@@ -22,6 +23,7 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
     ParallelAnalysisInterface, ProcessorPool, Communicator
 from yt.analysis_modules.halo_finding.halo_objects import * #Halos & HaloLists
 from yt.utilities.exceptions import YTRockstarMultiMassNotSupported
+
 
 import rockstar_interface
 
@@ -139,6 +141,9 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
     particle_type: str
         This is the "particle type" that can be found in the data.  This can be
         a filtered particle or an inherent type.
+    multi_mass : bool
+        If True all the particle species in particle_type will be passed to 
+        Rockstar even if they have different masses    
     force_res: float
         This parameter specifies the force resolution that Rockstar uses
         in units of Mpc/h.
@@ -147,6 +152,13 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
         last data snapshot (i.e. the one where time has evolved the
         longest) in the time series:
         ``ds_last.index.get_smallest_dx().in_units("Mpc/h")``.
+    initial_metric_scaling: float
+        The position element of the fof distance metric is divided by this
+        parameter, set to 1 by default. If the initial_metric_scaling=0.1 the
+        position element will have 10 times more weight than the velocity element,
+        biasing the metric towards position information more so than velocity 
+        information. That was found to be needed for hydro-ART simulations
+        with 10's of parsecs resolution.
     total_particles : int
         If supplied, this is a pre-calculated total number of particles present
         in the simulation. For example, this is useful when analyzing a series
@@ -193,9 +205,9 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
 
     """
     def __init__(self, ts, num_readers = 1, num_writers = None,
-            outbase="rockstar_halos", particle_type="all",
-            force_res=None, total_particles=None, dm_only=False,
-            particle_mass=None):
+            outbase="rockstar_halos", particle_type="all", multi_mass=False,
+            force_res=None,  initial_metric_scaling=1, total_particles=None,
+            dm_only=False, particle_mass=None):
         if is_root():
             mylog.info("The citation for the Rockstar halo finder can be found at")
             mylog.info("http://adsabs.harvard.edu/abs/2013ApJ...762..109B")
@@ -216,14 +228,16 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
             ts = DatasetSeries([ts])
         self.ts = ts
         self.particle_type = particle_type
+        self.multi_mass = multi_mass
         self.outbase = outbase
         if force_res is None:
             tds = ts[-1] # Cache a reference
-            self.force_res = tds.index.get_smallest_dx().in_units("Mpc/h")
+            self.force_res = tds.arr(tds.index.get_smallest_dx(), 'code_length').in_units("Mpc/h")
             # We have to delete now to wipe the index
             del tds
         else:
             self.force_res = force_res
+        self.initial_metric_scaling = initial_metric_scaling     
         self.total_particles = total_particles
         self.dm_only = dm_only
         self.particle_mass = particle_mass
@@ -238,7 +252,8 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
         if self.workgroup.name != "readers": return None
         tds = ts[0]
         ptype = self.particle_type
-        if ptype not in tds.particle_types and ptype != 'all':
+        particle_types = np.unique([field[0] for field in tds.field_list if 'particle' in field[1]])
+        if ptype not in particle_types and ptype != 'all':
             has_particle_filter = tds.add_particle_filter(ptype)
             if not has_particle_filter:
                 raise RuntimeError("Particle type (filter) %s not found." % (ptype))
@@ -252,7 +267,7 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
         if particle_mass is None:
             pmass_min, pmass_max = dd.quantities.extrema(
                 (ptype, "particle_mass"), non_zero = True)
-            if np.abs(pmass_max - pmass_min) / pmass_max > 0.01:
+            if (np.abs(pmass_max - pmass_min) / pmass_max > 0.01) and (self.multi_mass==False):
                 raise YTRockstarMultiMassNotSupported(pmass_min, pmass_max,
                     ptype)
             particle_mass = pmass_min
@@ -341,6 +356,7 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
                     block_ratio = block_ratio,
                     outbase = self.outbase,
                     force_res = self.force_res,
+                    initial_metric_scaling = self.initial_metric_scaling,               
                     callbacks = callbacks,
                     restart_num = restart_num)
         # Make the directory to store the halo lists in.
