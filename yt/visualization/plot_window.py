@@ -30,8 +30,7 @@ from .fixed_resolution import \
     FixedResolutionBuffer, \
     ObliqueFixedResolutionBuffer, \
     OffAxisProjectionFixedResolutionBuffer
-from .plot_modifications import get_smallest_appropriate_unit, \
-    callback_registry
+from .plot_modifications import callback_registry
 from .plot_container import \
     ImagePlotContainer, \
     log_transform, linear_transform, symlog_transform, \
@@ -691,8 +690,8 @@ class PWViewerMPL(PlotWindow):
             xc, yc = self._setup_origin()
 
             if self._axes_unit_names is None:
-                unit = get_smallest_appropriate_unit(
-                    self.xlim[1] - self.xlim[0], self.ds)
+                unit = self.ds.get_smallest_appropriate_unit(
+                    self.xlim[1] - self.xlim[0])
                 (unit_x, unit_y) = (unit, unit)
             else:
                 (unit_x, unit_y) = self._axes_unit_names
@@ -701,8 +700,8 @@ class PWViewerMPL(PlotWindow):
             # This will likely be replaced at some point by the coordinate handler
             # setting plot aspect.
             if self.aspect is None:
-                self.aspect = np.float64((self.ds.quan(1.0, unit_y) /
-                                         self.ds.quan(1.0, unit_x)).in_cgs())
+                self.aspect = float((self.ds.quan(1.0, unit_y) /
+                                     self.ds.quan(1.0, unit_x)).in_cgs())
 
             extentx = [(self.xlim[i] - xc).in_units(unit_x) for i in (0, 1)]
             extenty = [(self.ylim[i] - yc).in_units(unit_y) for i in (0, 1)]
@@ -775,7 +774,7 @@ class PWViewerMPL(PlotWindow):
                                    "%s_axis" % ("xy"[i]))[axis_index]
                     unn = self.ds.coordinates.default_unit_label.get(axax, "")
                     if unn != "":
-                        axes_unit_labels[i] = '\/\/\left('+unn+'\right)'
+                        axes_unit_labels[i] = r'\/\/\left('+unn+r'\right)'
                         continue
                 # Use sympy to factor h out of the unit.  In this context 'un'
                 # is a string, so we call the Unit constructor.
@@ -1645,7 +1644,7 @@ class PWViewerExtJS(PlotWindow):
         x_width = self.xlim[1] - self.xlim[0]
         y_width = self.ylim[1] - self.ylim[0]
         if self._axes_unit_names is None:
-            unit = get_smallest_appropriate_unit(x_width, self.ds)
+            unit = self.ds.get_smallest_appropriate_unit(x_width)
             unit = (unit, unit)
         else:
             unit = self._axes_unit_names
