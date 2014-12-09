@@ -252,13 +252,12 @@ class Dataset(object):
       for i in self.parameters: yield i
 
     def get_smallest_appropriate_unit(self, v):
-        max_nu = 1e30
         good_u = None
         for unit in ['Mpc', 'kpc', 'pc', 'au', 'rsun', 'km', 'cm']:
-            vv = v * self.length_unit.in_units(unit)
-            if vv < max_nu and vv > 1.0:
+            uq = self.quan(1.0, unit)
+            if uq < v:
                 good_u = unit
-                max_nu = v * self.length_unit.in_units(unit)
+                break
         if good_u is None : good_u = 'cm'
         return good_u
 
@@ -681,7 +680,8 @@ class Dataset(object):
                     self.length_unit / self.time_unit)
         self.unit_registry.modify("code_velocity", vel_unit)
         # domain_width does not yet exist
-        if None not in (self.domain_left_edge, self.domain_right_edge):
+        if (self.domain_left_edge is not None and
+            self.domain_right_edge is not None):
             DW = self.arr(self.domain_right_edge - self.domain_left_edge, "code_length")
             self.unit_registry.add("unitary", float(DW.max() * DW.units.cgs_value),
                                    DW.units.dimensions)
