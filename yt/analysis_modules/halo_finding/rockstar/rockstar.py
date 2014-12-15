@@ -119,7 +119,7 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
 
     Parameters
     ----------
-    ts   : DatasetSeries, Dataset
+    ts: DatasetSeries, Dataset
         This is the data source containing the DM particles. Because 
         halo IDs may change from one snapshot to the next, the only
         way to keep a consistent halo ID across time is to feed 
@@ -159,6 +159,10 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
         biasing the metric towards position information more so than velocity 
         information. That was found to be needed for hydro-ART simulations
         with 10's of parsecs resolution.
+    non_dm_metric_scaling: float
+        The metric scaling to be used for non-dm particles (not yet supported).
+    suppress_galaxies: int
+        Wether to include non-dm halos (i.e. galaxies) in the catalogs (not yet supported).
     total_particles : int
         If supplied, this is a pre-calculated total number of particles present
         in the simulation. For example, this is useful when analyzing a series
@@ -206,8 +210,8 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
     """
     def __init__(self, ts, num_readers = 1, num_writers = None,
             outbase="rockstar_halos", particle_type="all", multi_mass=False,
-            force_res=None,  initial_metric_scaling=1, total_particles=None,
-            dm_only=False, particle_mass=None):
+            force_res=None, initial_metric_scaling=1.0, non_dm_metric_scaling=10.0,
+            suppress_galaxies=1, total_particles=None, dm_only=False, particle_mass=None):
         if is_root():
             mylog.info("The citation for the Rockstar halo finder can be found at")
             mylog.info("http://adsabs.harvard.edu/abs/2013ApJ...762..109B")
@@ -237,7 +241,9 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
             del tds
         else:
             self.force_res = force_res
-        self.initial_metric_scaling = initial_metric_scaling     
+        self.initial_metric_scaling = initial_metric_scaling 
+        self.non_dm_metric_scaling = non_dm_metric_scaling
+        self.suppress_galaxies = suppress_galaxies
         self.total_particles = total_particles
         self.dm_only = dm_only
         self.particle_mass = particle_mass
@@ -268,8 +274,8 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
             pmass_min, pmass_max = dd.quantities.extrema(
                 (ptype, "particle_mass"), non_zero = True)
             if (np.abs(pmass_max - pmass_min) / pmass_max > 0.01) and (self.multi_mass==False):
-                raise YTRockstarMultiMassNotSupported(pmass_min, pmass_max,
-                    ptype)
+                raise YTRockstarMultiMassNotSupported(pmass_min, pmass_max, ptype)
+                print 'Set multi_mass=True if you are using a Rockstar version with multi-mass support'
             particle_mass = pmass_min
 
         p = {}
@@ -356,7 +362,9 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
                     block_ratio = block_ratio,
                     outbase = self.outbase,
                     force_res = self.force_res,
-                    initial_metric_scaling = self.initial_metric_scaling,               
+                    initial_metric_scaling = self.initial_metric_scaling,    
+                    non_dm_metric_scaling = self.non_dm_metric_scaling,
+                    suppress_galaxies = self.suppress_galaxies,                
                     callbacks = callbacks,
                     restart_num = restart_num)
         # Make the directory to store the halo lists in.
