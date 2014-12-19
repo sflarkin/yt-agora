@@ -21,6 +21,8 @@ from _mpl_imports import FigureCanvasAgg
 from yt.utilities.logger import ytLogger as mylog
 from .plot_window import PlotWindow
 from .profile_plotter import PhasePlot
+#from yt.data_objects import get_smallest_appropriate_unit
+from yt.units.yt_array import YTQuantity
 
 class DualEPS(object):
     def __init__(self, figsize=(12,12)):
@@ -100,6 +102,7 @@ class DualEPS(object):
         >>> d.axis_box(xrange=(0,100), yrange=(1e-3,1), ylog=True)
         >>> d.save_fig()
         """
+        
         if tickcolor is None:
             c1 = pyx.graph.axis.painter.regular\
                  (tickattrs=[pyx.color.cmyk.black])
@@ -149,7 +152,9 @@ class DualEPS(object):
             yrightlabel = ""
             c1y = c1
             c2y = c2
+        
 
+     
         if xlog:
             if xticklabels:
                 xaxis = pyx.graph.axis.log(min=xrange[0],max=xrange[1],
@@ -276,17 +281,19 @@ class DualEPS(object):
         >>> d.axis_box_yt(p)
         >>> d.save_fig()
         """
+       
         if isinstance(plot, (PlotWindow, PhasePlot)):
             plot.refresh()
         else:
             plot._redraw_image()
         if isinstance(plot, PlotWindow):
-            data = plot._frb
+            data = plot.frb
             width = plot.width[0]
             if units == None:
                 units = plot.ds.get_smallest_appropriate_unit(width)
-            _xrange = (0, width * plot.ds[units])
-            _yrange = (0, width * plot.ds[units])
+            width = width.in_units(str(units))
+            _xrange = (0, float(width))
+            _yrange = (0, float(width))
             _xlog = False
             _ylog = False
             axis_names = plot.ds.coordinates.axis_name
@@ -307,7 +314,7 @@ class DualEPS(object):
                     _ylabel = ylabel
                 else:
                     if data.axis != 4:
-                        yax = plot.ds.coordinatesyx_axis[data.axis]
+                        yax = plot.ds.coordinates.y_axis[data.axis]
                         _ylabel = '%s (%s)' % (axis_names[yax], units)
                     else:
                         _ylabel = 'Image y (%s)' % (units)
@@ -333,6 +340,7 @@ class DualEPS(object):
                     _ylabel = plot[k].axes.get_ylabel()
             if tickcolor == None:
                 _tickcolor = None
+            print "xlabel = ", _xlabel
         elif isinstance(plot, np.ndarray):
             ax = plt.gca()
             _xrange = ax.get_xlim()
@@ -444,20 +452,20 @@ class DualEPS(object):
         shift = 0.0
         if self.canvas is None:
             self.canvas = pyx.canvas.canvas()
-        elif isinstance(plot, (PlotWindow, PhasePlot)):
+        if isinstance(plot, (PlotWindow, PhasePlot)):
             self.field = field
             if self.field == None:
                 self.field = plot.plots.keys()[0]
                 mylog.warning("No field specified.  Choosing first field (%s)" % \
-                              self.field)
-            if self.field not in plot.plots.keys():
+                              self.field[1])
+            if self.field[1] not in plot.plots.keys()[0][1]:
                 raise RuntimeError("Field '%s' does not exist!" % str(self.field))
             plot.plots[self.field].hide_colorbar()
             plot.refresh()
             _p1 = plot.plots[self.field].figure
             # hack to account for non-square display ratios (not sure why)
-            if isinstance(plot, PlotWindow):
-                shift = 12.0 / 340
+            #if isinstance(plot, PlotWindow):
+            #    shift = 12.0 / 340
         elif isinstance(plot, np.ndarray):
             fig = plt.figure()
             iplot = plt.figimage(plot)
@@ -476,7 +484,6 @@ class DualEPS(object):
         size = (_p1.get_size_inches() * _p1.dpi).astype('int')
         image = pyx.bitmap.image(size[0], size[1], "RGB",
                                  figure_canvas.tostring_rgb())
-        #figure_canvas.print_png('test.png')
         self.canvas.insert(pyx.bitmap.bitmap(pos[0], pos[1], image,
                                              width=(1.0+2*shift)*scale*self.figsize[0],
                                              height=scale*self.figsize[1]))
@@ -611,7 +618,7 @@ class DualEPS(object):
 
 #=============================================================================
 
-    def colorbar_yt(self, plot, field=None, **kwargs):
+    def colorbar_yt(self, plot, field=None, cb_labels = None, **kwargs):
         r"""Wrapper around DualEPS.colorbar to take information from a yt plot.
 
         Accepts all parameters that DualEPS.colorbar takes.
@@ -644,7 +651,11 @@ class DualEPS(object):
             proj = plot._plot_type.endswith("Projection") and \
                 plot.data_source.weight_field == None
             if isinstance(plot, PlotWindow):
-                _zlabel = plot.ds.field_info[self.field].get_label(proj)
+                try:
+                    _zlabel = plot.ds.field_info[self.field].get_label(proj)
+                except NotImplementedError: 
+                    print "Colorbar label not available"
+                    _zlabel = ''
             else:
                 _zlabel = plot.data_source.ds.field_info[self.field].get_label(proj)
             _zlabel = _zlabel.replace("_","\;")
@@ -662,6 +673,8 @@ class DualEPS(object):
             _zlabel = plot._z_label.replace("_","\;")
             _zlog = plot._log_z
             _zrange = (plot.norm.vmin, plot.norm.vmax)
+        if cb_labels != None:  #Overrides deduced labels
+            _zlabel = cb_labels.pop()
         self.colorbar(_cmap, zrange=_zrange, label=_zlabel, log=_zlog, **kwargs)
 
 #=============================================================================
@@ -889,7 +902,7 @@ def multiplot(ncol, nrow, yt_plots=None, fields=None, images=None,
               shrink_cb=0.95, figsize=(8,8), margins=(0,0), titles=None,
               savefig=None, format="eps", yt_nocbar=False, bare_axes=False,
               xaxis_flags=None, yaxis_flags=None,
-              cb_flags=None, cb_location=None):
+              cb_flags=None, cb_location=None, cb_labels=None):
     r"""Convenience routine to create a multi-panel figure from yt plots or
     JPEGs.  The images are first placed from the origin, and then
     bottom-to-top and left-to-right.
@@ -937,6 +950,8 @@ def multiplot(ncol, nrow, yt_plots=None, fields=None, images=None,
     cb_location : list of strings
         Strings to control the location of the colorbar (left, right, 
         top, bottom)
+    cb_labels : list of labels for the colorbars. List should be the same
+                size as the number of colorbars used.
 
     Examples
     --------
@@ -962,6 +977,9 @@ def multiplot(ncol, nrow, yt_plots=None, fields=None, images=None,
     """
     # Error check
     npanels = ncol*nrow
+    if(cb_labels != None):
+        cb_labels.reverse()   #Because I pop the list
+    
     if images != None:
         if len(images) != npanels:
             raise RuntimeError("Number of images (%d) doesn't match nrow(%d)"\
@@ -1113,11 +1131,13 @@ def multiplot(ncol, nrow, yt_plots=None, fields=None, images=None,
                         # Set field if undefined
                         if fields[index] == None:
                             fields[index] = d.return_field(yt_plots[index])
+                                              
                         d.colorbar_yt(yt_plots[index],
                                       field=fields[index],
                                       pos=[xpos,ypos],
                                       shrink=shrink_cb,
-                                      orientation=orientation)
+                                      orientation=orientation,
+                                      cb_labels=cb_labels)
                     else:
                         d.colorbar(colorbars[index]["cmap"],
                                    zrange=colorbars[index]["range"],
