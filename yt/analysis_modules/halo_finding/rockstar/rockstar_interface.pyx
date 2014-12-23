@@ -202,7 +202,7 @@ cdef void rh_read_particles(char *filename, particle **p, np.int64_t *num_p):
     #cdef np.ndarray[np.float64_t, ndim=1] earr # energy
     #cdef np.ndarray[np.float64_t, ndim=1] sarr # softening
     #cdef np.ndarray[np.float64_t, ndim=1] mtarr # metalicity
-    #cdef np.ndarray[np.int32_t, ndim=1] tarr # type  
+    cdef np.ndarray[np.int32_t, ndim=1] tarr # type  
     cdef unsigned long long pi,fi,i
     cdef np.int64_t local_parts = 0
     ds = rh.ds = rh.tsl.next()
@@ -244,10 +244,10 @@ cdef void rh_read_particles(char *filename, particle **p, np.int64_t *num_p):
     for chunk in parallel_objects(dd.chunks(fields, "io")):
         arri = np.asarray(chunk[rh.particle_type, "particle_index"], dtype="int64")
         marr = chunk[rh.particle_type, "particle_mass"].in_units("Msun/h").astype("float64")
-        #earr = chunk[rh.particle_type, "particle_mass"].in_units("Msun/h").astype("float64")
-        #sarr = chunk[rh.particle_type, "particle_mass"].in_units("Msun/h").astype("float64")
-        #mtarr= chunk[rh.particle_type, "particle_mass"].in_units("Msun/h").astype("float64") 
-        #tarr = chunk[rh.particle_type, "particle_mass"].in_units("Msun/h").astype("int32")
+        #earr = chunk[rh.particle_type, "particle_"].in_units("").astype("float64")
+        #sarr = chunk[rh.particle_type, "particle_"].in_units("").astype("float64")
+        #mtarr= chunk[rh.particle_type, "particle_"].in_units("").astype("float64") 
+        tarr = np.asarray(chunk[rh.particle_type, "particle_type"], dtype="int32")
         npart = arri.size
         for i in range(npart):
             p[0][i+pi].id = <np.int64_t> arri[i]
@@ -255,7 +255,10 @@ cdef void rh_read_particles(char *filename, particle **p, np.int64_t *num_p):
             #p[0][i+pi].energy = <np.float64_t> earr[i]
             #p[0][i+pi].softening = <np.float64_t> sarr[i]
             #p[0][i+pi].metallicity = <np.float64_t> mtarr[i]
-            p[0][i+pi].type = <np.int32_t> 0  # For now only dm particles are supported 
+            if tarr[i] in rh.star_types: type = 2
+            else: type = 0
+            p[0][i+pi].type = <np.int32_t> type  
+
         fi = 0
         for field in ["particle_position_x", "particle_position_y",
                       "particle_position_z",
@@ -283,6 +286,7 @@ cdef class RockstarInterface:
     cdef int size
     cdef public int block_ratio
     cdef public object particle_type
+    cdef public object star_types
     cdef public int total_particles
     cdef public object callbacks
 
@@ -292,7 +296,7 @@ cdef class RockstarInterface:
 
     def setup_rockstar(self, char *server_address, char *server_port,
                        int num_snaps, int total_particles,
-                       particle_type,
+                       particle_type, star_types,
                        np.float64_t particle_mass,
                        int parallel = False, int num_readers = 1,
                        int num_writers = 1,
@@ -341,6 +345,7 @@ cdef class RockstarInterface:
         TOTAL_PARTICLES = total_particles
         self.block_ratio = block_ratio
         self.particle_type = particle_type
+        self.star_types = star_types
         
         tds = self.ts[0]
         h0 = tds.hubble_constant
