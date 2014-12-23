@@ -24,7 +24,6 @@ from yt.utilities.parallel_tools.parallel_analysis_interface import \
 from yt.analysis_modules.halo_finding.halo_objects import * #Halos & HaloLists
 from yt.utilities.exceptions import YTRockstarMultiMassNotSupported
 
-
 import rockstar_interface
 
 import socket
@@ -35,6 +34,7 @@ import os
 from os import environ
 from os import mkdir
 from os import path
+
 
 class InlineRunner(ParallelAnalysisInterface):
     def __init__(self):
@@ -141,6 +141,9 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
     particle_type: str
         This is the "particle type" that can be found in the data.  This can be
         a filtered particle or an inherent type.
+    star_types: str list/array
+        The types (as returned by data((particle_type, particle_type)) to be 
+        recognized as star particles. 
     multi_mass : bool
         If True all the particle species in particle_type will be passed to 
         Rockstar even if they have different masses    
@@ -209,9 +212,9 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
 
     """
     def __init__(self, ts, num_readers = 1, num_writers = None,
-                 outbase="rockstar_halos", particle_type="all", multi_mass=False,
+                 outbase="rockstar_halos", particle_type="all", star_types=[], multi_mass=False,
                  force_res=None, initial_metric_scaling=1.0, non_dm_metric_scaling=10.0,
-                 suppress_galaxies=1, total_particles=None, dm_only=False, particle_mass=None
+                 suppress_galaxies=1, total_particles=None, dm_only=False, particle_mass=None,
                  min_halo_size=25):
 
         if is_root():
@@ -234,6 +237,7 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
             ts = DatasetSeries([ts])
         self.ts = ts
         self.particle_type = particle_type
+        self.star_types = star_types
         self.multi_mass = multi_mass
         self.outbase = outbase
         self.min_halo_size = min_halo_size
@@ -357,6 +361,7 @@ class RockstarHaloFinder(ParallelAnalysisInterface):
         self.handler.setup_rockstar(self.server_address, self.port,
                     num_outputs, self.total_particles, 
                     self.particle_type,
+                    star_types = self.star_types,                
                     particle_mass = self.particle_mass,
                     parallel = self.comm.size > 1,
                     num_readers = self.num_readers,
