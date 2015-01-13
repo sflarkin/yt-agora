@@ -124,7 +124,7 @@ build_src.build_src.generate_a_pyrex_source = generate_a_pyrex_source
 # End snippet
 ######
 
-VERSION = "3.1dev"
+VERSION = "3.0.2"
 
 if os.path.exists('MANIFEST'):
     os.remove('MANIFEST')
@@ -199,8 +199,7 @@ def setup_package():
         name="yt",
         version=VERSION,
         description="An analysis and visualization toolkit for Astrophysical "
-                    + "simulations, focusing on Adaptive Mesh Refinement data "
-                      "from Enzo, Orion, FLASH, and others.",
+                    + "simulations.",
         classifiers=["Development Status :: 5 - Production/Stable",
                      "Environment :: Console",
                      "Intended Audience :: Science/Research",
