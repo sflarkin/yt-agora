@@ -61,8 +61,8 @@ def export_to_sunrise(ds, fn, star_particle_type, fc, fwidth, ncells_wide=None,
     http://sunrise.googlecode.com/ for more information.
 
     """
-    fc = np.array(fc)
-    fwidth = np.array(fwidth)
+    fc = fc.in_units('code_length').value
+    fwidth = fwidth.in_units('code_length').value
     
     #we must round the dle,dre to the nearest root grid cells
     ile,ire,super_level,ncells_wide= \
@@ -172,19 +172,25 @@ def domains_from_halos(ds,halo_list,frvir=0.15):
     domains_list.reverse() #we want the most populated domains first
     return domains_list
 
+
 def prepare_octree(ds,ile,start_level=0,debug=True,dd=None,center=None):
     if dd is None:
         #we keep passing dd around to not regenerate the data all the time
         dd = ds.all_data()
-    try:
-        dd['MetalMass']
-    except KeyError:
-        add_fields() #add the metal mass field that sunrise wants
+
+    def _MetalMass(field, data):
+        return (data['gas', 'metal_ia_density']*data['index', 'cell_volume']).in_units('Msun')
+    add_field("MetalMass", function=MetalMass)
+ 
     def _temp_times_mass(field, data):
-        return data["Temperature"]*data["CellMassMsun"]
+        te = data['thermal_energy']
+        hd = data['H_nuclei_density']
+        temp = (2.0*te/(3.0*hd*yt.physical_constants.kb)).in_units('K')
+        return temp*data["cell_mass"].in_units('Msun')
     add_field("TemperatureTimesCellMassMsun", function=_temp_times_mass)
-    fields = ["CellMassMsun","TemperatureTimesCellMassMsun", 
-              "MetalMass","CellVolumeCode"]
+
+    fields = ["cell_mass","TemperatureTimesCellMassMsun", 
+              "MetalMass","cell_volume"]
     
     #gather the field data from octs
     pbar = get_pbar("Retrieving field data",len(fields))
@@ -203,18 +209,21 @@ def prepare_octree(ds,ile,start_level=0,debug=True,dd=None,center=None):
     for l in range(100): 
         levels_finest[l]=0
         levels_all[l]=0
-    pbar = get_pbar("Initializing octs ",len(ds.index.grids))
-    for gi,g in enumerate(ds.index.grids):
+         
+    total_octs =  dd.index.total_octs    
+    pbar = get_pbar("Initializing octs ", total_octs)
+    for g, mask in dd.blocks:
         ff = np.array([g[f] for f in fields])
+        child_index_mask = get_child_index_mask(g)
         og = amr_utils.OctreeGrid(
-                g.child_index_mask.astype('int32'),
-                ff.astype("float64"),
-                g.LeftEdge.astype("float64"),
-                g.ActiveDimensions.astype("int32"),
-                np.ones(1,dtype="float64")*g.dds[0],
-                g.Level,
-                g.id)
-        grids[g.id] = og
+            child_index_mask.astype('int32'),
+            ff.astype("float64"),
+            g.LeftEdge.astype("float64"),
+            g.ActiveDimensions.astype("int32"),
+            np.ones(1,dtype="float64")*g.dds[0],
+            g.Level,
+            g.ind)
+        grids[g.ind] = og
         #how many refinement cells will we have?
         #measure the 'volume' of each mesh, but many
         #cells do not exist. an overstimate
@@ -352,24 +361,25 @@ def create_fits_file(ds,fn, refined,output,particle_data,fle,fre):
     st_table.header.update("hierarch lengthunit", "kpc", comment="Length unit for grid")
     fdx = fre-fle
     for i,a in enumerate('xyz'):
-        st_table.header.update("min%s" % a, fle[i] * ds['kpc'])
-        st_table.header.update("max%s" % a, fre[i] * ds['kpc'])
-        st_table.header.update("n%s" % a, fdx[i])
+        st_table.header.update("min%s" % a, fle[i].in_units('kpc'))
+        st_table.header.update("max%s" % a, fre[i].in_units('kpc'))
+        st_table.header.update("n%s" % a, fdx[i].in_units('kpc'))
         st_table.header.update("subdiv%s" % a, 2)
     st_table.header.update("subdivtp", "OCTREE", "Type of grid subdivision")
 
     #not the hydro grid data
-    fields = ["CellMassMsun","TemperatureTimesCellMassMsun", 
-              "MetalMass","CellVolumeCode"]
+    fields = ["cell_mass","TemperatureTimesCellMassMsun", 
+              "MetalMass","cell_volume"]
     fd = {}
     for i,f in enumerate(fields): 
         fd[f]=output[:,i]
     del output
     col_list = []
-    size = fd["CellMassMsun"].size
-    tm = fd["CellMassMsun"].sum()
+    cell_mass = fd["cell_mass"].in_units['Msun']
+    size = cell_mass.size
+    tm = cell_mass.sum()
     col_list.append(pyfits.Column("mass_gas", format='D',
-                    array=fd['CellMassMsun'], unit="Msun"))
+                    array=cell_mass, unit="Msun"))
     col_list.append(pyfits.Column("mass_metals", format='D',
                     array=fd['MetalMass'], unit="Msun"))
     # col_list.append(pyfits.Column("mass_stars", format='D',
@@ -391,8 +401,7 @@ def create_fits_file(ds,fn, refined,output,particle_data,fle,fre):
     col_list.append(pyfits.Column("gas_teff_m", format='D',
                     array=fd['TemperatureTimesCellMassMsun'], unit="K*Msun"))
     col_list.append(pyfits.Column("cell_volume", format='D',
-                    array=fd['CellVolumeCode'].astype('float64')*ds['kpc']**3.0,
-                    unit="kpc^3"))
+                    array=fd['cell_volume'].in_units('kpc**3'), unit="kpc^3"))
     col_list.append(pyfits.Column("SFR", format='D',
                     array=np.zeros(size, dtype='D')))
     cols = pyfits.ColDefs(col_list)
@@ -488,37 +497,46 @@ def prepare_star_particles(ds,star_type,pos=None,vel=None, age=None,
                           dd=None):
     if dd is None:
         dd = ds.all_data()
-    idxst = dd["particle_type"] == star_type
-
-    #make sure we select more than a single particle
-    assert na.sum(idxst)>0
+    nump = dd[star_type,"particle_ones"]
+    assert nump.sum()>1 #make sure we select more than a single particle
+    
     if pos is None:
-        pos = np.array([dd["particle_position_%s" % ax]
+        pos = np.array([dd[star_type,"particle_position_%s" % ax]
                         for ax in 'xyz']).transpose()
-    idx = idxst & np.all(pos>fle,axis=1) & np.all(pos<fre,axis=1)
-    assert np.sum(idx)>0
-    pos = pos[idx]*ds['kpc'] #unitary units -> kpc
+
+    idx = np.all(pos>fle,axis=1) & np.all(pos<fre,axis=1)
+    assert np.sum(idx)>0 #make sure we select more than a single particle
+    
+    pos = pos[idx].in_units('kpc') #unitary units -> kpc
+ 
+    if creation_time is None:
+        formation_time = dd[star_type,"particle_creation_time"][idx].in_units('years')
+
     if age is None:
-        age = dd["particle_age"][idx]*ds['years'] # seconds->years
+        age = (ds.current_time - formation_time).in_units('years')
+
     if vel is None:
-        vel = np.array([dd["particle_velocity_%s" % ax][idx]
+        vel = np.array([dd[star_type,"particle_velocity_%s" % ax]
                         for ax in 'xyz']).transpose()
         # Velocity is cm/s, we want it to be kpc/yr
         #vel *= (ds["kpc"]/ds["cm"]) / (365*24*3600.)
-        vel *= kpc_per_cm * sec_per_year
+        vel = vel[idx].in_units('kpc/yr')
+    
     if initial_mass is None:
         #in solar masses
-        initial_mass = dd["particle_mass_initial"][idx]*ds['Msun']
+        initial_mass = dd[star_type,"particle_mass_initial"][idx].in_units('Msun')
+    
     if current_mass is None:
         #in solar masses
-        current_mass = dd["particle_mass"][idx]*ds['Msun']
+        current_mass = dd[star_type,"particle_mass"][idx].in_units('Msun')
+    
     if metallicity is None:
         #this should be in dimensionless units, metals mass / particle mass
-        metallicity = dd["particle_metallicity"][idx]
-        assert np.all(metallicity>0.0)
+        metallicity = dd[star_type,"particle_metallicity"][idx]
+    
     if radius is None:
-        radius = initial_mass*0.0+10.0/1000.0 #10pc radius
-    formation_time = ds.current_time*ds['years']-age
+        radius = ds.arr(metallicity*0.0 + 10.0/1000.0, 'kpc') #10pc radius
+    
     #create every column
     col_list = []
     col_list.append(pyfits.Column("ID", format="J", array=np.arange(current_mass.size).astype('int32')))
@@ -533,7 +551,7 @@ def prepare_star_particles(ds,star_type,pos=None,vel=None, age=None,
     #For particles, Sunrise takes 
     #the dimensionless metallicity, not the mass of the metals
     col_list.append(pyfits.Column("metallicity", format="D",
-        array=metallicity,unit="Msun")) 
+        array=metallicity,unit="dimensionless")) 
     
     #make the table
     cols = pyfits.ColDefs(col_list)
@@ -547,13 +565,7 @@ def prepare_star_particles(ds,star_type,pos=None,vel=None, age=None,
 
 def add_fields():
     """Add three Eulerian fields Sunrise uses"""
-    def _MetalMass(field, data):
-        return data["Metallicity"] * data["CellMassMsun"]
-        
-    def _convMetalMass(data):
-        return 1.0
-    add_field("MetalMass", function=_MetalMass,
-              convert_function=_convMetalMass)
+
     def _initial_mass_cen_ostriker(field, data):
         # SFR in a cell. This assumes stars were created by the Cen & Ostriker algorithm
         # Check Grid_AddToDiskProfile.C and star_maker7.src
@@ -567,9 +579,7 @@ def add_fields():
         denom = (1.0 - star_mass_ejection_fraction * (1.0 - (1.0 + xv1)*np.exp(-xv1)))
         minitial = data["ParticleMassMsun"] / denom
         return minitial
-
     add_field("InitialMassCenOstriker", function=_initial_mass_cen_ostriker)
-
 
 class position:
     def __init__(self):
@@ -659,3 +669,55 @@ class hilbert_state():
         j+=1
         yield vertex, self.descend(j)
 
+
+def get_child_index_mask(grid):
+    '''
+    Generates self.child_index_mask, which is -1 where there is no child,
+    and otherwise has the ID of the grid that resides there.
+    '''
+    
+    eps = np.finfo(np.float64).eps
+    def inside(g):
+        return (np.all((g.RightEdge - grid.LeftEdge) > eps) &  
+                np.all((grid.RightEdge - g.LeftEdge) > eps)) 
+
+    child_index_mask = np.zeros(grid.ActiveDimensions, 'int32') - 1
+    
+
+def _fill_child_mask(self, child, mask, tofill, dlevel = 1):
+    rf = self.ds.refine_by
+    if dlevel != 1:
+        rf = rf**dlevel
+        gi, cgi = self.get_global_startindex(), child.get_global_startindex()
+        startIndex = np.maximum(0, cgi / rf - gi)
+        endIndex = np.minimum((cgi + child.ActiveDimensions) / rf - gi,
+                              self.ActiveDimensions)
+        endIndex += (startIndex == endIndex)
+        mask[startIndex[0]:endIndex[0],
+             startIndex[1]:endIndex[1],
+             startIndex[2]:endIndex[2]] = tofill
+
+def get_child_index_mask(oct_ind, oct_dic):
+    """
+    Generates child_index_mask, which is -1 where there is no child,
+    and otherwise has the ID of the grid that resides there.
+    
+    """
+    child_index_mask = np.zeros((2,2,2), 'int32') - 1
+    children = get_oct_children(oct_ind, oct_dic)
+    middle = oct_dic['right_edge'][oct_ind]
+    for child in children:
+        ch_re = oct_dic['right_edge']
+        xind, yind, zind = 
+        
+
+def get_oct_children(oct_ind, oct_dic):
+    
+    RE, LE = oct_dic['right_edge'][oct_ind], oct_dic['left_edge'][oct_ind]
+    level =  oct_dic['level'][oct_ind]
+
+    children = (np.all(RE >= oct_dic['right_edge']) &
+                np.all(LE <= grid_dic['left_edge']) &
+                (level + 1 == grid_dic[level])) 
+
+    return children
