@@ -940,25 +940,37 @@ class YTSelectionContainer3D(YTSelectionContainer):
         self._grids = None
         self.quantities = DerivedQuantityCollection(self)
 
-    def cut_region(self, field_cuts, field_parameters = None):
+    def cut_region(self, field_cuts, field_parameters=None):
         """
-        Return an InLineExtractedRegion, where the object cells are cut on the
-        fly with a set of field_cuts.  It is very useful for applying
-        conditions to the fields in your data object.  Note that in previous
-        versions of yt, this accepted 'grid' as a variable, but presently it
-        requires 'obj'.
-        
+        Return an YTCutRegionBase, where the a cell is identified as being inside
+        the cut region based on the value of one or more fields.  Note that in
+        previous versions of yt the name 'grid' was used to represent the data
+        object used to construct the field cut, as of yt 3.0, this has been
+        changed to 'obj'.
+
+        Parameters
+        ----------
+        field_cuts : list of strings
+           A list of conditionals that will be evaluated. In the namespace
+           available, these conditionals will have access to 'obj' which is a
+           data object of unknown shape, and they must generate a boolean array.
+           For instance, conditionals = ["obj['temperature'] < 1e3"]
+        field_parameters : dictionary
+           A dictionary of field parameters to be used when applying the field
+           cuts.
+
         Examples
         --------
-        To find the total mass of gas above 10^6 K in your volume:
+        To find the total mass of hot gas with temperature greater than 10^6 K
+        in your volume:
 
-        >>> ds = load("RedshiftOutput0005")
+        >>> ds = yt.load("RedshiftOutput0005")
         >>> ad = ds.all_data()
-        >>> cr = ad.cut_region(["obj['Temperature'] > 1e6"])
-        >>> print cr.quantities["TotalQuantity"]("CellMassMsun")
+        >>> cr = ad.cut_region(["obj['temperature'] > 1e6"])
+        >>> print cr.quantities.total_quantity("cell_mass").in_units('Msun')
         """
         cr = self.ds.cut_region(self, field_cuts,
-                                  field_parameters = field_parameters)
+                                field_parameters=field_parameters)
         return cr
 
     def extract_isocontours(self, field, value, filename = None,
@@ -1019,16 +1031,13 @@ class YTSelectionContainer3D(YTSelectionContainer):
         """
         verts = []
         samples = []
-        pb = get_pbar("Extracting ", len(list(self._get_grid_objs())))
-        for i, g in enumerate(self._get_grid_objs()):
-            pb.update(i)
+        for block, mask in self.blocks:
             my_verts = self._extract_isocontours_from_grid(
-                            g, field, value, sample_values)
+                block, mask, field, value, sample_values)
             if sample_values is not None:
                 my_verts, svals = my_verts
                 samples.append(svals)
             verts.append(my_verts)
-        pb.finish()
         verts = np.concatenate(verts).transpose()
         verts = self.comm.par_combine_object(verts, op='cat', datatype='array')
         verts = verts.transpose()
@@ -1052,11 +1061,9 @@ class YTSelectionContainer3D(YTSelectionContainer):
             return verts, samples
         return verts
 
-
-    def _extract_isocontours_from_grid(self, grid, field, value,
-                                       sample_values = None):
-        mask = self._get_cut_mask(grid) * grid.child_mask
-        vals = grid.get_vertex_centered_data(field, no_ghost = False)
+    def _extract_isocontours_from_grid(self, grid, mask, field, value,
+                                       sample_values=None):
+        vals = grid.get_vertex_centered_data(field, no_ghost=False)
         if sample_values is not None:
             svals = grid.get_vertex_centered_data(sample_values)
         else:
@@ -1130,15 +1137,14 @@ class YTSelectionContainer3D(YTSelectionContainer):
         ...     "velocity_x", "velocity_y", "velocity_z", "Metal_Density")
         """
         flux = 0.0
-        for g in self._get_grid_objs():
-            flux += self._calculate_flux_in_grid(g, field, value,
-                    field_x, field_y, field_z, fluxing_field)
+        for block, mask in self.blocks:
+            flux += self._calculate_flux_in_grid(block, mask, field, value, field_x,
+                                                 field_y, field_z, fluxing_field)
         flux = self.comm.mpi_allreduce(flux, op="sum")
         return flux
 
-    def _calculate_flux_in_grid(self, grid, field, value,
+    def _calculate_flux_in_grid(self, grid, mask, field, value,
                     field_x, field_y, field_z, fluxing_field = None):
-        mask = self._get_cut_mask(grid) * grid.child_mask
         vals = grid.get_vertex_centered_data(field)
         if fluxing_field is None:
             ff = np.ones(vals.shape, dtype="float64")
