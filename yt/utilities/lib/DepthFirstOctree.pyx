@@ -49,6 +49,26 @@ cdef class OctreeGridList:
     def __getitem__(self, int item):
         return self.grids[item]
 
+
+def fill_octree_arrays(ad, fields, np.int64_t nocts,
+                       np.ndarray[np.float64_t, ndim=2] LeftEdge,
+                       np.ndarray[np.float64_t, ndim=1] dx,
+                       np.ndarray[np.int32_t, ndim=1] Level,
+                       np.ndarray[np.float64_t, ndim=5] Fields):
+
+     cdef np.int64_t i
+     block_iter = ad.blocks.__iter__()  
+        
+     for i in range(nocts):
+         oct, mask = block_iter.next() 
+         LeftEdge[i] = oct.LeftEdge 
+         dx[i] = oct.dds[0]
+         Level[i] = oct.Level
+         Fields[i] = np.array([oct[f] for f in fields])
+
+     return LeftEdge, dx, Level, Fields
+
+
 @cython.boundscheck(False)
 def RecurseOctreeDepthFirst(int i_i, int j_i, int k_i,
                             int i_f, int j_f, int k_f,
