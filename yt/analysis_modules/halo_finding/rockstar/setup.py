@@ -25,7 +25,8 @@ def configuration(parent_package='',top_path=None):
                          define_macros = [("THREADSAFE", "")],
                          include_dirs=[rd,
                                        os.path.join(rd, "io"),
-                                       os.path.join(rd, "util")])
+                                       os.path.join(rd, "util")],
+                         extra_compile_args=['-DMULTIMASS'])                         
     config.add_extension("rockstar_groupies",
                          "yt/analysis_modules/halo_finding/rockstar/rockstar_groupies.pyx",
                          library_dirs=[rd],

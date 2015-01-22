@@ -1,0 +1,917 @@
+<html>
+<head>
+<script type='text/javascript' src='http://www.google.com/jsapi'></script>
+<link rel="stylesheet" href="//code.jquery.com/ui/1.10.4/themes/smoothness/jquery-ui.css">
+<script src="//code.jquery.com/jquery-1.10.2.js"></script>
+<script src="//code.jquery.com/ui/1.10.4/jquery-ui.js"></script>
+<script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/jsxgraph/0.99.1/jsxgraphcore.js"></script>
+<style>
+body {
+      font-size: 14;
+      overflow: hidden;
+}
+#slider-range.ui-state-highlight{
+      opacity: 0.6;
+}
+p {
+      margin: 10px;
+}
+</style>
+</head>
+
+<body bgcolor="#000000">
+
+
+<object id="video_stream" width="864" height="480" style="position: absolute; z-index: -50; left: 0; right: 0; top: 0; bottom: 0; margin: auto;" codebase="http://download.macromedia.com/pub/shockwave/cabs/flash/swflash.cab#version=6,0,40,0">
+      <!--<param id="param_address" name="movie" value="http://localhost:8884/test.swf" />-->
+      <param name="wmode" value="opaque" />
+      <param name="BGCOLOR" value="#FFFFFF" />
+      <!--
+      <embed wmode="opaque" src="http://localhost:8884/test.swf" width="864" height="480" bgcolor="#FFFFFF" type="application/x-shockwave-flash" pluginspage="http://www.macromedia.com/go/getflashplayer">
+      </embed>
+      -->
+</object>
+
+<canvas id="render_ctx" style="width: 100%; height: 100%; opacity: 0.0; position: absolute; background: #000000;" oncontextmenu="return false;">
+Your browser does not support the HTML5 canvas tag.
+</canvas>
+
+<div id="window_container" style="opacity: 1.0; background: #242424; width: 400px; height: 100%;">
+      <div id="title_bar" style="width: 20px; height: 20px; float: top; position: relative; background-color: grey; text-align: center; font-weight: bold;">_</div>
+      <div id="menu_container" style="font-family: sans-serif; color: #FFFFFF;float: left; postition: relative;  width: 400px; z-index: 20; height: 96%; overflow: scroll; overflow-x:hidden;">
+            <p><label id="brightness_label" for="amount">Brightness:</label><input id="brightness_input" size="2" style="float: right;"><div id="brightness_slider" ></div></p>
+            <p><label id="density_label" for="amount">Global Opacity:</label><input id="density_input" size="2" style="float: right;"><div id="density_slider" ></div></p>
+            <p>Colormap:<select id="colormap_input">
+                  <option>16 LEVEL</option>
+                  <option>16 LEVEL_r</option>
+                  <option>Accent</option>
+                  <option>Accent_r</option>
+                  <option>B-W LINEAR</option>
+                  <option>B-W LINEAR_r</option>
+                  <option>BLUE</option>
+                  <option>BLUE_r</option>
+                  <option>BLUE-RED</option>
+                  <option>BLUE-RED_r</option>
+                  <option>Beach</option>
+                  <option>Beach_r</option>
+                  <option>Blue - Pastel - Red</option>
+                  <option>Blue - Pastel - Red_r</option>
+                  <option>Blue Waves</option>
+                  <option>Blue Waves_r</option>
+                  <option>Blue-Red</option>
+                  <option>Blue-Red_r</option>
+                  <option>Blues</option>
+                  <option>Blues_r</option>
+                  <option>BrBG</option>
+                  <option>BrBG_r</option>
+                  <option>BuGn</option>
+                  <option>BuGn_r</option>
+                  <option>BuPu</option>
+                  <option>BuPu_r</option>
+                  <option>CMRmap</option>
+                  <option>CMRmap_r</option>
+                  <option>Dark2</option>
+                  <option>Dark2_r</option>
+                  <option>Eos A</option>
+                  <option>Eos A_r</option>
+                  <option>Eos B</option>
+                  <option>Eos B_r</option>
+                  <option>GREEN</option>
+                  <option>GREEN_r</option>
+                  <option>GREEN-PINK</option>
+                  <option>GREEN-PINK_r</option>
+                  <option>GRN</option>
+                  <option>GRN_r</option>
+                  <option>GRN-RED-BLU-WHT</option>
+                  <option>GRN-RED-BLU-WHT_r</option>
+                  <option>GnBu</option>
+                  <option>GnBu_r</option>
+                  <option>Greens</option>
+                  <option>Greens_r</option>
+                  <option>Greys</option>
+                  <option>Greys_r</option>
+                  <option>Hardcandy</option>
+                  <option>Hardcandy_r</option>
+                  <option>Haze</option>
+                  <option>Haze_r</option>
+                  <option>Hue Sat Lightness 1</option>
+                  <option>Hue Sat Lightness 1_r</option>
+                  <option>Hue Sat Lightness 2</option>
+                  <option>Hue Sat Lightness 2_r</option>
+                  <option>Hue Sat Value 1</option>
+                  <option>Hue Sat Value 1_r</option>
+                  <option>Hue Sat Value 2</option>
+                  <option>Hue Sat Value 2_r</option>
+                  <option>Mac Style</option>
+                  <option>Mac Style_r</option>
+                  <option>Nature</option>
+                  <option>Nature_r</option>
+                  <option>Ocean</option>
+                  <option>Ocean_r</option>
+                  <option>OrRd</option>
+                  <option>OrRd_r</option>
+                  <option>Oranges</option>
+                  <option>Oranges_r</option>
+                  <option>PRGn</option>
+                  <option>PRGn_r</option>
+                  <option>PRISM</option>
+                  <option>PRISM_r</option>
+                  <option>Paired</option>
+                  <option>Paired_r</option>
+                  <option>Pastel1</option>
+                  <option>Pastel1_r</option>
+                  <option>Pastel2</option>
+                  <option>Pastel2_r</option>
+                  <option>Pastels</option>
+                  <option>Pastels_r</option>
+                  <option>Peppermint</option>
+                  <option>Peppermint_r</option>
+                  <option>PiYG</option>
+                  <option>PiYG_r</option>
+                  <option>Plasma</option>
+                  <option>Plasma_r</option>
+                  <option>PuBu</option>
+                  <option>PuBu_r</option>
+                  <option>PuBuGn</option>
+                  <option>PuBuGn_r</option>
+                  <option>PuOr</option>
+                  <option>PuOr_r</option>
+                  <option>PuRd</option>
+                  <option>PuRd_r</option>
+                  <option>Purple-Red + Stripes</option>
+                  <option>Purple-Red + Stripes_r</option>
+                  <option>Purples</option>
+                  <option>Purples_r</option>
+                  <option>RAINBOW</option>
+                  <option>RAINBOW_r</option>
+                  <option>RED TEMPERATURE</option>
+                  <option>RED TEMPERATURE_r</option>
+                  <option>RED-PURPLE</option>
+                  <option>RED-PURPLE_r</option>
+                  <option>Rainbow</option>
+                  <option>Rainbow_r</option>
+                  <option>Rainbow + black</option>
+                  <option>Rainbow + black_r</option>
+                  <option>Rainbow + white</option>
+                  <option>Rainbow + white_r</option>
+                  <option>Rainbow18</option>
+                  <option>Rainbow18_r</option>
+                  <option>RdBu</option>
+                  <option>RdBu_r</option>
+                  <option>RdGy</option>
+                  <option>RdGy_r</option>
+                  <option>RdPu</option>
+                  <option>RdPu_r</option>
+                  <option>RdYlBu</option>
+                  <option>RdYlBu_r</option>
+                  <option>RdYlGn</option>
+                  <option>RdYlGn_r</option>
+                  <option>Reds</option>
+                  <option>Reds_r</option>
+                  <option>STD GAMMA-II</option>
+                  <option>STD GAMMA-II_r</option>
+                  <option>STEPS</option>
+                  <option>STEPS_r</option>
+                  <option>STERN SPECIAL</option>
+                  <option>STERN SPECIAL_r</option>
+                  <option>Set1</option>
+                  <option>Set1_r</option>
+                  <option>Set2</option>
+                  <option>Set2_r</option>
+                  <option>Set3</option>
+                  <option>Set3_r</option>
+                  <option>Spectral</option>
+                  <option>Spectral_r</option>
+                  <option>Volcano</option>
+                  <option>Volcano_r</option>
+                  <option>Waves</option>
+                  <option>Waves_r</option>
+                  <option>YlGn</option>
+                  <option>YlGn_r</option>
+                  <option>YlGnBu</option>
+                  <option>YlGnBu_r</option>
+                  <option>YlGnBr</option>
+                  <option>YlGnBr_r</option>
+                  <option>YlOrRd</option>
+                  <option>YlOrRd_r</option>
+                  <option>afmhot</option>
+                  <option>afmhot_r</option>
+                  <option>algae</option>
+                  <option>algae_r</option>
+                  <option>autumn</option>
+                  <option>autumn_r</option>
+                  <option>bds_highcontrast</option>
+                  <option>bds_highcontrast_r</option>
+                  <option>binary</option>
+                  <option>binary_r</option>
+                  <option>black_green</option>
+                  <option>black_green_r</option>
+                  <option>bone</option>
+                  <option>bone_r</option>
+                  <option>brg</option>
+                  <option>brg_r</option>
+                  <option>bwr</option>
+                  <option>bwr_r</option>
+                  <option>cool</option>
+                  <option>cool_r</option>
+                  <option>coolwarm</option>
+                  <option>coolwarm_r</option>
+                  <option>copper</option>
+                  <option>copper_r</option>
+                  <option>cubehelix</option>
+                  <option>cubehelix_r</option>
+                  <option>flag</option>
+                  <option>flag_r</option>
+                  <option>gist_earth</option>
+                  <option>gist_earth_r</option>
+                  <option>gist_gray</option>
+                  <option>gist_gray_r</option>
+                  <option>gist_heat</option>
+                  <option>gist_heat_r</option>
+                  <option>gist_ncar</option>
+                  <option>gist_ncar_r</option>
+                  <option>gist_rainbow</option>
+                  <option>gist_rainbow_r</option>
+                  <option>gist_stern</option>
+                  <option>gist_stern_r</option>
+                  <option>gist_yarg</option>
+                  <option>gist_yarg_r</option>
+                  <option>gnuplot</option>
+                  <option>gnuplot_r</option>
+                  <option>gnuplot2</option>
+                  <option>gnuplot2_r</option>
+                  <option>gray</option>
+                  <option>gray_r</option>
+                  <option>hot</option>
+                  <option>hot_r</option>
+                  <option>hsv</option>
+                  <option>hsv_r</option>
+                  <option>jet</option>
+                  <option>jet_r</option>
+                  <option>kamae</option>
+                  <option>kamae_r</option>
+                  <option>ocean</option>
+                  <option>ocean_r</option>
+                  <option>pink</option>
+                  <option>pink_r</option>
+                  <option>prism</option>
+                  <option>prism_r</option>
+                  <option>rainbow</option>
+                  <option>rainbow_r</option>
+                  <option>seismic</option>
+                  <option>seismic_r</option>
+                  <option>spectral</option>
+                  <option>spectral_r</option>
+                  <option>spring</option>
+                  <option>spring_r</option>
+                  <option>summer</option>
+                  <option>summer_r</option>
+                  <option>terrain</option>
+                  <option>terrain_r</option>
+                  <option>winter</option>
+                  <option>winter_r</option>
+            </select></p>
+            <p>Opacity Map:</p>
+            <form>
+                  <input type="radio" name="func" checked="checked" value="gaussian">Gaussian<br>
+                  <input type="radio" name="func" value="exponential">Exponential<br>
+                  <input type="radio" name="func" value="linear">Linear
+            </form>
+            <p><div id='box' class='jxgbox' style='background-color: white; width:390px; height:200px;'></div></p>
+            <div id="slider-range" ></div>
+                  <input readonly="true" id="tfmin_label" size="2" style="float: left;"/>
+                  <input id="tfl_input" size="2" style="float: left;"></input>
+                  <input readonly="true" id="tfmax_label" size="2" style="float: right;"/>
+                  <input id="tfu_input" size="2" style="float: right;"></input>
+            <p></br></p>
+            <p><input type="checkbox" id="rev_tfbounds_checkbox">Reverse Transfer Function Bounds</input></p>
+            <p>Path:<input id="grid_path_input" size="32" style="float: right;"></p>
+            <p>Grid:<select id="grid_input" style="float: right;"></select></p>
+            <p><label>Max Samples:</label><input id="max_samples_input" size="2" style="float: right;"></p>
+            <p><label>Sample Size:</label><input id="sample_size_input" size="2" style="float: right;"></p>
+            <p><label>Near Clip:</label><input id="near_clip_input" size="2" style="float: right;"></p>
+            <p><label>Far Clip:</label><input id="far_clip_input" size="2" style="float: right;"></p>
+            <p><label>Perspective:</label>
+                  <label>X&nbsp</label><input id="perspective_x_input" size="2">
+                  <label>Y&nbsp</label><input id="perspective_y_input" size="2">
+                  <label>Z&nbsp</label><input id="perspective_z_input" size="2">
+            </p>
+            <div id="button_container" align="center">
+                  <input id="axis_x_button" type="button" value="X"/>
+                  <input id="axis_y_button" type="button" value="Y"/>
+                  <input id="axis_z_button" type="button" value="Z"/>
+            </div>
+            <p>
+            <input id="img_save_button" type="button" value="Save Image"/>
+            <input id="xml_save_button" type="button" value="Save XML"/>
+            <input id="xml_load_button" type="button" value="Load XML"/>
+            </br>
+            <input id="video_arm_checkbox" type="checkbox" value="Arm Record"/> Arm
+            <input id="video_rec_checkbox" type="checkbox" value="Record Video"/> Rec Video
+            </p>
+      </div>
+</div>
+
+<script type="text/javascript">
+
+//-------------------------------------
+// Initialize the graph
+//  Updates the color transfer function graph.
+
+var jsxgraph = {
+      // Initialization function, called once at creation
+      init        : function() {
+                          this.set('gaussian');
+                          this.is_init = true;
+                    },
+      // Destructor
+      destroy     : function() {
+                          if(!this.is_init) return;
+                          console.log(this.sd);
+                          this.board.removeObject(this.sd);
+                          this.board.removeObject(this.u);
+                          this.board.removeObject(this.f);
+                    },
+      type        : 'gaussian',
+      board       : JXG.JSXGraph.initBoard('box', {boundingbox: [-5, 1, 5, 0], axis:true, showNavigation: false, showCopyright: false, ticks:false}),
+      sd          : 0,
+      u           : 0,
+      f           : 0,
+      get_sd      : function() {
+                          try {
+                                return this.sd.Value();
+                          } catch (err) {
+                                return 0;
+                          }
+                    },
+      get_u       : function() {
+                          try {
+                                return this.u.Value();
+                          } catch (err) {
+                                return 0;
+                          }
+                    },
+      it_init     : false,
+      // Set the function type on the graph
+      set         : function(func_string) {
+                          if (func_string === 'gaussian') {
+                                this.type = func_string;
+                                this.destroy();
+                                this.gaussian();
+                          } else if (func_string === 'exponential') {
+                                this.type = func_string;
+                                this.destroy();
+                                this.exponential();
+                          } else if (func_string === 'linear') {
+                                this.type = func_string;
+                                this.destroy();
+                                this.linear();
+                          } else {
+                                console.log("No such function type:", func_string);
+                          }
+                    },
+      set_bg      : function(base64_img_data) {
+                          this.board.create('image',["data:image/png;base64," + base64_img_data, [-5,0], [10,1]], {frozen: true});
+                    },
+      // Following functions define the function types to be drawn on the graph.  Respective functions in context/render.py
+      gaussian    : function() {
+                          var sd = this.board.create('slider', [[-3, 0.8], [3, 0.8], [0.0, 1.0, 2.0]], {name: 'sd'});
+                          var u  = this.board.create('slider', [[-3, 0.7], [3, 0.7], [-5.0, 0.0, 5.0]], {name: 'u'});
+                          this.sd = sd;
+                          this.u  = u;
+                          this.f  = this.board.create('functiongraph', [function(x){ return (1 / (sd.Value() * Math.sqrt(2 * Math.PI))) * Math.pow(Math.E, - Math.pow((x - u.Value()), 2) / (2 * Math.pow(sd.Value(), 2))); }], 
+                                                 {strokeWidth:3,strokeColor:'black'});
+                    },
+      exponential : function() {
+                          var sd = this.board.create('slider', [[-3, 0.8], [3, 0.8], [0.0, 0.25, 2.0]], {name: 'base'});
+                          var u  = this.board.create('slider', [[-3, 0.7], [3, 0.7], [-5.0, 4.0, 5.0]], {name: 'exp'});
+                          this.sd = sd;
+                          this.u  = u;
+                          this.f  = this.board.create('functiongraph', [function(x){ return (Math.pow((x + 5.0) * sd.Value(), u.Value())) }], 
+                                               {strokeWidth:3,strokeColor:'black'});
+                    },
+      linear      : function() {
+                          var sd = this.board.create('slider', [[-3, 0.8], [3, 0.8], [-5.0, 0.0, 5.0]], {name: 'slope'});
+                          var u  = this.board.create('slider', [[-3, 0.7], [3, 0.7], [0.0, 0.5, 1.0]], {name: 'y-int'});
+                          this.sd = sd;
+                          this.u  = u;
+                          this.f  = this.board.create('functiongraph', [function(x){ return (x * sd.Value() + u.Value()) }], 
+                                               {strokeWidth:3,strokeColor:'black'});
+                    },
+};
+
+//-------------------------------------
+// Initialize the flash object
+/** Specify a custom port by constucting the object's embed
+  * tag from within javascript.  Also specify custom resolution
+  * though hopefully this is depricated in favor of video.js.
+*/
+function init_flash_obj() {
+      var flash_obj = document.getElementById("video_stream");
+      flash_obj.setAttribute("width", width);
+      flash_obj.setAttribute("height", height);
+      var embed_address = document.createElement("embed");
+      embed_address.setAttribute("wmode", "opaque");
+      embed_address.setAttribute("src", "http://localhost:" + video_port + "/test.swf?file=http://localhost:" + video_port + "/test.flv");
+      embed_address.setAttribute("width", width);
+      embed_address.setAttribute("height", height);
+      embed_address.setAttribute("bgcolor", "#FFFFFF");
+      embed_address.setAttribute("type", "application/x-shockwave-flash");
+      embed_address.setAttribute("pluginspage", "http://www.macromedia.com/go/getflashplayer");
+      flash_obj.appendChild(embed_address);
+      /*
+      // TODO: Depricated, extra attributes that don't seemly make a difference in streaming
+      var param_address = document.createElement("param_address");
+      param_address.setAttribute("name", "movie");
+      param_address.setAttribute("value", "http://localhost:" + video_port + "/test.swf?file=http://localhost:" + video_port + "/test.flv");
+      flash_obj.appendChild(param_address);
+      */
+}
+
+
+//-------------------------------------
+// Initialize the canvas
+var canvas = document.getElementById('render_ctx');
+canvas.width = document.body.clientWidth;
+canvas.height = document.body.clientHeight;
+var context = canvas.getContext('2d');
+
+/* A data structure holding pertainent 
+ * values to be passed to and from the 
+ * server.
+*/ 
+var options = {
+      density        : 0.05,
+      brightness     : 0.05,
+      prev_density   : 0.05,
+      prev_brightness: 0.05,
+      tfl            : 0.6,
+      tfu            : 4.5,
+      prev_tfl       : 0.6,
+      prev_tfu       : 4.5,
+      tfmin          : 0.0,
+      tfmax          : 100.0,
+      tfmean         : jsxgraph.get_u(),
+      tfstddev       : jsxgraph.get_sd(),
+      tf_func        : jsxgraph.type,
+      colormap       : 'Accent',
+      prev_colormap  : 'Accent',
+      nclip          : 0.01,
+      fclip          : 1.0,
+      samplesize     : 0.01,
+      maxsamples     : 1000.0,
+      prev_nclip     : 0.01,
+      prev_fclip     : 1.0,
+      prev_samplesize: 0.01,
+      prev_maxsamples: 1000.0,
+      grids          : [],
+      grid           : '',
+      grid_dir       : '',
+      prev_grid_dir  : '',
+      grid_set       : false,
+      grid_change    : false,
+      grid_path      : '',
+      x_persp        : 0.0,
+      y_persp        : 0.0,
+      z_persp        : 0.25,
+      x_axis         : false,
+      y_axis         : false,
+      z_axis         : false,
+      prev_x_persp   : 0.0,
+      prev_y_persp   : 0.0,
+      prev_z_persp   : 0.25,
+      img_save       : false,
+      alert_screen   : false,
+      mouseDX        : 0.0,
+      mouseDY        : 0.0,
+      width          : width,  // Embedded in the server
+      height         : height, // Embedded in the server
+      mouse_button   : 'L',
+      matrix         : 0,
+      xml_save       : false,
+      xml_load       : false,
+      video_save     : false,
+      img_path       : '',
+      xml_path       : '',
+      rev_tfbounds   : false,
+      is_serv_error  : false,
+      serv_error     : '',
+      video_path     : '',
+      video_arm      : false,
+      video_rec      : false,
+};
+
+
+//-------------------------------------
+// Websocket communication
+var connected = false;
+var received_message = false;
+var frame_count = 0;
+context.fillStyle = 'white';
+var URL = (window.URL || window.webkitURL);
+
+// Connect to the specified port
+var url_address = "ws://127.0.0.1:" + websocket_port + "/websocket";
+
+var ws = new WebSocket(url_address);
+
+ws.onopen = function() {
+      console.log("Stream open");
+      connected = true;
+      alert_screen("Loading...");
+      jsxgraph.init();
+      $("#video_rec_checkbox").prop("disabled", true);
+      menu2serv(true);
+};
+
+ws.onmessage = function (evt) {
+      if(!received_message) {
+            // Initialize flash object late, when video is likely to be served
+            init_flash_obj();
+      }
+      received_message = true;
+      clear_canvas();
+      var updated_options = evt.data.split("|");
+      serv2options(updated_options);
+};
+
+ws.onclose = function() {
+      connected = false;
+      alert_screen("Connection closed.");
+}
+
+
+//-------------------------------------
+// Mouse events
+
+menu_focused = false;
+/* Data structure to store mouse data.
+*/
+var mouse = {
+      dragging: false,
+      drag_counter: 0, // Counter, to drag_sample
+      drag_sample: 5, // How frequently to sample the mouse
+      shifted: false, // TODO: Depricated, detects shift button press
+      shift_begin: true,
+      x: 0,
+      y: 0,
+      orig_x: 0,
+      orig_y: 0,
+      prev_x: 0,
+      prev_y: 0,
+      button: '', // Mouse button, Left, Middle, Right
+      graph_slider_down:false,
+};
+
+$('canvas').mousedown(function(e){
+    switch(e.which){
+          case 1  : mouse.button = 'L'; break;
+          case 2  : mouse.button = 'M'; break;
+          case 3  : mouse.button = 'R'; break;
+          defualt : mouse.button = 'L'; break;
+    }
+    mouse.dragging = true;
+    menu_focused = false;
+    mouse.orig_x = e.pageX;
+    mouse.orig_y = e.pageY;
+});
+
+$('canvas').mouseup(function(e){
+    mouse.dragging = false;
+    mouse.button = 'L';
+    menu2serv(false);
+});
+
+$('canvas').mousemove(function(e){
+    if (received_message) {
+          var rect = render_ctx.getBoundingClientRect();
+          if(mouse.drag_counter++ === mouse.drag_sample){
+                mouse.drag_counter = 0;
+                mouse.prev_x = mouse.x;
+                mouse.prev_y = mouse.y;
+                mouse.x = Math.floor(e.clientX - rect.left);
+                mouse.y = height - Math.floor(e.clientY - rect.top);
+                if(mouse.x > canvas.width) mouse.x = width;
+                if(mouse.y > canvas.height) mouse.y = height;
+                if(mouse.dragging && !mouse.shifted) menu2serv(false);
+                if(mouse.shifted) {
+                      if(mouse.shift_begin){
+                            prev_image_data = context.getImageData(0,0,width,height);
+                            mouse.shift_begin = false;
+                      }
+                } else mouse.shift_begin = true;
+          }
+    }
+});
+
+$('#menu_container').mouseleave(function(e){
+      menu2options();
+      menu2serv(true);
+});
+
+$('#menu_container').click(function(e){
+      menu2options();
+      menu2serv(true);
+});
+
+$('#brightness_slider').slider({
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      values: [options.brightness],
+      slide: function(event, ui){
+            options.brightness = parseFloat(ui.values[0]);
+            options2menu();
+            menu2serv(true);
+      }
+});
+
+$('#density_slider').slider({
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      values: [options.density],
+      slide: function(event, ui){
+            options.density = parseFloat(ui.values[0]);
+            options2menu();
+            menu2serv(true);
+      }
+});
+
+$( "#slider-range" ).slider({
+      range: true,
+      min: options.tfmin,
+      max: options.tfmax,
+      step: 0.01,
+      values: [ options.tfl, options.tfu ],
+
+      slide: function( event, ui ) {
+            options.tfl = parseFloat(ui.values[0]);
+            options.tfu = parseFloat(ui.values[1]);
+            options2menu();
+            menu2serv(true);
+      }
+});
+
+$("#window_container").draggable({ 
+      start: function() {
+            $("#window_container").css("opacity", 0.5);
+      },
+      stop: function() {
+            $("#window_container").css("opacity", 1.0);
+      },
+      snap: 'body',
+});
+
+$("#box").mouseover(function(e){
+      $("#window_container").draggable({disabled:true});
+});
+
+$("#box").mouseleave(function(e){
+      $("#window_container").draggable({disabled:false});
+});
+
+$("#box").mousedown(function(e){
+      mouse.graph_slider_down = true;
+});
+
+$("#box").mousemove(function(e){
+      if (mouse.graph_slider_down) {
+            menu2options();
+            menu2serv(true);
+      }
+});
+
+$("#box").mouseup(function(e){
+      mouse.graph_slider_down = false;
+});
+
+$('#title_bar').click(function(e){
+      $('#menu_container').toggle();
+});
+
+$('#axis_x_button').click(function(e){
+      options.x_axis = true;
+      menu2serv(true);
+      menu2serv(true);
+      menu2serv(true);
+      menu2serv(true);
+      options.x_axis = false;
+});
+
+$('#axis_y_button').click(function(e){
+      options.y_axis = true;
+      menu2serv(true);
+      menu2serv(true);
+      menu2serv(true);
+      menu2serv(true);
+      options.y_axis = false;
+});
+
+$('#axis_z_button').click(function(e){
+      options.z_axis = true;
+      menu2serv(true);
+      menu2serv(true);
+      menu2serv(true);
+      menu2serv(true);
+      options.z_axis = false;
+});
+
+$('#img_save_button').click(function(e) {
+      // TODO: Explore other image formats
+      options.img_path = prompt("Please enter a full path including the image name and format.\ne.g. /home/me/my_image.jpg\nSupported image formats: .jpg", options.img_path);
+      options.img_save = true;
+      menu2serv(true);
+      options.img_save = false;
+});
+
+$('#xml_save_button').click(function(e) {
+      options.xml_path = prompt("Please enter a full path including the file name and extension.\ne.g. /home/me/my_save.xml", options.xml_path);
+      options.xml_save = true;
+      menu2serv(true);
+      options.xml_save = false;
+});
+
+$('#xml_load_button').click(function(e) {
+      options.xml_path = prompt("Please enter a full path including the file name and extension.\ne.g. /home/me/my_save.xml", options.xml_path);
+      options.xml_load = true;
+      menu2serv(true);
+      //options.xml_load = false;
+});
+
+$('#video_rec_checkbox').click(function(e) {
+      options.video_rec = this.checked;
+      menu2serv(true);
+});
+
+$('#video_arm_checkbox').click(function(e) {
+      options.video_arm = this.checked;
+      if (this.checked) {
+            $("video_rec_checkbox").removeAttr("disabled");
+            options.video_path = prompt("Please enter a full path including the file name and extension.\ne.g. /home/me/my_video.mp4", options.video_path);
+      }
+      $("#video_rec_checkbox").prop("disabled", !this.checked);
+      menu2serv(true);
+});
+
+$('input[name=func]').click(function(e) {
+      jsxgraph.set($('input[name=func]:checked').val());
+});
+
+$('#rev_tfbounds_checkbox').click(function(e) {
+      options.rev_tfbounds = this.checked;
+});
+
+//-------------------------------------
+// Sync menu / options / server
+/** Send Mouse Data up to the server
+  * q: a boolean that specifies if transfer function stuff should be updated
+*/
+function menu2serv(q){
+      options.menu_updated = (q || options.alert_screen);
+      options.mouseDX = mouse.prev_x - mouse.x;
+      options.mouseDY = mouse.prev_y - mouse.y;
+      options.mouse_button = mouse.button;
+      if(connected) 
+            ws.send(JSON.stringify(options));
+}
+
+/** Update newly acquired server values and update the options data structure
+*/
+function serv2options(updated_options) {
+      options = JSON.parse(updated_options[3]);
+
+      if (options.is_serv_error === true) {
+            options.is_serv_error = false;
+            alert(options.serv_error);
+      }
+
+      if (options.grid_change) {
+            alert_screen("Grid changing...");
+      }
+      options.grid_dir   = updated_options[2];
+
+      var menu_container = document.getElementById('menu_container');
+      var tf_image_slider = document.getElementById('slider-range');
+      if (options.colormap != options.prev_colormap) {
+            options.prev_colormap = options.colormap;
+            jsxgraph.set_bg(updated_options[0]);
+      }
+
+      options.grids = updated_options[1].split(" ");
+      if (options.prev_grid_dir != options.grid_dir) {
+            options.grid_set = false;
+      }
+
+      options2menu();
+      if(frame_count++ < 3){
+            menu2serv(true);
+      }
+}
+
+/** Update the UI menu with the updated options data sctructure
+*/
+function options2menu(){
+      $("#density_input").val(options.density);
+      $("#brightness_input").val(options.brightness);
+      $("#colormap_input").val(options.colormap);
+      $("#tfl_input").val(options.tfl);
+      $("#tfu_input").val(options.tfu);
+      $("#tfmin_label").val(options.tfmin);
+      $("#tfmax_label").val(options.tfmax);
+      $("#near_clip_input").val(options.nclip);
+      $("#far_clip_input").val(options.fclip);
+      $("#sample_size_input").val(options.samplesize);
+      $("#max_samples_input").val(options.maxsamples);
+      $("#perspective_x_input").val(options.x_persp);
+      $("#perspective_y_input").val(options.y_persp);
+      $("#perspective_z_input").val(options.z_persp);
+      $("#grid_path_input").val(options.grid_dir);
+      $( "#slider-range" ).slider("option", "min", parseFloat(options.tfmin));
+      $( "#slider-range" ).slider("option", "max", parseFloat(options.tfmax));
+      $('#grid_input').val(options.grid);
+      options.prev_density = options.density;
+      options.prev_brightness = options.brightness;
+      options.prev_colormap = options.colormap;
+      options.prev_tfl = options.tfl;
+      options.prev_tfu = options.tfu;
+      options.prev_nclip = options.nclip;
+      options.prev_fclip = options.fclip;
+      options.prev_samplesize = options.samplesize;
+      options.prev_maxsamples = options.maxsamples;
+      options.prev_x_persp = options.x_persp;
+      options.prev_y_persp = options.y_persp; 
+      options.prev_z_persp = options.z_persp;
+      options.prev_grid_dir = options.grid_dir;
+      
+      if(!options.grid_set && options.grids.length > 1){
+            var gi = document.getElementById('grid_input');
+            while(gi.length > 0) {
+                  gi.remove(0);
+            }
+            for(var i = 0; i < options.grids.length; ++i){
+                  $('#grid_input').append("<option value=\"" + options.grids[i] + "\">" + options.grids[i] + "</option>");
+            }
+            options.grid_set = true;
+      }
+}
+
+/** Update the options data structure with the UI
+*/
+function menu2options() {
+      options.density       = (isNaN(parseFloat($("#density_input").val()))) ? options.prev_density : parseFloat($("#density_input").val());
+      options.brightness    = (isNaN(parseFloat($("#brightness_input").val()))) ? options.prev_brightness : parseFloat($("#brightness_input").val());
+      options.tfl           = (isNaN(parseFloat($("#tfl_input").val()))) ? options.prev_tfl : parseFloat($("#tfl_input").val());
+      options.tfl           = (isNaN(parseFloat($("#tfl_input").val()))) ? options.prev_tfl : parseFloat($("#tfl_input").val());
+      options.tfu           = (isNaN(parseFloat($("#tfu_input").val()))) ? options.prev_tfu : parseFloat($("#tfu_input").val());
+      options.nclip         = (isNaN(parseFloat($("#near_clip_input").val()))) ? options.prev_nclip : parseFloat($("#near_clip_input").val());
+      options.fclip         = (isNaN(parseFloat($("#far_clip_input").val()))) ? options.prev_fclip : parseFloat($("#far_clip_input").val());
+      options.samplesize    = (isNaN(parseFloat($("#sample_size_input").val()))) ? options.prev_samplesize : parseFloat($("#sample_size_input").val());
+      options.maxsamples    = (isNaN(parseFloat($("#max_samples_input").val()))) ? options.prev_maxsamples : parseFloat($("#max_samples_input").val());
+      options.x_persp       = (isNaN(parseFloat($("#perspective_x_input").val()))) ? options.prev_x_persp : parseFloat($("#perspective_x_input").val());
+      options.y_persp       = (isNaN(parseFloat($("#perspective_y_input").val()))) ? options.prev_y_persp : parseFloat($("#perspective_y_input").val());
+      options.z_persp       = (isNaN(parseFloat($("#perspective_z_input").val()))) ? options.prev_z_persp : parseFloat($("#perspective_z_input").val());
+      options.colormap      = $("#colormap_input").val();
+      options.grid          = $("#grid_input").val();
+      options.grid_dir     = $('#grid_path_input').val();
+      options.tfmean = jsxgraph.get_u();
+      options.tfstddev = jsxgraph.get_sd();
+      options.grid_path = options.grid_dir + options.grid;
+      if (options.img_path === '') {
+            options.img_path = options.grid_path;
+      }
+}
+
+//-------------------------------------
+// Screens
+var update_interval;
+
+function update() {
+      menu2options();
+      menu2serv(true);
+}
+
+function alert_screen(screen_text){
+      options.alert_screen = true;
+      clear_canvas();
+      update_interval = setInterval(function() { update() }, 1000);
+      canvas.style.opacity = 0.8;
+      context.fillStyle = "rgba(0,0,0, 0.5)";
+      context.rect(0,0,canvas.width,canvas.height);
+      context.fill();
+      context.fillStyle = 'white';
+      context.textAlign = 'center';
+      context.font = '20pt Arial';
+      context.fillText(screen_text, canvas.width / 2, canvas.height / 2);
+}
+
+function clear_canvas() {
+      clearInterval(update_interval);
+      options.alert_screen = false;
+      canvas.style.opacity = 0.0;
+      context.clearRect(0, 0, canvas.width, canvas.height);
+}
+</script>
+
+</body>
+</html>
