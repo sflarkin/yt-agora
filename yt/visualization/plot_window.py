@@ -4,6 +4,7 @@ A plotting mechanism based on the idea of a "window" into the data.
 
 
 """
+from __future__ import print_function
 
 #-----------------------------------------------------------------------------
 # Copyright (c) 2013, yt Development Team.
@@ -85,9 +86,19 @@ def get_window_parameters(axis, center, width, ds):
         center, display_center = ds.coordinates.sanitize_center(center, axis)
     elif ds.geometry in ("polar", "cylindrical"):
         # Set our default width to be the full domain
-        width = [ds.domain_right_edge[0]*2.0, ds.domain_right_edge[0]*2.0]
-        center = ds.arr([0.0, 0.0, 0.0], "code_length")
-        display_center = center.copy()
+        axis_name = ds.coordinates.axis_name[axis]
+        center, display_center = ds.coordinates.sanitize_center(center, axis)
+        # Note: regardless of axes, these are set up to give consistent plots
+        # when plotted, which is not strictly a "right hand rule" for axes.
+        r_ax, theta_ax, z_ax = (ds.coordinates.axis_id[ax]
+                                for ax in ('r', 'theta', 'z'))
+        if axis_name == "r": # soup can label
+            width = [2.0*np.pi * ds.domain_width.uq, ds.domain_width[z_ax]]
+        elif axis_name == "theta":
+            width = [ds.domain_right_edge[r_ax], ds.domain_width[z_ax]]
+        elif axis_name == "z":
+            width = [2.0*ds.domain_right_edge[r_ax],
+                     2.0*ds.domain_right_edge[r_ax]]
     elif ds.geometry == "spherical":
         center, display_center = ds.coordinates.sanitize_center(center, axis)
         if axis == 0:
@@ -98,7 +109,7 @@ def get_window_parameters(axis, center, width, ds):
             center[2] = 0.0
     elif ds.geometry == "geographic":
         c_r = ((ds.domain_right_edge + ds.domain_left_edge)/2.0)[2]
-        center = ds.arr([0.0, 0.0, c_r], "code_length")
+        center = display_center = ds.arr([0.0, 0.0, c_r], "code_length")
         if axis == 2:
             # latitude slice
             width = ds.arr([360, 180], "code_length")
@@ -825,7 +836,7 @@ class PWViewerMPL(PlotWindow):
                 xax = coordinates.x_axis[axis_index]
                 yax = coordinates.y_axis[axis_index]
 
-                if hasattr(coordinates, "axis_default_unit_label"):
+                if hasattr(coordinates, "axis_default_unit_name"):
                     axes_unit_labels = \
                     [coordinates.axis_default_unit_name[xax],
                      coordinates.axis_default_unit_name[yax]]
@@ -872,7 +883,7 @@ class PWViewerMPL(PlotWindow):
             parser = MathTextParser('Agg')
             try:
                 parser.parse(colorbar_label)
-            except ParseFatalException, err:
+            except ParseFatalException as err:
                 raise YTCannotParseUnitDisplayName(f, colorbar_label, str(err))
 
             self.plots[f].cb.set_label(colorbar_label)
@@ -1584,7 +1595,7 @@ class PWViewerExtJS(PlotWindow):
         nn = ((px**2.0 + py**2.0)**0.5).max()
         px /= nn
         py /= nn
-        print scale, px.min(), px.max(), py.min(), py.max()
+        print(scale, px.min(), px.max(), py.min(), py.max())
         ax.quiver(x, y, px, py, scale=float(vi)/skip)
 
     def get_ticks(self, field, height = 400):
@@ -1625,7 +1636,7 @@ class PWViewerExtJS(PlotWindow):
         dy = (self.ylim[1] - self.ylim[0]) / img_size_y
         new_x = img_x * dx + self.xlim[0]
         new_y = img_y * dy + self.ylim[0]
-        print img_x, img_y, dx, dy, new_x, new_y
+        print(img_x, img_y, dx, dy, new_x, new_y)
         self.set_center((new_x, new_y))
 
     def get_field_units(self, field, strip_mathml = True):
