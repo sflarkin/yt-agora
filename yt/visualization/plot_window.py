@@ -104,12 +104,13 @@ def get_window_parameters(axis, center, width, ds):
         if axis == 0:
             # latitude slice
             width = ds.arr([2*np.pi, np.pi], "code_length")
-        else:
-            width = [2.0*ds.domain_right_edge[2], 2.0*ds.domain_right_edge[2]]
-            center[2] = 0.0
+        elif axis == 1:
+            width = [2.0*ds.domain_right_edge[0], 2.0*ds.domain_right_edge[0]]
+        elif axis == 2:
+            width = [ds.domain_right_edge[0], 2.0*ds.domain_right_edge[0]]
     elif ds.geometry == "geographic":
         c_r = ((ds.domain_right_edge + ds.domain_left_edge)/2.0)[2]
-        center = ds.arr([0.0, 0.0, c_r], "code_length")
+        center = display_center = ds.arr([0.0, 0.0, c_r], "code_length")
         if axis == 2:
             # latitude slice
             width = ds.arr([360, 180], "code_length")
@@ -793,7 +794,7 @@ class PWViewerMPL(PlotWindow):
                                    "%s_axis" % ("xy"[i]))[axis_index]
                     unn = self.ds.coordinates.default_unit_label.get(axax, "")
                     if unn != "":
-                        axes_unit_labels[i] = r'\/\/\left('+unn+r'\right)'
+                        axes_unit_labels[i] = r'\ \ \left('+unn+r'\right)'
                         continue
                 # Use sympy to factor h out of the unit.  In this context 'un'
                 # is a string, so we call the Unit constructor.
@@ -825,11 +826,11 @@ class PWViewerMPL(PlotWindow):
                         un = un + '\,h^{-1}'
                     if comoving:
                         un = un + '\,(1+z)^{-1}'
-                    axes_unit_labels[i] = '\/\/('+un+')'
+                    axes_unit_labels[i] = '\ \ ('+un+')'
 
             if self.oblique:
-                labels = [r'$\rm{Image\/x'+axes_unit_labels[0]+'}$',
-                          r'$\rm{Image\/y'+axes_unit_labels[1]+'}$']
+                labels = [r'$\rm{Image\ x'+axes_unit_labels[0]+'}$',
+                          r'$\rm{Image\ y'+axes_unit_labels[1]+'}$']
             else:
                 coordinates = self.ds.coordinates
                 axis_names = coordinates.image_axis_name[axis_index]
@@ -878,7 +879,7 @@ class PWViewerMPL(PlotWindow):
                 if units is None or units == '':
                     pass
                 else:
-                    colorbar_label += r'$\/\/\left('+units+r'\right)$'
+                    colorbar_label += r'$\ \ \left('+units+r'\right)$'
 
             parser = MathTextParser('Agg')
             try:
