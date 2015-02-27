@@ -429,7 +429,8 @@ class ImagePlotContainer(object):
         for f in self.fields:
             keys = self.frb.keys()
             for name, (args, kwargs) in self._callbacks:
-                cbw = CallbackWrapper(self, self.plots[f], self.frb, f)
+                cbw = CallbackWrapper(self, self.plots[f], self.frb, f, 
+                                      self._font_properties, self._font_color)
                 CallbackMaker = callback_registry[name]
                 callback = CallbackMaker(*args[1:], **kwargs)
                 callback(cbw)
@@ -654,7 +655,8 @@ class ImagePlotContainer(object):
         ret = ''
         for field in self.plots:
             img = base64.b64encode(self.plots[field]._repr_png_())
-            ret += '<img src="data:image/png;base64,%s"><br>' % img
+            ret += r'<img style="max-width:100%%;max-height:100%%;" ' \
+                   r'src="data:image/png;base64,%s"><br>' % img
         return ret
 
     @invalidate_plot
