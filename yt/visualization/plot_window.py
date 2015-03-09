@@ -18,7 +18,6 @@ import numpy as np
 import matplotlib
 import types
 import sys
-import warnings
 
 from distutils.version import LooseVersion
 from matplotlib.mathtext import MathTextParser
@@ -37,6 +36,7 @@ from .plot_container import \
     log_transform, linear_transform, symlog_transform, \
     get_log_minorticks, get_symlog_minorticks, \
     invalidate_data, invalidate_plot, apply_callback
+from .base_plot_types import CallbackWrapper
 
 from yt.data_objects.time_series import \
     DatasetSeries
@@ -104,19 +104,21 @@ def get_window_parameters(axis, center, width, ds):
         if axis == 0:
             # latitude slice
             width = ds.arr([2*np.pi, np.pi], "code_length")
-        else:
-            width = [2.0*ds.domain_right_edge[2], 2.0*ds.domain_right_edge[2]]
-            center[2] = 0.0
+        elif axis == 1:
+            width = [2.0*ds.domain_right_edge[0], 2.0*ds.domain_right_edge[0]]
+        elif axis == 2:
+            width = [ds.domain_right_edge[0], 2.0*ds.domain_right_edge[0]]
     elif ds.geometry == "geographic":
-        c_r = ((ds.domain_right_edge + ds.domain_left_edge)/2.0)[2]
-        center = display_center = ds.arr([0.0, 0.0, c_r], "code_length")
-        if axis == 2:
-            # latitude slice
-            width = ds.arr([360, 180], "code_length")
-        else:
+        center, display_center = ds.coordinates.sanitize_center(center, axis)
+        if axis == 0:
             width = [2.0*(ds.domain_right_edge[2] + ds.surface_height),
                      2.0*(ds.domain_right_edge[2] + ds.surface_height)]
-            center[2] = 0.0
+        elif axis == 1:
+            width = [(ds.domain_left_edge[2] + ds.domain_width[2] + ds.surface_height),
+                     2.0*(ds.domain_right_edge[2] + ds.surface_height)]
+        elif axis == 2:
+            # latitude slice
+            width = ds.arr([360, 180], "code_length")
     else:
         raise NotImplementedError
     xax = ds.coordinates.x_axis[axis]
@@ -197,7 +199,6 @@ class PlotWindow(ImagePlotContainer):
         including the margins but not the colorbar.
 
     """
-    frb = None
     def __init__(self, data_source, bounds, buff_size=(800,800), antialias=True,
                  periodic=True, origin='center-window', oblique=False, 
                  window_size=8.0, fields=None, fontsize=18, aspect=None, 
@@ -206,7 +207,6 @@ class PlotWindow(ImagePlotContainer):
             self.ds = data_source.ds
             ts = self._initialize_dataset(self.ds)
             self.ts = ts
-        self._initfinished = False
         self._axes_unit_names = None
         self.center = None
         self._periodic = periodic
@@ -232,14 +232,14 @@ class PlotWindow(ImagePlotContainer):
                 self.data_source.center, ax)
             center = [display_center[xax], display_center[yax]]
             self.set_center(center)
-        for field in self.data_source._determine_fields(self.frb.data.keys()):
+        for field in self.data_source._determine_fields(self.fields):
             finfo = self.data_source.ds._get_field_info(*field)
             if finfo.take_log:
                 self._field_transform[field] = log_transform
             else:
                 self._field_transform[field] = linear_transform
         self.setup_callbacks()
-        self._initfinished = True
+        self._setup_plots()
 
     def _initialize_dataset(self, ts):
         if not isinstance(ts, DatasetSeries):
@@ -258,11 +258,32 @@ class PlotWindow(ImagePlotContainer):
             self._switch_ds(ds)
             yield self
 
+    _frb = None
+    def frb():
+        doc = "The frb property."
+        def fget(self):
+            if self._frb is None:
+                self._recreate_frb()
+            return self._frb
+
+        def fset(self, value):
+            self._frb = value
+
+        def fdel(self):
+            del self._frb
+            self._frb = None
+
+        return locals()
+    frb = property(**frb())
+
     def _recreate_frb(self):
         old_fields = None
-        if self.frb is not None:
+        # If we are regenerating an frb, we want to know what fields we had before
+        if self._frb is not None:
             old_fields = self.frb.keys()
             old_units = [str(self.frb[of].units) for of in old_fields]
+
+        # Set the bounds
         if hasattr(self,'zlim'):
             bounds = self.xlim+self.ylim+self.zlim
         else:
@@ -270,17 +291,24 @@ class PlotWindow(ImagePlotContainer):
         if self._frb_generator is ObliqueFixedResolutionBuffer:
             bounds = np.array([b.in_units('code_length') for b in bounds])
 
-        self.frb = self._frb_generator(self.data_source, bounds, self.buff_size,
-                                       self.antialias, periodic=self._periodic)
-        if old_fields is None:
-            self.frb._get_data_source_fields()
-        else:
-            for key, unit in zip(old_fields, old_units):
-                self.frb[key]
-                self.frb[key].convert_to_units(unit)
-        for key in self.override_fields:
-            self.frb[key]
+        # Generate the FRB
+        self._frb = self._frb_generator(self.data_source, bounds,
+                                        self.buff_size, self.antialias,
+                                        periodic=self._periodic)
+
+        # At this point the frb has the valid bounds, size, aliasing, etc.
         self._data_valid = True
+        if old_fields is None:
+            self._frb._get_data_source_fields()
+        else:
+            # Restore the old fields
+            for key, unit in zip(old_fields, old_units):
+                self._frb[key]
+                self._frb[key].convert_to_units(unit)
+
+        # Restore the override fields
+        for key in self.override_fields:
+            self._frb[key]
 
     @property
     def width(self):
@@ -616,14 +644,6 @@ class PlotWindow(ImagePlotContainer):
         self._axes_unit_names = unit_name
         return self
 
-    @property
-    def _frb(self):
-        # Note we use SyntaxWarning because DeprecationWarning is not shown
-        # by default
-        warnings.warn("_frb is deprecated, use frb instead.",
-                      SyntaxWarning)
-        return self.frb
-
 class PWViewerMPL(PlotWindow):
     """Viewer using matplotlib as a backend via the WindowPlotMPL.
 
@@ -631,6 +651,7 @@ class PWViewerMPL(PlotWindow):
     _current_field = None
     _frb_generator = None
     _plot_type = None
+    _data_valid = False
 
     def __init__(self, *args, **kwargs):
         if self._frb_generator is None:
@@ -702,6 +723,7 @@ class PWViewerMPL(PlotWindow):
         return xc, yc
 
     def _setup_plots(self):
+        if self._plot_valid: return
         self._colorbar_valid = True
         for f in list(set(self.data_source._determine_fields(self.fields))):
             axis_index = self.data_source.axis
@@ -943,6 +965,133 @@ class PWViewerMPL(PlotWindow):
             callback = invalidate_plot(apply_callback(CallbackMaker))
             callback.__doc__ = CallbackMaker.__doc__
             self.__dict__['annotate_'+cbname] = types.MethodType(callback,self)
+
+    def run_callbacks(self):
+        for f in self.fields:
+            keys = self.frb.keys()
+            for name, (args, kwargs) in self._callbacks:
+                cbw = CallbackWrapper(self, self.plots[f], self.frb, f, 
+                                      self._font_properties, self._font_color)
+                CallbackMaker = callback_registry[name]
+                callback = CallbackMaker(*args[1:], **kwargs)
+                callback(cbw)
+            for key in self.frb.keys():
+                if key not in keys:
+                    del self.frb[key]
+
+    def hide_colorbar(self, field=None):
+        """
+        Hides the colorbar for a plot and updates the size of the 
+        plot accordingly.  Defaults to operating on all fields for a 
+        PlotWindow object.
+
+        Parameters
+        ----------
+
+        field : string, field tuple, or list of strings or field tuples (optional)
+            The name of the field(s) that we want to hide the colorbar. If None
+            is provided, will default to using all fields available for this
+            object.
+
+        Examples
+        --------
+
+        This will save an image with no colorbar.
+
+        >>> import yt
+        >>> ds = yt.load('IsolatedGalaxy/galaxy0030/galaxy0030')
+        >>> s = SlicePlot(ds, 2, 'density', 'c', (20, 'kpc'))
+        >>> s.hide_colorbar()
+        >>> s.save()
+
+        This will save an image with no axis or colorbar.
+
+        >>> import yt
+        >>> ds = yt.load('IsolatedGalaxy/galaxy0030/galaxy0030')
+        >>> s = SlicePlot(ds, 2, 'density', 'c', (20, 'kpc'))
+        >>> s.hide_axes()
+        >>> s.hide_colorbar()
+        >>> s.save()
+        """
+        if field is None:
+            field = self.fields
+        field = ensure_list(field)
+        for f in field:
+            self.plots[f].hide_colorbar()
+
+    def show_colorbar(self, field=None):
+        """
+        Shows the colorbar for a plot and updates the size of the 
+        plot accordingly.  Defaults to operating on all fields for a 
+        PlotWindow object.  See hide_colorbar().
+
+        Parameters
+        ----------
+
+        field : string, field tuple, or list of strings or field tuples (optional)
+            The name of the field(s) that we want to show the colorbar.
+        """
+        if field is None:
+            field = self.fields
+        field = ensure_list(field)
+        for f in field:
+            self.plots[f].show_colorbar()
+
+    def hide_axes(self, field=None):
+        """
+        Hides the axes for a plot and updates the size of the 
+        plot accordingly.  Defaults to operating on all fields for a 
+        PlotWindow object.
+
+        Parameters
+        ----------
+
+        field : string, field tuple, or list of strings or field tuples (optional)
+            The name of the field(s) that we want to hide the axes.
+
+        Examples
+        --------
+
+        This will save an image with no axes.
+
+        >>> import yt
+        >>> ds = yt.load('IsolatedGalaxy/galaxy0030/galaxy0030')
+        >>> s = SlicePlot(ds, 2, 'density', 'c', (20, 'kpc'))
+        >>> s.hide_axes()
+        >>> s.save()
+
+        This will save an image with no axis or colorbar.
+
+        >>> import yt
+        >>> ds = yt.load('IsolatedGalaxy/galaxy0030/galaxy0030')
+        >>> s = SlicePlot(ds, 2, 'density', 'c', (20, 'kpc'))
+        >>> s.hide_axes()
+        >>> s.hide_colorbar()
+        >>> s.save()
+        """
+        if field is None:
+            field = self.fields
+        field = ensure_list(field)
+        for f in field:
+            self.plots[f].hide_axes()
+
+    def show_axes(self, field=None):
+        """
+        Shows the axes for a plot and updates the size of the 
+        plot accordingly.  Defaults to operating on all fields for a 
+        PlotWindow object.  See hide_axes().
+
+        Parameters
+        ----------
+
+        field : string, field tuple, or list of strings or field tuples (optional)
+            The name of the field(s) that we want to show the axes.
+        """
+        if field is None:
+            field = self.fields
+        field = ensure_list(field)
+        for f in field:
+            self.plots[f].show_axes()
 
 class AxisAlignedSlicePlot(PWViewerMPL):
     r"""Creates a slice plot from a dataset
@@ -1720,8 +1869,8 @@ class PWViewerExtJS(PlotWindow):
 
 class WindowPlotMPL(ImagePlotMPL):
     """A container for a single PlotWindow matplotlib figure and axes"""
-    def __init__(self, data, cbname, cblinthresh, cmap, extent, zlim, figure_size, fontsize,
-                 unit_aspect, figure, axes, cax):
+    def __init__(self, data, cbname, cblinthresh, cmap, extent, zlim, figure_size,
+                 fontsize, aspect, figure, axes, cax):
         self._draw_colorbar = True
         self._draw_axes = True
         self._fontsize = fontsize
@@ -1740,13 +1889,14 @@ class WindowPlotMPL(ImagePlotMPL):
         self._ax_text_size = [1.2*fontscale, 0.9*fontscale]
         self._top_buff_size = 0.30*fontscale
         self._aspect = ((extent[1] - extent[0])/(extent[3] - extent[2])).in_cgs()
+        self._unit_aspect = aspect
 
         size, axrect, caxrect = self._get_best_layout()
 
         super(WindowPlotMPL, self).__init__(
             size, axrect, caxrect, zlim, figure, axes, cax)
 
-        self._init_image(data, cbname, cblinthresh, cmap, extent, unit_aspect)
+        self._init_image(data, cbname, cblinthresh, cmap, extent, aspect)
 
         self.image.axes.ticklabel_format(scilimits=(-2, 3))
         if cbname == 'linear':
