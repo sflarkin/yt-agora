@@ -184,6 +184,17 @@ class YTUnitConversionError(YTException):
           % (self.unit1, self.dimension1, self.unit2, self.dimension2)
         return err
 
+class YTUnitsNotReducible(YTException):
+    def __init__(self, units, units_base):
+        self.unit = unit
+        self.units_base = units_base
+        YTException.__init__(self)
+        
+    def __str__(self):
+        err = "The unit %s cannot be reduced to a single expression within " \
+          "the %s base system of units." % (self.unit, self.units_base)
+        return err
+    
 class YTUfuncUnitError(YTException):
     def __init__(self, ufunc, unit1, unit2):
         self.ufunc = ufunc
@@ -441,7 +452,7 @@ class YTInvalidUnitEquivalence(Exception):
         self.unit2 = unit2
 
     def __str__(self):
-        return "The unit equivalence '%s' does not exist for the units '%s' and '%s.'" % (self.equiv,
+        return "The unit equivalence '%s' does not exist for the units '%s' and '%s'." % (self.equiv,
                                                                                           self.unit1,
                                                                                           self.unit2)
 

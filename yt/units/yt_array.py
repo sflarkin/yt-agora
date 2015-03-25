@@ -30,11 +30,11 @@ from numpy import \
 
 from yt.units.unit_object import Unit, UnitParseError
 from yt.units.unit_registry import UnitRegistry
-from yt.units.dimensions import dimensionless
+from yt.units.dimensions import dimensionless, current_mks
 from yt.utilities.exceptions import \
     YTUnitOperationError, YTUnitConversionError, \
     YTUfuncUnitError, YTIterableUnitCoercionError, \
-    YTInvalidUnitEquivalence
+    YTInvalidUnitEquivalence, YTUnitsNotReducible
 from numbers import Number as numeric_type
 from yt.utilities.on_demand_imports import _astropy
 from sympy import Rational
@@ -402,6 +402,8 @@ class YTArray(np.ndarray):
         Convert the array and units to the equivalent cgs units.
 
         """
+        if current_mks in self.units.dimensions.free_symbols:
+            raise YTUnitsNotReducible(self.units, "cgs")
         return self.convert_to_units(self.units.get_cgs_equivalent())
 
     def convert_to_mks(self):
@@ -447,6 +449,8 @@ class YTArray(np.ndarray):
         Quantity object with data converted to cgs units.
 
         """
+        if current_mks in self.units.dimensions.free_symbols:
+            raise YTUnitsNotReducible(self.units, "cgs")
         return self.in_units(self.units.get_cgs_equivalent())
 
     def in_mks(self):
@@ -481,9 +485,16 @@ class YTArray(np.ndarray):
         >>> a.to_equivalent("keV", "thermal")
         """
         unit_quan = YTQuantity(1.0, unit, registry=self.units.registry)
-        if self.has_equivalent(equiv) and unit_quan.has_equivalent(equiv):
-            this_equiv = equivalence_registry[equiv]()
-            return this_equiv.convert(self, unit_quan.units.dimensions, **kwargs).in_units(unit)
+        this_equiv = equivalence_registry[equiv]()
+        if self.has_equivalent(equiv) and (unit_quan.has_equivalent(equiv) or this_equiv._one_way):
+            new_arr = this_equiv.convert(self, unit_quan.units.dimensions, **kwargs)
+            if isinstance(new_arr, tuple):
+                try:
+                    return YTArray(new_arr[0], new_arr[1]).in_units(unit)
+                except YTUnitConversionError:
+                    raise YTInvalidUnitEquivalence(equiv, self.units, unit)
+            else:
+                return new_arr.in_units(unit)
         else:
             raise YTInvalidUnitEquivalence(equiv, self.units, unit)
 
@@ -494,7 +505,7 @@ class YTArray(np.ndarray):
         """
         for k,v in equivalence_registry.items():
             if self.has_equivalent(k):
-                print(v())
+                print(k,v())
 
     def has_equivalent(self, equiv):
         """
