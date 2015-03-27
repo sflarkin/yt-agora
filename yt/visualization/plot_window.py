@@ -61,6 +61,8 @@ from yt.utilities.definitions import \
     formatted_length_unit_names
 from yt.utilities.math_utils import \
     ortho_find
+from yt.utilities.orientation import \
+    Orientation
 from yt.utilities.exceptions import \
     YTUnitNotRecognized, \
     YTInvalidWidthError, \
@@ -424,8 +426,8 @@ class PlotWindow(ImagePlotContainer):
             'center'.  Finally, the whether the origin is applied in 'domain'
             space, plot 'window' space or 'native' simulation coordinate system
             is given. For example, both 'upper-right-domain' and ['upper',
-            'right', 'domain'] both place the origin in the upper right hand
-            corner of domain space. If x or y are not given, a value is inffered.
+            'right', 'domain'] place the origin in the upper right hand
+            corner of domain space. If x or y are not given, a value is inferred.
             For instance, 'left-domain' corresponds to the lower-left hand corner
             of the simulation domain, 'center-domain' corresponds to the center
             of the simulation domain, or 'center-window' for the center of the
@@ -949,11 +951,9 @@ class PWViewerMPL(PlotWindow):
 
     def setup_callbacks(self):
         for key in callback_registry:
-            ignored = ['PlotCallback','CoordAxesCallback','LabelCallback',
-                       'UnitBoundaryCallback']
+            ignored = ['PlotCallback']
             if self._plot_type.startswith('OffAxis'):
-                ignored += ['HopCirclesCallback','HopParticleCallback',
-                            'ParticleCallback','ClumpContourCallback',
+                ignored += ['ParticleCallback','ClumpContourCallback',
                             'GridBoundaryCallback']
             if self._plot_type == 'OffAxisProjection':
                 ignored += ['VelocityCallback','MagFieldCallback',
@@ -966,6 +966,19 @@ class PWViewerMPL(PlotWindow):
             callback = invalidate_plot(apply_callback(CallbackMaker))
             callback.__doc__ = CallbackMaker.__doc__
             self.__dict__['annotate_'+cbname] = types.MethodType(callback,self)
+
+    def annotate_clear(self, index=None):
+        """
+        Clear callbacks from the plot.  If index is not set, clear all 
+        callbacks.  If index is set, clear that index (ie 0 is the first one
+        created, 1 is the 2nd one created, -1 is the last one created, etc.)
+        """
+        if index is None:
+            self._callbacks = []
+        else:
+            del self._callbacks[index]
+        self.setup_callbacks()
+        
 
     def run_callbacks(self):
         for f in self.fields:
@@ -1154,15 +1167,15 @@ class AxisAlignedSlicePlot(PWViewerMPL):
          represented by '-' separated string or a tuple of strings.  In the
          first index the y-location is given by 'lower', 'upper', or 'center'.
          The second index is the x-location, given as 'left', 'right', or
-         'center'.  Finally, the whether the origin is applied in 'domain'
+         'center'.  Finally, whether the origin is applied in 'domain'
          space, plot 'window' space or 'native' simulation coordinate system
          is given. For example, both 'upper-right-domain' and ['upper',
-         'right', 'domain'] both place the origin in the upper right hand
-         corner of domain space. If x or y are not given, a value is inffered.
-         For instance, 'left-domain' corresponds to the lower-left hand corner
-         of the simulation domain, 'center-domain' corresponds to the center
-         of the simulation domain, or 'center-window' for the center of the
-         plot window. Further examples:
+         'right', 'domain'] place the origin in the upper right hand
+         corner of domain space. If x or y are not given, a value is inferred.
+         For instance, the default location 'center-window' corresponds to
+         the center of the plot window, 'left-domain' corresponds to the
+         lower-left hand corner of the simulation domain, or 'center-domain'
+         for the center of the simulation domain. Further examples:
 
          ==================================     ============================
          format                                 example
@@ -1188,7 +1201,7 @@ class AxisAlignedSlicePlot(PWViewerMPL):
     Examples
     --------
 
-    This will save an image the the file 'sliceplot_Density
+    This will save an image in the file 'sliceplot_Density.png'
 
     >>> from yt import load
     >>> ds = load('IsolatedGalaxy/galaxy0030/galaxy0030')
@@ -1281,11 +1294,11 @@ class ProjectionPlot(PWViewerMPL):
          represented by '-' separated string or a tuple of strings.  In the
          first index the y-location is given by 'lower', 'upper', or 'center'.
          The second index is the x-location, given as 'left', 'right', or
-         'center'.  Finally, the whether the origin is applied in 'domain'
+         'center'.  Finally, whether the origin is applied in 'domain'
          space, plot 'window' space or 'native' simulation coordinate system
          is given. For example, both 'upper-right-domain' and ['upper',
-         'right', 'domain'] both place the origin in the upper right hand
-         corner of domain space. If x or y are not given, a value is inffered.
+         'right', 'domain'] place the origin in the upper right hand
+         corner of domain space. If x or y are not given, a value is inferred.
          For instance, 'left-domain' corresponds to the lower-left hand corner
          of the simulation domain, 'center-domain' corresponds to the center
          of the simulation domain, or 'center-window' for the center of the
@@ -1497,6 +1510,7 @@ class OffAxisProjectionDummyDataSource(object):
         self.re = re
         self.north_vector = north_vector
         self.method = method
+        self.orienter = Orientation(normal_vector, north_vector=north_vector)
 
     def _determine_fields(self, *args):
         return self.dd._determine_fields(*args)
@@ -1980,12 +1994,12 @@ def SlicePlot(ds, normal=None, fields=None, axis=None, *args, **kwargs):
          this parameter is discarded.  This is represented by '-' separated
          string or a tuple of strings.  In the first index the y-location is
          given by 'lower', 'upper', or 'center'.  The second index is the
-         x-location, given as 'left', 'right', or 'center'.  Finally, the
+         x-location, given as 'left', 'right', or 'center'.  Finally,
          whether the origin is applied in 'domain' space, plot 'window' space
          or 'native' simulation coordinate system is given. For example, both
-         'upper-right-domain' and ['upper', 'right', 'domain'] both place the
+         'upper-right-domain' and ['upper', 'right', 'domain'] place the
          origin in the upper right hand corner of domain space. If x or y are
-         not given, a value is inffered.  For instance, 'left-domain'
+         not given, a value is inferred.  For instance, 'left-domain'
          corresponds to the lower-left hand corner of the simulation domain,
          'center-domain' corresponds to the center of the simulation domain,
          or 'center-window' for the center of the plot window. Further
@@ -2036,7 +2050,7 @@ def SlicePlot(ds, normal=None, fields=None, axis=None, *args, **kwargs):
 
     """
     # Make sure we are passed a normal
-    # we check the axis keyword for backwards compatability
+    # we check the axis keyword for backwards compatibility
     if normal is None: normal = axis
     if normal is None:
         raise AssertionError("Must pass a normal vector to the slice!")
