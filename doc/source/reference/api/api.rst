@@ -549,8 +549,9 @@ Sunrise exporting:
 .. autosummary::
    :toctree: generated/
 
-   ~yt.analysis_modules.sunrise_export.sunrise_exporter.export_to_sunrise
-   ~yt.analysis_modules.sunrise_export.sunrise_exporter.export_to_sunrise_from_halolist
+   ~yt.analysis_modules.sunrise_export.sunrise_grid_exporter_yt2x.export_to_sunrise
+   ~yt.analysis_modules.sunrise_export.sunrise_grid_exporter_yt2x.export_to_sunrise_from_halolist
+   ~yt.analysis_modules.sunrise_export.sunrise_octree_exporter.py.export_to_sunrise
 
 RADMC-3D exporting:
 

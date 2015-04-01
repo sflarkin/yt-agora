@@ -1,8 +1,6 @@
 """
-Code to export from yt to Sunrise
-
-
-
+Code to export from yt to Sunrise.
+This is the old exporter that only works with yt2.x using grids.
 """
 
 #-----------------------------------------------------------------------------
