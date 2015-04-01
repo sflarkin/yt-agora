@@ -1,8 +1,5 @@
 """
-Code to export from yt to Sunrise
-
-
-
+Export octree data to a FITS file for Sunrise. Works with yt-3.x!
 """
 #-----------------------------------------------------------------------------
 # Copyright (c) 2013, yt Development Team.
@@ -18,7 +15,6 @@ import pyfits
 import yt
 from yt.funcs import *
 import yt.analysis_modules.sunrise_export.octree_to_depthFirstHilbert as depthFirstHilbert
-#import pdb
 
 
 def export_to_sunrise(ds, fn, star_particle_type, fc, fwidth, nocts_wide=None,
