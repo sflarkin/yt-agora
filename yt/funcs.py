@@ -100,6 +100,25 @@ def just_one(obj):
         return obj[0]
     return obj
 
+
+def compare_dicts(dict1, dict2):
+    if not set(dict1) <= set(dict2):
+        return False
+    for key in dict1.keys():
+        if dict1[key] is not None and dict2[key] is not None:
+            if isinstance(dict1[key], dict):
+                if compare_dicts(dict1[key], dict2[key]):
+                    continue
+                else:
+                    return False
+            try:
+                comparison = (dict1[key] == dict2[key]).all()
+            except AttributeError:
+                comparison = (dict1[key] == dict2[key])
+            if not comparison:
+                return False
+    return True
+
 # Taken from
 # http://www.goldb.org/goldblog/2008/02/06/PythonConvertSecsIntoHumanReadableTimeStringHHMMSS.aspx
 def humanize_time(secs):
@@ -507,7 +526,8 @@ def get_hg_version(path):
     try:
         import hglib
     except ImportError:
-        print("Updating requires python-hglib to be installed.")
+        print("Updating and precise version information requires ")
+        print("python-hglib to be installed.")
         print("Try: pip install python-hglib")
         return -1
     repo = hglib.open(path)

@@ -283,6 +283,7 @@ class ChomboDataset(Dataset):
         self.length_unit = self.quan(1.0, "cm")
         self.mass_unit = self.quan(1.0, "g")
         self.time_unit = self.quan(1.0, "s")
+        self.magnetic_unit = self.quan(1.0, "gauss")
         self.velocity_unit = self.length_unit / self.time_unit
 
     def _localize(self, f, default):
