@@ -1517,6 +1517,7 @@ class OffAxisProjectionDummyDataSource(object):
         self.fields = fields
         self.interpolated = interpolated
         self.resolution = resolution
+        self.buff_size = resolution
         self.weight_field = weight
         self.volume = volume
         self.no_ghost = no_ghost
@@ -1584,6 +1585,8 @@ class OffAxisProjectionPlot(PWViewerMPL):
          are assumed
     weight_field : string
          The name of the weighting field.  Set to None for no weight.
+    buff_size : sequence of ints
+        The size of the image to generate.
     max_level: int
          The maximum level to project to.
     axes_unit : A string
@@ -1616,9 +1619,10 @@ class OffAxisProjectionPlot(PWViewerMPL):
     _frb_generator = OffAxisProjectionFixedResolutionBuffer
 
     def __init__(self, ds, normal, fields, center='c', width=None,
-                 depth=(1, '1'), axes_unit=None, weight_field=None,
-                 max_level=None, north_vector=None, volume=None, no_ghost=False,
-                 le=None, re=None, interpolated=False, fontsize=18, method="integrate"):
+                 depth=(1, '1'), axes_unit=None, weight_field=None, 
+                 buff_size=(800,800),max_level=None, north_vector=None,
+                 volume=None, no_ghost=False, le=None, re=None,
+                 interpolated=False, fontsize=18, method="integrate"):
         (bounds, center_rot) = \
           get_oblique_window_parameters(normal,center,width,ds,depth=depth)
         fields = ensure_list(fields)[:]
@@ -1628,7 +1632,8 @@ class OffAxisProjectionPlot(PWViewerMPL):
         OffAxisProj = OffAxisProjectionDummyDataSource(
             center_rot, ds, normal, oap_width, fields, interpolated,
             weight=weight_field,  volume=volume, no_ghost=no_ghost,
-            le=le, re=re, north_vector=north_vector, method=method)
+            le=le, re=re, north_vector=north_vector, method=method,
+            resolution=buff_size)
         # If a non-weighted, integral projection, assure field-label reflects that
         if weight_field is None and OffAxisProj.method == "integrate":
             self.projected = True
@@ -1636,7 +1641,7 @@ class OffAxisProjectionPlot(PWViewerMPL):
         # aren't well-defined for off-axis data objects
         PWViewerMPL.__init__(
             self, OffAxisProj, bounds, fields=fields, origin='center-window',
-            periodic=False, oblique=True, fontsize=fontsize)
+            periodic=False, oblique=True, fontsize=fontsize, buff_size=buff_size)
         if axes_unit is None:
             axes_unit = get_axes_unit(width, ds)
         self.set_axes_unit(axes_unit)

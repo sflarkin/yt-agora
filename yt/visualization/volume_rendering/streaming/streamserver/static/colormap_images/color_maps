@@ -1,0 +1,228 @@
+16 LEVEL|colormap0.png
+Accent|colormap1.png
+B-W LINEAR|colormap2.png
+BLUE|colormap3.png
+BLUE-RED|colormap4.png
+Beach|colormap5.png
+Blue - Pastel - Red|colormap6.png
+Blue Waves|colormap7.png
+Blue-Red|colormap8.png
+Blues|colormap9.png
+BrBG|colormap10.png
+BuGn|colormap11.png
+BuPu|colormap12.png
+CMRmap|colormap13.png
+Dark2|colormap14.png
+Eos A|colormap15.png
+Eos B|colormap16.png
+GREEN|colormap17.png
+GREEN-PINK|colormap18.png
+GRN|colormap19.png
+GRN-RED-BLU-WHT|colormap20.png
+GnBu|colormap21.png
+Greens|colormap22.png
+Greys|colormap23.png
+Hardcandy|colormap24.png
+Haze|colormap25.png
+Hue Sat Lightness 1|colormap26.png
+Hue Sat Lightness 2|colormap27.png
+Hue Sat Value 1|colormap28.png
+Hue Sat Value 2|colormap29.png
+Mac Style|colormap30.png
+Nature|colormap31.png
+Ocean|colormap32.png
+OrRd|colormap33.png
+Oranges|colormap34.png
+PRGn|colormap35.png
+PRISM|colormap36.png
+Paired|colormap37.png
+Pastel1|colormap38.png
+Pastel2|colormap39.png
+Pastels|colormap40.png
+Peppermint|colormap41.png
+PiYG|colormap42.png
+Plasma|colormap43.png
+PuBu|colormap44.png
+PuBuGn|colormap45.png
+PuOr|colormap46.png
+PuRd|colormap47.png
+Purple-Red + Stripes|colormap48.png
+Purples|colormap49.png
+RAINBOW|colormap50.png
+RED TEMPERATURE|colormap51.png
+RED-PURPLE|colormap52.png
+Rainbow|colormap53.png
+Rainbow + black|colormap54.png
+Rainbow + white|colormap55.png
+Rainbow18|colormap56.png
+RdBu|colormap57.png
+RdGy|colormap58.png
+RdPu|colormap59.png
+RdYlBu|colormap60.png
+RdYlGn|colormap61.png
+Reds|colormap62.png
+STD GAMMA-II|colormap63.png
+STEPS|colormap64.png
+STERN SPECIAL|colormap65.png
+Set1|colormap66.png
+Set2|colormap67.png
+Set3|colormap68.png
+Spectral|colormap69.png
+Volcano|colormap70.png
+Waves|colormap71.png
+YlGn|colormap72.png
+YlGnBu|colormap73.png
+YlGnBr|colormap74.png
+YlOrRd|colormap75.png
+afmhot|colormap76.png
+algae|colormap77.png
+autumn|colormap78.png
+bds_highcontrast|colormap79.png
+binary|colormap80.png
+black_green|colormap81.png
+bone|colormap82.png
+brg|colormap83.png
+bwr|colormap84.png
+cool|colormap85.png
+coolwarm|colormap86.png
+copper|colormap87.png
+cubehelix|colormap88.png
+flag|colormap89.png
+gist_earth|colormap90.png
+gist_gray|colormap91.png
+gist_heat|colormap92.png
+gist_ncar|colormap93.png
+gist_rainbow|colormap94.png
+gist_stern|colormap95.png
+gist_yarg|colormap96.png
+gnuplot|colormap97.png
+gnuplot2|colormap98.png
+gray|colormap99.png
+hot|colormap100.png
+hsv|colormap101.png
+jet|colormap102.png
+kamae|colormap103.png
+ocean|colormap104.png
+pink|colormap105.png
+prism|colormap106.png
+rainbow|colormap107.png
+seismic|colormap108.png
+spectral|colormap109.png
+spring|colormap110.png
+summer|colormap111.png
+terrain|colormap112.png
+winter|colormap113.png
+16 LEVEL_r|colormap0_r.png
+Accent_r|colormap1_r.png
+B-W LINEAR_r|colormap2_r.png
+BLUE_r|colormap3_r.png
+BLUE-RED_r|colormap4_r.png
+Beach_r|colormap5_r.png
+Blue - Pastel - Red_r|colormap6_r.png
+Blue Waves_r|colormap7_r.png
+Blue-Red_r|colormap8_r.png
+Blues_r|colormap9_r.png
+BrBG_r|colormap10_r.png
+BuGn_r|colormap11_r.png
+BuPu_r|colormap12_r.png
+CMRmap_r|colormap13_r.png
+Dark2_r|colormap14_r.png
+Eos A_r|colormap15_r.png
+Eos B_r|colormap16_r.png
+GREEN_r|colormap17_r.png
+GREEN-PINK_r|colormap18_r.png
+GRN_r|colormap19_r.png
+GRN-RED-BLU-WHT_r|colormap20_r.png
+GnBu_r|colormap21_r.png
+Greens_r|colormap22_r.png
+Greys_r|colormap23_r.png
+Hardcandy_r|colormap24_r.png
+Haze_r|colormap25_r.png
+Hue Sat Lightness 1_r|colormap26_r.png
+Hue Sat Lightness 2_r|colormap27_r.png
+Hue Sat Value 1_r|colormap28_r.png
+Hue Sat Value 2_r|colormap29_r.png
+Mac Style_r|colormap30_r.png
+Nature_r|colormap31_r.png
+Ocean_r|colormap32_r.png
+OrRd_r|colormap33_r.png
+Oranges_r|colormap34_r.png
+PRGn_r|colormap35_r.png
+PRISM_r|colormap36_r.png
+Paired_r|colormap37_r.png
+Pastel1_r|colormap38_r.png
+Pastel2_r|colormap39_r.png
+Pastels_r|colormap40_r.png
+Peppermint_r|colormap41_r.png
+PiYG_r|colormap42_r.png
+Plasma_r|colormap43_r.png
+PuBu_r|colormap44_r.png
+PuBuGn_r|colormap45_r.png
+PuOr_r|colormap46_r.png
+PuRd_r|colormap47_r.png
+Purple-Red + Stripes_r|colormap48_r.png
+Purples_r|colormap49_r.png
+RAINBOW_r|colormap50_r.png
+RED TEMPERATURE_r|colormap51_r.png
+RED-PURPLE_r|colormap52_r.png
+Rainbow_r|colormap53_r.png
+Rainbow + black_r|colormap54_r.png
+Rainbow + white_r|colormap55_r.png
+Rainbow18_r|colormap56_r.png
+RdBu_r|colormap57_r.png
+RdGy_r|colormap58_r.png
+RdPu_r|colormap59_r.png
+RdYlBu_r|colormap60_r.png
+RdYlGn_r|colormap61_r.png
+Reds_r|colormap62_r.png
+STD GAMMA-II_r|colormap63_r.png
+STEPS_r|colormap64_r.png
+STERN SPECIAL_r|colormap65_r.png
+Set1_r|colormap66_r.png
+Set2_r|colormap67_r.png
+Set3_r|colormap68_r.png
+Spectral_r|colormap69_r.png
+Volcano_r|colormap70_r.png
+Waves_r|colormap71_r.png
+YlGn_r|colormap72_r.png
+YlGnBu_r|colormap73_r.png
+YlGnBr_r|colormap74_r.png
+YlOrRd_r|colormap75_r.png
+afmhot_r|colormap76_r.png
+algae_r|colormap77_r.png
+autumn_r|colormap78_r.png
+bds_highcontrast_r|colormap79_r.png
+binary_r|colormap80_r.png
+black_green_r|colormap81_r.png
+bone_r|colormap82_r.png
+brg_r|colormap83_r.png
+bwr_r|colormap84_r.png
+cool_r|colormap85_r.png
+coolwarm_r|colormap86_r.png
+copper_r|colormap87_r.png
+cubehelix_r|colormap88_r.png
+flag_r|colormap89_r.png
+gist_earth_r|colormap90_r.png
+gist_gray_r|colormap91_r.png
+gist_heat_r|colormap92_r.png
+gist_ncar_r|colormap93_r.png
+gist_rainbow_r|colormap94_r.png
+gist_stern_r|colormap95_r.png
+gist_yarg_r|colormap96_r.png
+gnuplot_r|colormap97_r.png
+gnuplot2_r|colormap98_r.png
+gray_r|colormap99_r.png
+hot_r|colormap100_r.png
+hsv_r|colormap101_r.png
+jet_r|colormap102_r.png
+kamae_r|colormap103_r.png
+ocean_r|colormap104_r.png
+pink_r|colormap105_r.png
+prism_r|colormap106_r.png
+rainbow_r|colormap107_r.png
+seismic_r|colormap108_r.png
+spectral_r|colormap109_r.png
+spring_r|colormap110_r.png
+summer_r|colormap111_r.png
+terrain_r|colormap112_r.png
+winter_r|colormap113_r.png
