@@ -14,7 +14,7 @@
 # http://yt-project.org.
 #
 
-DEST_SUFFIX="yt-agora_install"
+DEST_SUFFIX="yt-agora_install_testing"
 DEST_DIR="$AGORA_PIPE_INSTALL/${DEST_SUFFIX/ /}"   # Installation location
 BRANCH="yt" # This is the branch to which we will forcibly update.
 
@@ -969,8 +969,8 @@ then
 #        ( hg up -C tip 2>&1 ) 1>> ${LOG_FILE}
         ( make lib 2>&1 ) 1>> ${LOG_FILE} || do_exit
 #        cp librockstar.so ${DEST_DIR}/lib
-	ln -s librockstar-galaxies.so  ${DEST_DIR}/lib/librockstar.so
         ROCKSTAR_DIR=${DEST_DIR}/src/rockstar-galaxies
+	ln -s ${ROCKSTAR_DIR}/librockstar-galaxies.so ${DEST_DIR}/lib/librockstar.so
         echo $ROCKSTAR_DIR > ${YT_DIR}/rockstar.cfg
         touch done
         cd ..
